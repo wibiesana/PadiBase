@@ -1,0 +1,9 @@
+pub mod admins;
+pub mod auth_records;
+pub mod backups;
+pub mod collections;
+pub mod files;
+pub mod health;
+pub mod realtime;
+pub mod records;
+pub mod router;

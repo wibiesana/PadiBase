@@ -1,0 +1,2176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PadiBase Studio — High-Performance Multi-DB Rust BaaS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+    body { font-family: 'Plus Jakarta Sans', sans-serif; }
+    code, pre, .font-mono { font-family: 'JetBrains Mono', monospace; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .modal-backdrop { background: rgba(6, 24, 18, 0.60); backdrop-filter: blur(6px); }
+    .padi-gradient { background: linear-gradient(135deg, #064e3b 0%, #0f172a 55%, #115e59 100%); }
+    .padi-btn-primary { background: linear-gradient(135deg, #059669 0%, #0d9488 100%); }
+    .padi-btn-primary:hover { background: linear-gradient(135deg, #047857 0%, #0f766e 100%); }
+  </style>
+</head>
+<body class="bg-[#f1f5f3] text-slate-800 h-screen overflow-hidden flex flex-col select-none">
+
+  <!-- ================= TOAST NOTIFICATION ================= -->
+  <div id="toastContainer" class="fixed bottom-5 right-5 z-[100] flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- ================= AUTH GATEWAY (PADIBASE STUDIO LOGIN / SETUP) ================= -->
+  <div id="authScreen" class="fixed inset-0 padi-gradient z-50 flex items-center justify-center p-4">
+    <div class="w-full max-w-4xl grid md:grid-cols-5 bg-white/95 backdrop-blur-xl border border-emerald-500/20 rounded-3xl overflow-hidden shadow-2xl">
+      
+      <!-- Left Brand Showcase Panel -->
+      <div class="md:col-span-2 padi-gradient p-8 text-white flex flex-col justify-between relative overflow-hidden">
+        <div class="relative z-10">
+          <div class="inline-flex items-center space-x-2.5 bg-white/10 border border-white/15 px-3.5 py-1.5 rounded-full mb-6">
+            <span class="text-lg">🌾</span>
+            <span class="text-xs font-extrabold tracking-wider uppercase text-amber-300">PadiBase Engine</span>
+          </div>
+          <h1 class="text-2xl font-extrabold tracking-tight leading-snug" id="authAppTitle">
+            PadiBase Studio
+          </h1>
+          <p class="text-xs text-emerald-100/80 mt-2 leading-relaxed">
+            Multi-Database Backend-as-a-Service built on Rust &amp; Axum with Padi Framework architecture.
+          </p>
+        </div>
+
+        <div class="space-y-2.5 my-6 relative z-10 text-xs">
+          <div class="flex items-center space-x-2.5 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+            <i class="fa-solid fa-database text-amber-400"></i>
+            <span>SQLite · MySQL · MariaDB · PostgreSQL</span>
+          </div>
+          <div class="flex items-center space-x-2.5 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+            <i class="fa-solid fa-bolt text-emerald-400"></i>
+            <span>Per-Collection Realtime SSE Stream</span>
+          </div>
+          <div class="flex items-center space-x-2.5 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+            <i class="fa-solid fa-code text-teal-300"></i>
+            <span>Standard Padi Rust JSON &amp; SQL Profiler</span>
+          </div>
+        </div>
+
+        <div class="text-[11px] text-emerald-200/60 font-mono relative z-10">
+          v0.2 · Padi Rust Ecosystem
+        </div>
+      </div>
+
+      <!-- Right Auth Form Panel -->
+      <div class="md:col-span-3 p-8 md:p-10 flex flex-col justify-center bg-white">
+        <div class="mb-6">
+          <span class="text-[11px] font-bold uppercase tracking-widest text-emerald-600">Authentication</span>
+          <h2 class="text-xl font-extrabold text-slate-900 mt-1">Welcome to PadiBase Console</h2>
+          <p class="text-xs text-slate-500 mt-0.5">Sign in with your superuser credentials to manage schemas, data &amp; rules.</p>
+        </div>
+
+        <div id="authAlert" class="hidden mb-4 p-3.5 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-600 font-semibold"></div>
+
+        <!-- FORM 1: CREATE FIRST SUPERUSER -->
+        <div id="setupAdminForm" class="hidden space-y-4">
+          <div class="bg-amber-50 border border-amber-200 rounded-xl p-3.5 text-xs text-amber-900 flex items-start space-x-2.5">
+            <i class="fa-solid fa-wand-magic-sparkles text-amber-600 mt-0.5"></i>
+            <span>Initialize your first <strong>PadiBase Superuser</strong> account to unlock the workspace.</span>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Superuser Email <span class="text-rose-500">*</span></label>
+            <input type="email" id="setupEmail" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition" placeholder="admin@padibase.local">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Password <span class="text-rose-500">*</span></label>
+              <input type="password" id="setupPassword" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition" placeholder="Min. 8 chars">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Confirm Password <span class="text-rose-500">*</span></label>
+              <input type="password" id="setupPasswordConfirm" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition" placeholder="Repeat password">
+            </div>
+          </div>
+          <button onclick="handleFirstAdminCreate()" class="w-full py-3 padi-btn-primary text-white font-bold text-sm rounded-xl transition shadow-md shadow-emerald-600/20 flex items-center justify-center">
+            Initialize &amp; Enter Studio <i class="fa-solid fa-arrow-right ml-2 text-xs"></i>
+          </button>
+        </div>
+
+        <!-- FORM 2: ADMIN SIGN IN -->
+        <div id="loginAdminForm" class="hidden space-y-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Administrator Email</label>
+            <input type="email" id="loginEmail" onkeydown="if(event.key==='Enter') handleAdminLogin()" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition" placeholder="admin@padibase.local">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1">Password</label>
+            <input type="password" id="loginPassword" onkeydown="if(event.key==='Enter') handleAdminLogin()" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition" placeholder="••••••••">
+          </div>
+          <button onclick="handleAdminLogin()" class="w-full py-3 padi-btn-primary text-white font-bold text-sm rounded-xl transition shadow-md shadow-emerald-600/20 flex items-center justify-center">
+            Open PadiBase Studio <i class="fa-solid fa-arrow-right ml-2 text-xs"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= PADIBASE STUDIO MAIN WORKSPACE (TOP COMMAND BAR + BENTO CANVAS) ================= -->
+  <div id="dashboardApp" class="hidden flex-1 flex flex-col overflow-hidden">
+
+    <!-- 1. TOP COMMAND BAR (Distinctive PadiBase Header — No Left Icon Rail) -->
+    <header class="h-16 padi-gradient text-white px-6 flex items-center justify-between shadow-lg z-30 shrink-0 border-b border-emerald-500/20">
+      <!-- Brand + Active DB Driver Badge -->
+      <div class="flex items-center space-x-4">
+        <a href="#/" onclick="switchMainView('collections'); return false;" class="flex items-center space-x-3 group">
+          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-emerald-500 text-slate-950 flex items-center justify-center text-xl shadow-md group-hover:scale-105 transition">
+            🌾
+          </div>
+          <div>
+            <div class="flex items-center space-x-2">
+              <span class="font-extrabold text-base tracking-tight text-white">PadiBase</span>
+              <span class="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 font-bold">Studio</span>
+            </div>
+            <div class="text-[10px] text-emerald-200/70 font-mono">Multi-DB Rust BaaS</div>
+          </div>
+        </a>
+
+        <div class="h-6 w-px bg-white/15 mx-1"></div>
+
+        <!-- Live Database Driver Pill -->
+        <div class="hidden sm:flex items-center space-x-2 bg-white/10 border border-white/15 px-3 py-1.5 rounded-xl text-xs font-mono">
+          <i class="fa-solid fa-server text-amber-300 text-[11px]"></i>
+          <span class="text-emerald-100/70 text-[11px]">DB:</span>
+          <span id="headerDbBadge" class="font-bold text-white uppercase">SQLITE</span>
+        </div>
+      </div>
+
+      <!-- Center Horizontal Navigation Pills -->
+      <nav class="flex items-center space-x-1.5 bg-slate-950/40 p-1.5 rounded-2xl border border-white/10">
+        <button id="railCollectionsBtn" onclick="switchMainView('collections')" class="px-4 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-emerald-500 text-slate-950 shadow-sm">
+          <i class="fa-solid fa-layer-group"></i>
+          <span>Data Studio</span>
+        </button>
+        <button id="railLogsBtn" onclick="switchMainView('logs')" class="px-4 py-1.5 rounded-xl text-xs font-semibold transition flex items-center space-x-2 text-emerald-100/80 hover:text-white hover:bg-white/10 relative">
+          <i class="fa-solid fa-wave-square"></i>
+          <span>Realtime Pulse</span>
+          <span id="sseStatusDot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        </button>
+        <button id="railSettingsBtn" onclick="switchMainView('settings')" class="px-4 py-1.5 rounded-xl text-xs font-semibold transition flex items-center space-x-2 text-emerald-100/80 hover:text-white hover:bg-white/10">
+          <i class="fa-solid fa-sliders"></i>
+          <span>System &amp; Config</span>
+        </button>
+      </nav>
+
+      <!-- Right Quick Actions & Admin Profile -->
+      <div class="flex items-center space-x-3">
+        <button onclick="openApiPreviewDrawer()" class="hidden md:flex items-center space-x-2 px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-semibold text-amber-200 transition">
+          <i class="fa-solid fa-terminal text-[11px]"></i>
+          <span>API Explorer</span>
+        </button>
+
+        <div class="relative group">
+          <button class="flex items-center space-x-2.5 bg-white/10 hover:bg-white/15 border border-white/15 pl-2 pr-3 py-1.5 rounded-xl transition">
+            <span id="adminAvatarBtn" class="w-7 h-7 rounded-lg bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center uppercase">
+              AD
+            </span>
+            <div class="text-left hidden sm:block">
+              <div class="text-[10px] text-emerald-200/70 leading-none">Superuser</div>
+              <div id="userEmail" class="text-xs font-mono font-semibold text-white truncate max-w-[130px] mt-0.5">admin@local</div>
+            </div>
+            <i class="fa-solid fa-chevron-down text-[10px] text-emerald-200/70"></i>
+          </button>
+
+          <!-- Dropdown Menu -->
+          <div class="hidden group-hover:block absolute right-0 top-11 w-56 bg-white text-slate-800 border border-slate-200 rounded-2xl shadow-2xl p-2 z-50">
+            <div class="px-3 py-2 border-b border-slate-100">
+              <div class="text-[10px] uppercase font-bold text-emerald-600">PadiBase Superuser</div>
+              <div class="text-xs font-mono text-slate-600 truncate">Full Access Enabled</div>
+            </div>
+            <button onclick="switchMainView('settings'); switchSettingsTab('admins');" class="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 rounded-xl flex items-center mt-1 transition">
+              <i class="fa-solid fa-user-shield w-5 text-emerald-600"></i> Manage Superusers
+            </button>
+            <button onclick="switchMainView('settings'); switchSettingsTab('backups');" class="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 hover:text-emerald-800 rounded-xl flex items-center transition">
+              <i class="fa-solid fa-box-archive w-5 text-teal-600"></i> Database Snapshots
+            </button>
+            <div class="my-1 border-t border-slate-100"></div>
+            <button onclick="handleLogout()" class="w-full text-left px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl flex items-center transition">
+              <i class="fa-solid fa-right-from-bracket w-5"></i> Sign Out
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ================= VIEW 1: DATA STUDIO WORKSPACE ================= -->
+    <div id="collectionsView" class="flex-1 flex overflow-hidden p-4 gap-4">
+
+      <!-- LEFT SCHEMA EXPLORER CARD -->
+      <aside class="w-64 bg-white border border-slate-200/90 rounded-2xl shadow-sm flex flex-col overflow-hidden shrink-0">
+        <div class="p-4 border-b border-slate-100 bg-gradient-to-b from-emerald-50/50 to-transparent">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h3 class="text-xs font-extrabold uppercase tracking-wider text-slate-800">Schemas &amp; Tables</h3>
+              <p class="text-[11px] text-slate-400">Select or build a collection</p>
+            </div>
+            <button onclick="openCollectionDrawer(false)" class="px-2.5 py-1.5 rounded-xl padi-btn-primary text-white text-xs font-bold shadow-sm flex items-center space-x-1 transition" title="Create New Collection">
+              <i class="fa-solid fa-plus text-[10px]"></i>
+              <span>New</span>
+            </button>
+          </div>
+          <div class="relative">
+            <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs absolute left-3 top-2.5"></i>
+            <input type="text" id="collectionSearchInput" oninput="renderCollectionsList()" placeholder="Filter tables..." class="w-full bg-slate-100/90 border border-slate-200/80 focus:border-emerald-500 focus:bg-white rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none transition">
+          </div>
+        </div>
+
+        <nav id="collectionsList" class="flex-1 overflow-y-auto p-3 space-y-1.5">
+          <!-- Injected via JS -->
+        </nav>
+
+        <div class="p-3 border-t border-slate-100 bg-slate-50/70 flex items-center justify-between text-[11px] text-slate-500">
+          <span class="font-mono"><i class="fa-solid fa-circle-nodes text-emerald-600 mr-1"></i>Padi ORM</span>
+          <button onclick="switchMainView('settings'); switchSettingsTab('import');" class="text-emerald-700 hover:underline font-semibold">Import JSON</button>
+        </div>
+      </aside>
+
+      <!-- MAIN DATA STUDIO CANVAS CARD -->
+      <main class="flex-1 flex flex-col overflow-hidden bg-white border border-slate-200/90 rounded-2xl shadow-sm">
+        
+        <!-- Collection Studio Header Banner -->
+        <div class="px-6 py-4 border-b border-slate-200/80 bg-gradient-to-r from-emerald-50/40 via-white to-teal-50/30 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center text-base shadow-2xs">
+              <i class="fa-solid fa-table-cells-large"></i>
+            </div>
+            <div>
+              <div class="flex items-center space-x-2">
+                <h2 id="currentCollectionTitle" class="text-lg font-extrabold text-slate-900 tracking-tight font-mono">users</h2>
+                <span id="collectionTypeBadge" class="text-[10px] font-mono uppercase px-2.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 font-bold">auth</span>
+                <span id="collectionRealtimeBadge" class="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold inline-flex items-center" title="Per-Collection Realtime SSE Rule">
+                  <i class="fa-solid fa-bolt mr-1 text-[9px]"></i> realtime: on
+                </span>
+              </div>
+              <div id="collectionSchemaPills" class="flex items-center flex-wrap gap-1.5 mt-1 text-[11px] text-slate-400">
+                <span>Active table ready for queries</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center space-x-2">
+            <button onclick="loadRecords()" class="px-3 py-2 rounded-xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-xs font-semibold transition flex items-center" title="Reload records">
+              <i class="fa-solid fa-rotate"></i>
+            </button>
+            <button onclick="openCollectionDrawer(true)" class="px-3.5 py-2 rounded-xl border border-slate-200 hover:border-emerald-300 bg-white hover:bg-emerald-50/50 text-slate-700 text-xs font-bold transition flex items-center">
+              <i class="fa-solid fa-sliders mr-1.5 text-emerald-600"></i> Schema &amp; Rules
+            </button>
+            <button onclick="openApiPreviewDrawer()" class="px-3.5 py-2 rounded-xl border border-slate-200 hover:border-teal-300 bg-white hover:bg-teal-50/50 text-slate-700 text-xs font-bold transition flex items-center">
+              <i class="fa-solid fa-code mr-1.5 text-teal-600"></i> Endpoints
+            </button>
+            <div class="relative group">
+              <button class="px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center">
+                <i class="fa-solid fa-file-code mr-1.5 text-amber-600"></i> JSON <i class="fa-solid fa-chevron-down ml-1.5 text-[9px]"></i>
+              </button>
+              <div class="hidden group-hover:block absolute right-0 top-9 w-48 bg-white border border-slate-200 rounded-2xl shadow-xl p-1.5 z-40">
+                <button onclick="handleExportCollection()" class="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 rounded-xl flex items-center">
+                  <i class="fa-solid fa-download w-5 text-emerald-600"></i> Export Records JSON
+                </button>
+                <button onclick="openImportModal()" class="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 rounded-xl flex items-center">
+                  <i class="fa-solid fa-upload w-5 text-teal-600"></i> Import Records JSON
+                </button>
+              </div>
+            </div>
+            <button onclick="openRecordDrawer(null)" class="px-4 py-2 rounded-xl padi-btn-primary text-white text-xs font-bold transition shadow-sm shadow-emerald-600/20 flex items-center">
+              <i class="fa-solid fa-plus mr-1.5"></i> Add Record
+            </button>
+          </div>
+        </div>
+
+        <!-- Query Filter Bar -->
+        <div class="px-6 py-3 bg-slate-50/70 border-b border-slate-200/80 flex items-center space-x-2.5">
+          <div class="flex-1 flex items-center bg-white border border-slate-200 focus-within:border-emerald-500 rounded-xl px-3.5 py-1.5 shadow-2xs transition">
+            <span class="text-[10px] font-mono uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md mr-2.5 font-bold">WHERE</span>
+            <input type="text" id="recordFilterInput" onkeydown="if(event.key==='Enter') applyFilterSearch()" placeholder='Filter query e.g. nama ~ "alina" && alamat = "Ciranjang"' class="w-full bg-transparent text-xs font-mono text-slate-800 focus:outline-none">
+            <button id="clearFilterBtn" onclick="clearFilterSearch()" class="hidden text-slate-400 hover:text-slate-700 text-xs px-1.5">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <button onclick="applyFilterSearch()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow-2xs flex items-center space-x-1.5">
+            <i class="fa-solid fa-filter text-[10px]"></i>
+            <span>Run Query</span>
+          </button>
+        </div>
+
+        <!-- Records Data Grid -->
+        <div class="flex-1 overflow-auto">
+          <table class="w-full text-left border-collapse">
+            <thead class="bg-slate-50/90 border-b border-slate-200 text-[11px] font-mono text-slate-500 sticky top-0 z-10 select-none">
+              <tr id="tableHeader">
+                <!-- Dynamic columns -->
+              </tr>
+            </thead>
+            <tbody id="recordsBody" class="divide-y divide-slate-100 text-xs font-mono text-slate-700">
+              <!-- Dynamic rows -->
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Table Footer & Pagination -->
+        <div class="px-6 py-3 bg-slate-50/80 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-500 shrink-0">
+          <div class="flex items-center space-x-3">
+            <span id="paginationInfo" class="font-medium">Showing 0 of 0 records</span>
+            <div id="bulkDeleteBar" class="hidden flex items-center space-x-2 bg-rose-50 border border-rose-200 px-3 py-1 rounded-xl">
+              <span id="selectedCountText" class="text-rose-700 font-bold text-[11px]">0 selected</span>
+              <button onclick="deleteSelectedRecords()" class="text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 px-2.5 py-0.5 rounded-lg transition">
+                Delete Selected
+              </button>
+            </div>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="prevPageBtn" onclick="changePage(-1)" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-emerald-50 text-slate-700 font-semibold disabled:opacity-40 transition">
+              <i class="fa-solid fa-chevron-left text-[10px] mr-1"></i> Prev
+            </button>
+            <span id="currentPageBadge" class="px-3 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono font-bold">1 / 1</span>
+            <button id="nextPageBtn" onclick="changePage(1)" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-emerald-50 text-slate-700 font-semibold disabled:opacity-40 transition">
+              Next <i class="fa-solid fa-chevron-right text-[10px] ml-1"></i>
+            </button>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- ================= VIEW 2: REALTIME PULSE & STREAM MONITOR ================= -->
+    <div id="logsView" class="hidden flex-1 flex flex-col overflow-hidden p-6">
+      <div class="max-w-6xl w-full mx-auto flex-1 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        <header class="px-6 py-5 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-emerald-50/50 to-white">
+          <div class="flex items-center space-x-3">
+            <div class="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+              <i class="fa-solid fa-bolt"></i>
+            </div>
+            <div>
+              <h2 class="text-base font-extrabold text-slate-900">PadiBase Realtime Event Bus (SSE)</h2>
+              <p class="text-xs text-slate-500 mt-0.5">Live record mutations broadcast from collections with <code class="text-emerald-700 font-semibold">realtime = true</code> via <code class="text-slate-700">/api/realtime</code></p>
+            </div>
+          </div>
+          <div class="flex items-center space-x-3">
+            <span class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-2"></span> Stream Connected
+            </span>
+            <button onclick="clearEventLogs()" class="px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700">
+              Clear Stream
+            </button>
+          </div>
+        </header>
+        <div class="flex-1 p-6 overflow-y-auto bg-slate-950 font-mono text-xs space-y-2" id="eventLogContainer">
+          <div class="text-emerald-400/70">🌾 PadiBase SSE monitor ready — waiting for CREATE / UPDATE / DELETE events...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= VIEW 3: SYSTEM & CONFIG WORKSPACE (TOP HORIZONTAL TABS) ================= -->
+    <div id="settingsView" class="hidden flex-1 flex flex-col overflow-hidden p-6">
+      <div class="max-w-5xl w-full mx-auto flex-1 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+        
+        <!-- Settings Top Horizontal Navigation Bar -->
+        <div class="px-6 pt-5 pb-3 border-b border-slate-200 bg-gradient-to-r from-emerald-50/40 via-white to-teal-50/30 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 class="text-base font-extrabold text-slate-900">PadiBase System &amp; Environment</h2>
+            <p class="text-xs text-slate-500">Configure multi-DB engine settings, backups, schema migrations, and superusers.</p>
+          </div>
+          <nav class="flex items-center space-x-1.5 bg-slate-100 p-1.5 rounded-xl">
+            <button id="setTab_app" onclick="switchSettingsTab('app')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-1.5 transition">
+              <i class="fa-solid fa-microchip"></i> <span>Engine &amp; App</span>
+            </button>
+            <button id="setTab_backups" onclick="switchSettingsTab('backups')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition">
+              <i class="fa-solid fa-box-archive"></i> <span>Snapshots</span>
+            </button>
+            <button id="setTab_export" onclick="switchSettingsTab('export')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition">
+              <i class="fa-solid fa-file-export"></i> <span>Export Schema</span>
+            </button>
+            <button id="setTab_import" onclick="switchSettingsTab('import')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition">
+              <i class="fa-solid fa-file-import"></i> <span>Import Schema</span>
+            </button>
+            <button id="setTab_admins" onclick="switchSettingsTab('admins')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition">
+              <i class="fa-solid fa-user-shield"></i> <span>Superusers</span>
+            </button>
+          </nav>
+        </div>
+
+        <!-- Settings Content Body -->
+        <main class="flex-1 overflow-y-auto p-8 bg-slate-50/40">
+          
+          <!-- SUB-TAB 1: APPLICATION & ENGINE -->
+          <div id="settingsPane_app" class="max-w-3xl mx-auto space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div class="bg-white border border-emerald-200/80 rounded-2xl p-4 shadow-2xs">
+                <div class="text-[10px] font-extrabold uppercase tracking-wider text-emerald-600">Active DB Driver</div>
+                <div id="settingsDbBadge" class="text-base font-extrabold text-slate-900 font-mono mt-1">SQLite / Multi-DB</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Configured via <code class="text-slate-600">.env</code> (DB_DRIVER)</div>
+              </div>
+              <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-2xs">
+                <div class="text-[10px] font-extrabold uppercase tracking-wider text-teal-600">Response Envelope</div>
+                <div class="text-base font-extrabold text-slate-900 font-mono mt-1">Padi Rust API</div>
+                <div class="text-[11px] text-slate-400 mt-0.5"><code class="text-slate-600">item</code>, <code class="text-slate-600">meta</code>, <code class="text-slate-600">debug</code></div>
+              </div>
+              <div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-2xs">
+                <div class="text-[10px] font-extrabold uppercase tracking-wider text-amber-600">Security Layer</div>
+                <div class="text-base font-extrabold text-slate-900 font-mono mt-1">Argon2id + JWT</div>
+                <div class="text-[11px] text-slate-400 mt-0.5">Collection Row-Level Rules</div>
+              </div>
+            </div>
+
+            <div class="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 shadow-2xs">
+              <h3 class="text-sm font-extrabold text-slate-900">Instance Metadata</h3>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Instance Name</label>
+                  <input type="text" id="settingAppName" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-600" value="PadiBase Studio">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Public Base URL</label>
+                  <input type="text" id="settingAppUrl" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-mono focus:outline-none focus:border-emerald-600" value="http://127.0.0.1:8090">
+                </div>
+              </div>
+              <div class="pt-3 border-t border-slate-100 flex justify-end">
+                <button onclick="saveAppSettings()" class="px-5 py-2 padi-btn-primary text-white text-xs font-bold rounded-xl transition shadow-sm">
+                  Save Configuration
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUB-TAB 2: BACKUPS -->
+          <div id="settingsPane_backups" class="hidden max-w-3xl mx-auto space-y-6">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-base font-extrabold text-slate-900">Database Snapshots</h3>
+                <p class="text-xs text-slate-500 mt-0.5">Create and restore hot snapshots of your local database state.</p>
+              </div>
+              <div class="flex items-center space-x-2">
+                <button onclick="loadBackups()" class="px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700">
+                  <i class="fa-solid fa-rotate"></i>
+                </button>
+                <button id="createBackupBtn" onclick="handleCreateBackup()" class="px-4 py-2 rounded-xl padi-btn-primary text-white text-xs font-bold transition flex items-center">
+                  <i class="fa-solid fa-plus mr-2"></i> Create Snapshot
+                </button>
+              </div>
+            </div>
+
+            <div class="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+              <table class="w-full text-left text-xs font-mono">
+                <thead class="bg-slate-50 border-b border-slate-200 text-slate-500">
+                  <tr>
+                    <th class="py-3 px-4">Snapshot Key</th>
+                    <th class="py-3 px-4">Size</th>
+                    <th class="py-3 px-4">Timestamp</th>
+                    <th class="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="backupsTableBody" class="divide-y divide-slate-100"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- SUB-TAB 3: EXPORT COLLECTIONS SCHEMA -->
+          <div id="settingsPane_export" class="hidden max-w-3xl mx-auto space-y-4">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-base font-extrabold text-slate-900">Export Schema Blueprint</h3>
+                <p class="text-xs text-slate-500 mt-0.5">Clone your PadiBase tables, fields, and API rules across staging &amp; production.</p>
+              </div>
+              <div class="flex space-x-2">
+                <button onclick="copyExportedSchema()" class="px-3.5 py-2 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold rounded-xl">
+                  <i class="fa-regular fa-copy mr-1"></i> Copy JSON
+                </button>
+                <button onclick="downloadExportedSchema()" class="px-4 py-2 padi-btn-primary text-white text-xs font-bold rounded-xl">
+                  <i class="fa-solid fa-download mr-1.5"></i> Download Blueprint
+                </button>
+              </div>
+            </div>
+            <pre id="exportCollectionsPre" class="bg-slate-950 text-emerald-400 p-5 rounded-2xl text-xs font-mono overflow-auto max-h-[440px] border border-slate-800"></pre>
+          </div>
+
+          <!-- SUB-TAB 4: IMPORT COLLECTIONS SCHEMA -->
+          <div id="settingsPane_import" class="hidden max-w-3xl mx-auto space-y-4">
+            <div>
+              <h3 class="text-base font-extrabold text-slate-900">Import Schema Blueprint</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Paste a PadiBase collections JSON array below to auto-migrate tables and columns.</p>
+            </div>
+            <div class="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+              <textarea id="importSchemaTextarea" rows="11" class="w-full bg-slate-950 text-emerald-400 p-4 rounded-xl text-xs font-mono focus:outline-none" placeholder='[ { "name": "posts", "type": "base", "realtime": true, "schema": [ ... ] } ]'></textarea>
+              <div class="flex justify-end">
+                <button onclick="submitImportCollectionsSchema()" class="px-5 py-2.5 padi-btn-primary text-white text-xs font-bold rounded-xl">
+                  Apply Schema Migration
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- SUB-TAB 5: ADMINS (_admins) -->
+          <div id="settingsPane_admins" class="hidden max-w-3xl mx-auto space-y-6">
+            <div>
+              <h3 class="text-base font-extrabold text-slate-900">PadiBase Superusers (<code class="text-sm text-emerald-700">_admins</code>)</h3>
+              <p class="text-xs text-slate-500 mt-0.5">Superusers have unrestricted access to all collections and bypass row-level rules.</p>
+            </div>
+
+            <div class="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+              <table class="w-full text-left text-xs font-mono">
+                <thead class="bg-slate-50 border-b border-slate-200 text-slate-500">
+                  <tr>
+                    <th class="py-3 px-4">ID</th>
+                    <th class="py-3 px-4">Email</th>
+                    <th class="py-3 px-4">Created</th>
+                    <th class="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="adminTableBody" class="divide-y divide-slate-100"></tbody>
+              </table>
+            </div>
+
+            <div class="bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+              <h4 class="text-sm font-extrabold text-slate-900">Register Additional Superuser</h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Email</label>
+                  <input type="email" id="newAdminEmail" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900" placeholder="ops@padibase.local">
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-slate-700 mb-1">Password (min 8 chars)</label>
+                  <input type="password" id="newAdminPassword" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900" placeholder="••••••••">
+                </div>
+              </div>
+              <div class="flex justify-end">
+                <button onclick="handleCreateAdditionalAdmin()" class="px-5 py-2 padi-btn-primary text-white text-xs font-bold rounded-xl">
+                  Add Superuser
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </main>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ================= CENTERED STUDIO MODAL 1: RECORD EDITOR ================= -->
+  <div id="recordDrawer" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
+    <div class="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
+      <!-- Modal Header -->
+      <div class="px-6 py-4 padi-gradient text-white flex items-center justify-between">
+        <div class="flex items-center space-x-2.5">
+          <span class="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-amber-300">
+            <i class="fa-solid fa-pen-to-square"></i>
+          </span>
+          <h3 id="recordDrawerTitle" class="font-extrabold text-base text-white">New <span class="font-mono text-amber-300">users</span> record</h3>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="toggleRecordJsonMode()" id="toggleJsonBtn" class="text-[11px] font-mono px-3 py-1 rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 text-white font-semibold transition">
+            { } Raw JSON
+          </button>
+          <button onclick="closeDrawer('recordDrawer')" class="w-8 h-8 rounded-xl hover:bg-white/15 text-white/80 flex items-center justify-center text-lg">&times;</button>
+        </div>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="flex-1 overflow-y-auto p-6 space-y-5">
+        <div id="recordDrawerAlert" class="hidden p-3.5 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-600 font-semibold"></div>
+
+        <!-- Visual Form Mode -->
+        <div id="recordFormContainer" class="space-y-4"></div>
+
+        <!-- Raw JSON Mode -->
+        <div id="recordJsonContainer" class="hidden space-y-2">
+          <label class="block text-xs font-mono font-bold text-slate-600">Record JSON Payload</label>
+          <textarea id="recordPayloadJson" rows="14" class="w-full bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-xs focus:outline-none"></textarea>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div>
+          <button id="drawerDeleteRecordBtn" onclick="deleteRecordFromDrawer()" class="hidden px-3.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition">
+            <i class="fa-solid fa-trash mr-1"></i> Delete Record
+          </button>
+        </div>
+        <div class="flex items-center space-x-2.5">
+          <button onclick="closeDrawer('recordDrawer')" class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900">Cancel</button>
+          <button onclick="saveRecordDrawer()" id="saveRecordBtn" class="px-6 py-2.5 padi-btn-primary text-white text-xs font-bold rounded-xl shadow-sm transition">
+            Save Record
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= CENTERED STUDIO MODAL 2: COLLECTION & SCHEMA ARCHITECT ================= -->
+  <div id="collectionDrawer" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
+    <div class="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
+      <!-- Modal Header -->
+      <div class="px-6 py-4 padi-gradient text-white flex items-center justify-between">
+        <div class="flex items-center space-x-2.5">
+          <span class="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-emerald-300">
+            <i class="fa-solid fa-cubes"></i>
+          </span>
+          <h3 id="colDrawerTitle" class="font-extrabold text-base">Schema Architect</h3>
+        </div>
+        <button onclick="closeDrawer('collectionDrawer')" class="w-8 h-8 rounded-xl hover:bg-white/15 text-white/80 flex items-center justify-center text-lg">&times;</button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="flex-1 overflow-y-auto p-6 space-y-5">
+        <div id="colDrawerAlert" class="hidden p-3.5 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-600 font-semibold"></div>
+
+        <!-- Collection Name, Type & Per-Collection Realtime Toggle -->
+        <div class="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-200/70 space-y-3.5">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="md:col-span-2">
+              <label class="block text-xs font-bold text-slate-700 mb-1">Collection / Table Name <span class="text-rose-500">*</span></label>
+              <input type="text" id="colNameInput" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600" placeholder="e.g. siswa, products, orders">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Collection Archetype</label>
+              <select id="colTypeInput" onchange="renderColAuthInfo()" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-900 focus:outline-none focus:border-emerald-600">
+                <option value="base">Base Data Table</option>
+                <option value="auth">Auth Users Table</option>
+              </select>
+            </div>
+          </div>
+          <div class="pt-3 border-t border-emerald-200/60 flex items-center justify-between">
+            <div>
+              <div class="text-xs font-extrabold text-slate-800 flex items-center">
+                <i class="fa-solid fa-bolt text-emerald-600 mr-1.5"></i> Per-Collection Realtime SSE Broadcast
+              </div>
+              <div class="text-[11px] text-slate-500">Enable or disable automatic live event streaming (<code class="text-slate-700">create</code>, <code class="text-slate-700">update</code>, <code class="text-slate-700">delete</code>) for this collection.</div>
+            </div>
+            <label class="inline-flex items-center space-x-2 cursor-pointer bg-white px-3.5 py-1.5 rounded-xl border border-emerald-300 shadow-2xs">
+              <input type="checkbox" id="colRealtimeInput" checked class="rounded border-slate-300 w-4 h-4 text-emerald-600">
+              <span class="text-xs font-bold text-emerald-800">Realtime Active</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Sub-tabs: Fields vs API Rules -->
+        <div class="border-b border-slate-200 flex space-x-6 text-xs font-bold">
+          <button id="colTab_fields" onclick="switchColDrawerTab('fields')" class="pb-2.5 border-b-2 border-emerald-600 text-emerald-700">
+            <i class="fa-solid fa-table-columns mr-1"></i> Schema Columns
+          </button>
+          <button id="colTab_rules" onclick="switchColDrawerTab('rules')" class="pb-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-700">
+            <i class="fa-solid fa-shield-halved mr-1"></i> Access Control Rules
+          </button>
+        </div>
+
+        <!-- TAB 1: FIELDS -->
+        <div id="colPane_fields" class="space-y-4">
+          <div class="text-[11px] font-mono text-slate-500 bg-slate-100 px-3.5 py-2 rounded-xl flex items-center justify-between">
+            <span>Auto columns: <strong class="text-slate-700">id</strong>, <strong class="text-slate-700">created</strong>, <strong class="text-slate-700">updated</strong></span>
+            <span id="colAuthSystemBadge" class="hidden text-emerald-700 font-bold">+ username, email, password, verified</span>
+          </div>
+
+          <!-- Fields List -->
+          <div id="colFieldsList" class="space-y-2.5"></div>
+
+          <!-- Add New Field Picker -->
+          <div class="pt-2">
+            <div class="text-xs font-bold text-slate-600 mb-2">Append column by data type:</div>
+            <div class="grid grid-cols-5 gap-2 text-xs">
+              <button type="button" onclick="addSchemaField('text')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
+                <i class="fa-solid fa-font text-emerald-600"></i> <span>Text</span>
+              </button>
+              <button type="button" onclick="addSchemaField('number')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
+                <i class="fa-solid fa-hashtag text-emerald-600"></i> <span>Number</span>
+              </button>
+              <button type="button" onclick="addSchemaField('bool')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
+                <i class="fa-solid fa-toggle-on text-emerald-600"></i> <span>Boolean</span>
+              </button>
+              <button type="button" onclick="addSchemaField('email')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
+                <i class="fa-solid fa-envelope text-emerald-600"></i> <span>Email</span>
+              </button>
+              <button type="button" onclick="addSchemaField('url')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
+                <i class="fa-solid fa-link text-emerald-600"></i> <span>URL</span>
+              </button>
+              <button type="button" onclick="addSchemaField('date')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
+                <i class="fa-regular fa-calendar text-teal-600"></i> <span>DateTime</span>
+              </button>
+              <button type="button" onclick="addSchemaField('select')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
+                <i class="fa-solid fa-list-check text-teal-600"></i> <span>Select</span>
+              </button>
+              <button type="button" onclick="addSchemaField('file')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
+                <i class="fa-regular fa-image text-teal-600"></i> <span>File</span>
+              </button>
+              <button type="button" onclick="addSchemaField('relation')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
+                <i class="fa-solid fa-diagram-project text-teal-600"></i> <span>Relation</span>
+              </button>
+              <button type="button" onclick="addSchemaField('json')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
+                <i class="fa-solid fa-code text-teal-600"></i> <span>JSON</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- TAB 2: API RULES -->
+        <div id="colPane_rules" class="hidden space-y-3">
+          <p class="text-xs text-slate-500">Leave blank for public access, or define a filter expression (e.g. <code class="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded">@request.auth.id != ""</code>).</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">List / Search Rule</label>
+              <input type="text" id="ruleList" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder="Public (Anyone)">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">View Rule</label>
+              <input type="text" id="ruleView" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder="Public (Anyone)">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Create Rule</label>
+              <input type="text" id="ruleCreate" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder="Public (Anyone)">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-slate-700 mb-1">Update Rule</label>
+              <input type="text" id="ruleUpdate" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder='id = @request.auth.id'>
+            </div>
+            <div class="md:col-span-2">
+              <label class="block text-xs font-bold text-slate-700 mb-1">Delete Rule</label>
+              <input type="text" id="ruleDelete" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder='id = @request.auth.id'>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Footer -->
+      <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div>
+          <button id="drawerDeleteColBtn" onclick="handleDeleteCurrentCollection()" class="hidden px-3.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl">
+            <i class="fa-solid fa-trash mr-1"></i> Drop Collection
+          </button>
+        </div>
+        <div class="flex items-center space-x-2.5">
+          <button onclick="closeDrawer('collectionDrawer')" class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900">Cancel</button>
+          <button onclick="saveCollectionDrawer()" class="px-6 py-2.5 padi-btn-primary text-white text-xs font-bold rounded-xl shadow-sm">
+            Apply Schema
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= CENTERED STUDIO MODAL 3: PADIBASE API EXPLORER ================= -->
+  <div id="apiPreviewDrawer" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
+    <div class="w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
+      <!-- Header -->
+      <div class="px-6 py-4 padi-gradient text-white flex items-center justify-between">
+        <div class="flex items-center space-x-2.5">
+          <span class="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-amber-300">
+            <i class="fa-solid fa-code"></i>
+          </span>
+          <div>
+            <h3 class="font-extrabold text-base"><span id="apiPreviewColName" class="font-mono text-amber-300">users</span> REST &amp; SSE Endpoints</h3>
+            <p class="text-[11px] text-emerald-100/75">Standard Padi Rust API Response Envelope</p>
+          </div>
+        </div>
+        <button onclick="closeDrawer('apiPreviewDrawer')" class="w-8 h-8 rounded-xl hover:bg-white/15 text-white/80 flex items-center justify-center text-lg">&times;</button>
+      </div>
+
+      <!-- Horizontal Endpoint Action Pills -->
+      <div class="px-6 py-3 bg-slate-100 border-b border-slate-200 flex items-center flex-wrap gap-1.5 text-xs font-bold" id="apiPreviewTabs">
+        <button data-api-tab="list" onclick="renderApiPreview('list')" class="px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white shadow-2xs transition">GET List / Search</button>
+        <button data-api-tab="view" onclick="renderApiPreview('view')" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition">GET Single</button>
+        <button data-api-tab="create" onclick="renderApiPreview('create')" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition">POST Create</button>
+        <button data-api-tab="update" onclick="renderApiPreview('update')" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition">PATCH Update</button>
+        <button data-api-tab="delete" onclick="renderApiPreview('delete')" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition">DELETE Record</button>
+        <button data-api-tab="realtime" onclick="renderApiPreview('realtime')" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition">SSE Realtime</button>
+        <button id="apiTabAuth" data-api-tab="auth" onclick="renderApiPreview('auth')" class="hidden px-3.5 py-1.5 rounded-xl text-teal-700 hover:bg-teal-50 font-bold transition">POST Auth Login</button>
+      </div>
+
+      <!-- Endpoint Documentation Content -->
+      <div class="flex-1 overflow-y-auto p-6 space-y-5 text-xs" id="apiPreviewContent"></div>
+
+      <div class="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex justify-end">
+        <button onclick="closeDrawer('apiPreviewDrawer')" class="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold rounded-xl">Close Explorer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL: IMPORT RECORDS JSON ================= -->
+  <div id="importRecordsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
+    <div class="bg-white border border-slate-200 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden">
+      <div class="px-6 py-4 padi-gradient text-white flex items-center justify-between">
+        <h3 class="font-extrabold">Bulk Import JSON into <span id="importColNameBadge" class="font-mono text-amber-300"></span></h3>
+        <button onclick="closeDrawer('importRecordsModal')" class="text-white/70 hover:text-white text-lg">&times;</button>
+      </div>
+      <div class="p-6 space-y-4 text-xs">
+        <div id="importAlert" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-600"></div>
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Upload JSON file</label>
+          <input type="file" id="importFileInput" accept=".json" onchange="handleImportFileSelect(event)" class="w-full border border-slate-300 rounded-xl p-2 text-xs">
+        </div>
+        <div>
+          <label class="block font-bold text-slate-700 mb-1">Or paste JSON Array</label>
+          <textarea id="importJsonTextarea" rows="8" class="w-full bg-slate-950 text-emerald-400 rounded-2xl p-3.5 font-mono text-xs" placeholder='[ { "nama": "Alina", "alamat": "Ciranjang" } ]'></textarea>
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end space-x-2">
+        <button onclick="closeDrawer('importRecordsModal')" class="px-4 py-2 text-xs font-bold text-slate-600">Cancel</button>
+        <button onclick="submitImportRecords()" class="px-5 py-2 padi-btn-primary text-white text-xs font-bold rounded-xl">Import Records</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentCollection = "users";
+    let collections = [];
+    let currentRecords = [];
+    let selectedRecordIds = new Set();
+    let currentPage = 1;
+    let currentSort = "-created";
+    let currentFilter = "";
+    let sseSource = null;
+    let activeDbDriver = "sqlite";
+
+    // Modal states
+    let editingRecordId = null;
+    let isRecordJsonMode = false;
+    let isEditingCollection = false;
+    let tempSchemaFields = [];
+
+    const FIELD_ICONS = {
+      text: 'fa-solid fa-font',
+      number: 'fa-solid fa-hashtag',
+      bool: 'fa-solid fa-toggle-on',
+      email: 'fa-regular fa-envelope',
+      url: 'fa-solid fa-link',
+      date: 'fa-regular fa-calendar',
+      select: 'fa-solid fa-list-check',
+      json: 'fa-solid fa-code',
+      file: 'fa-regular fa-file',
+      relation: 'fa-solid fa-diagram-project'
+    };
+
+    function showToast(msg, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const el = document.createElement('div');
+      const bg = type === 'error'
+        ? 'bg-rose-600 text-white'
+        : 'bg-emerald-950 text-white border border-emerald-500/30';
+      el.className = `${bg} px-4 py-3 rounded-2xl shadow-xl text-xs font-semibold flex items-center space-x-2.5 pointer-events-auto transition duration-200`;
+      el.innerHTML = `<i class="fa-solid ${type === 'error' ? 'fa-circle-exclamation' : 'fa-circle-check text-emerald-400'}"></i> <span>${msg}</span>`;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), 3200);
+    }
+
+    async function init() {
+      const token = localStorage.getItem('padi_admin_token');
+      const email = localStorage.getItem('padi_admin_email');
+
+      if (token && email) {
+        showDashboard(email);
+      } else {
+        await checkHasAdmins();
+      }
+    }
+
+    async function loadHealthInfo() {
+      try {
+        const res = await fetch('/api/health');
+        const data = await res.json();
+        const db = data.debug?.database || data.item?.database || 'sqlite';
+        activeDbDriver = db;
+        const headerBadge = document.getElementById('headerDbBadge');
+        if (headerBadge) headerBadge.textContent = String(db).toUpperCase();
+        const settingsBadge = document.getElementById('settingsDbBadge');
+        if (settingsBadge) settingsBadge.textContent = String(db).toUpperCase() + ' Engine';
+      } catch (_) {}
+    }
+
+    async function checkHasAdmins() {
+      try {
+        const res = await fetch('/api/admins/has-admins');
+        const data = await res.json();
+        const hasAdmins = data.item?.hasAdmins ?? data.hasAdmins;
+        document.getElementById('authScreen').classList.remove('hidden');
+        document.getElementById('dashboardApp').classList.add('hidden');
+
+        if (hasAdmins) {
+          document.getElementById('loginAdminForm').classList.remove('hidden');
+          document.getElementById('setupAdminForm').classList.add('hidden');
+        } else {
+          document.getElementById('setupAdminForm').classList.remove('hidden');
+          document.getElementById('loginAdminForm').classList.add('hidden');
+        }
+      } catch (err) {
+        showAuthAlert('Cannot reach PadiBase server: ' + err.message);
+      }
+    }
+
+    function showAuthAlert(msg) {
+      const el = document.getElementById('authAlert');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    async function handleFirstAdminCreate() {
+      const email = document.getElementById('setupEmail').value.trim();
+      const password = document.getElementById('setupPassword').value;
+      const confirm = document.getElementById('setupPasswordConfirm').value;
+
+      if (!email || !password) return showAuthAlert('Email and password are required');
+      if (password.length < 8) return showAuthAlert('Password must be at least 8 characters');
+      if (password !== confirm) return showAuthAlert('Passwords do not match');
+
+      try {
+        const res = await fetch('/api/admins', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          await doLogin(email, password);
+        } else {
+          showAuthAlert(data.message || 'Failed to create superuser');
+        }
+      } catch (err) {
+        showAuthAlert(err.message);
+      }
+    }
+
+    async function handleAdminLogin() {
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      if (!email || !password) return showAuthAlert('Email and password are required');
+      await doLogin(email, password);
+    }
+
+    async function doLogin(identity, password) {
+      try {
+        const res = await fetch('/api/admins/auth-with-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identity, password })
+        });
+        const data = await res.json();
+        const authData = data.item || data;
+        if (res.ok && authData.token) {
+          localStorage.setItem('padi_admin_token', authData.token);
+          localStorage.setItem('padi_admin_email', authData.admin.email);
+          showDashboard(authData.admin.email);
+        } else {
+          showAuthAlert(data.message || 'Invalid login credentials');
+        }
+      } catch (err) {
+        showAuthAlert(err.message);
+      }
+    }
+
+    function showDashboard(email) {
+      document.getElementById('authScreen').classList.add('hidden');
+      document.getElementById('dashboardApp').classList.remove('hidden');
+      document.getElementById('userEmail').textContent = email;
+      document.getElementById('adminAvatarBtn').textContent = email.slice(0, 2).toUpperCase();
+
+      loadHealthInfo();
+      loadCollections();
+      loadAppSettings();
+      initSSE();
+    }
+
+    function handleLogout() {
+      localStorage.removeItem('padi_admin_token');
+      localStorage.removeItem('padi_admin_email');
+      if (sseSource) sseSource.close();
+      checkHasAdmins();
+    }
+
+    // ================= NAVIGATION & VIEWS =================
+    function switchMainView(view) {
+      const views = ['collections', 'logs', 'settings'];
+      views.forEach(v => {
+        document.getElementById(`${v}View`).classList.toggle('hidden', v !== view);
+        const btn = document.getElementById(`rail${v.charAt(0).toUpperCase() + v.slice(1)}Btn`);
+        if (v === view) {
+          btn.className = "px-4 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-emerald-500 text-slate-950 shadow-sm relative";
+        } else {
+          btn.className = "px-4 py-1.5 rounded-xl text-xs font-semibold transition flex items-center space-x-2 text-emerald-100/80 hover:text-white hover:bg-white/10 relative";
+        }
+      });
+
+      if (view === 'settings') {
+        loadAppSettings();
+        loadBackups();
+        loadAdminAccounts();
+        document.getElementById('exportCollectionsPre').textContent = JSON.stringify(collections, null, 2);
+      }
+    }
+
+    function switchSettingsTab(tab) {
+      const tabs = ['app', 'backups', 'export', 'import', 'admins'];
+      tabs.forEach(t => {
+        document.getElementById(`settingsPane_${t}`).classList.toggle('hidden', t !== tab);
+        const btn = document.getElementById(`setTab_${t}`);
+        if (t === tab) {
+          btn.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-1.5 transition";
+        } else {
+          btn.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition";
+        }
+      });
+      if (tab === 'backups') loadBackups();
+      if (tab === 'admins') loadAdminAccounts();
+      if (tab === 'export') {
+        document.getElementById('exportCollectionsPre').textContent = JSON.stringify(collections, null, 2);
+      }
+    }
+
+    // ================= COLLECTIONS MANAGEMENT =================
+    async function loadCollections(targetCol) {
+      try {
+        const res = await fetch('/api/collections');
+        const data = await res.json();
+        if (data.debug?.database) {
+          activeDbDriver = data.debug.database;
+          const hb = document.getElementById('headerDbBadge');
+          if (hb) hb.textContent = String(activeDbDriver).toUpperCase();
+        }
+        collections = data.item || data.items || [];
+        renderCollectionsList();
+
+        const preferred = targetCol || localStorage.getItem('padi_active_col') || currentCollection;
+        if (collections.some(c => c.name === preferred)) {
+          currentCollection = preferred;
+        } else if (collections.length > 0) {
+          currentCollection = collections[0].name;
+        }
+        selectCollection(currentCollection);
+      } catch (err) {
+        console.error("Failed to load collections:", err);
+      }
+    }
+
+    function renderCollectionsList() {
+      const container = document.getElementById('collectionsList');
+      const kw = (document.getElementById('collectionSearchInput')?.value || '').toLowerCase();
+      const filtered = collections.filter(c => c.name.toLowerCase().includes(kw));
+
+      container.innerHTML = filtered.map(c => {
+        const isActive = c.name === currentCollection;
+        const icon = c.type === 'auth' ? 'fa-user-astronaut' : 'fa-table';
+        const isRealtime = c.realtime !== false;
+        const fieldCount = (c.schema || []).length;
+        return `
+          <button onclick="selectCollection('${c.name}')" class="w-full flex items-center justify-between p-2.5 rounded-xl text-xs transition border ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/60 text-slate-700 border-slate-100 font-semibold'}">
+            <div class="flex items-center space-x-2.5 truncate">
+              <span class="w-7 h-7 rounded-lg flex items-center justify-center ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">
+                <i class="fa-solid ${icon} text-[11px]"></i>
+              </span>
+              <div class="text-left truncate">
+                <div class="truncate font-mono">${c.name}</div>
+                <div class="text-[10px] ${isActive ? 'text-emerald-100' : 'text-slate-400'}">${c.type} · ${fieldCount} cols</div>
+              </div>
+            </div>
+            ${isRealtime
+              ? `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/20 text-amber-200' : 'bg-emerald-50 text-emerald-700'}" title="Realtime SSE enabled"><i class="fa-solid fa-bolt"></i></span>`
+              : `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/10 text-emerald-200' : 'bg-slate-100 text-slate-400'}" title="Realtime SSE disabled">off</span>`}
+          </button>
+        `;
+      }).join('');
+    }
+
+    function selectCollection(name) {
+      currentCollection = name;
+      localStorage.setItem('padi_active_col', name);
+      selectedRecordIds.clear();
+      updateBulkDeleteBar();
+      renderCollectionsList();
+
+      const col = collections.find(c => c.name === name);
+      document.getElementById('currentCollectionTitle').textContent = name;
+      document.getElementById('collectionTypeBadge').textContent = col ? col.type : 'base';
+
+      const rtBadge = document.getElementById('collectionRealtimeBadge');
+      if (rtBadge) {
+        const isRt = !col || col.realtime !== false;
+        if (isRt) {
+          rtBadge.className = 'text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold inline-flex items-center';
+          rtBadge.innerHTML = '<i class="fa-solid fa-bolt mr-1 text-[9px]"></i> realtime: on';
+        } else {
+          rtBadge.className = 'text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 font-bold inline-flex items-center';
+          rtBadge.innerHTML = '<i class="fa-solid fa-bolt-slash mr-1 text-[9px]"></i> realtime: off';
+        }
+      }
+
+      const pillsEl = document.getElementById('collectionSchemaPills');
+      if (pillsEl && col) {
+        const fields = (col.schema || []).map(f => `<span class="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-mono text-[10px]">${f.name}: <strong class="text-emerald-700">${f.type}</strong></span>`).join('');
+        pillsEl.innerHTML = fields || '<span class="text-slate-400">System columns only (id, created, updated)</span>';
+      }
+
+      currentPage = 1;
+      loadRecords();
+    }
+
+    // ================= RECORDS TABLE & SEARCH =================
+    function applyFilterSearch() {
+      currentFilter = document.getElementById('recordFilterInput').value.trim();
+      document.getElementById('clearFilterBtn').classList.toggle('hidden', !currentFilter);
+      currentPage = 1;
+      loadRecords();
+    }
+
+    function clearFilterSearch() {
+      document.getElementById('recordFilterInput').value = '';
+      currentFilter = '';
+      document.getElementById('clearFilterBtn').classList.add('hidden');
+      currentPage = 1;
+      loadRecords();
+    }
+
+    function toggleSort(colName) {
+      if (currentSort === colName) {
+        currentSort = `-${colName}`;
+      } else {
+        currentSort = colName;
+      }
+      loadRecords();
+    }
+
+    function changePage(delta) {
+      currentPage = Math.max(1, currentPage + delta);
+      loadRecords();
+    }
+
+    async function loadRecords() {
+      try {
+        const params = new URLSearchParams({
+          page: currentPage,
+          perPage: 30,
+          sort: currentSort
+        });
+        if (currentFilter) params.set('filter', currentFilter);
+
+        const res = await fetch(`/api/collections/${currentCollection}/records?${params.toString()}`);
+        const data = await res.json();
+        if (!res.ok) {
+          showToast(data.message || 'Filter query error', 'error');
+          return;
+        }
+        currentRecords = data.item || data.items || [];
+        renderRecordsTable(data);
+      } catch (err) {
+        console.error("Failed to load records:", err);
+      }
+    }
+
+    function getCollectionColumns(col, items) {
+      const cols = [];
+      if (col && col.type === 'auth') {
+        cols.push({ name: 'name', type: 'text' });
+        cols.push({ name: 'username', type: 'text' });
+        cols.push({ name: 'email', type: 'email' });
+        cols.push({ name: 'role', type: 'text' });
+        cols.push({ name: 'status', type: 'text' });
+        cols.push({ name: 'verified', type: 'bool' });
+      }
+      if (col && col.schema) {
+        for (const f of col.schema) {
+          if (!cols.some(c => c.name === f.name)) {
+            cols.push({ name: f.name, type: f.type });
+          }
+        }
+      }
+      for (const item of items) {
+        for (const k of Object.keys(item)) {
+          if (!k.startsWith('@') && !['id', 'created', 'updated', 'collectionId', 'collectionName', 'emailVisibility'].includes(k)) {
+            if (!cols.some(c => c.name === k)) {
+              cols.push({ name: k, type: 'text' });
+            }
+          }
+        }
+      }
+      return cols;
+    }
+
+    function renderRecordsTable(data) {
+      const tbody = document.getElementById('recordsBody');
+      const thead = document.getElementById('tableHeader');
+      const items = data.item || data.items || [];
+      const totalItems = data.meta?.total ?? data.totalItems ?? 0;
+      const pageNum = data.meta?.current_page ?? data.page ?? 1;
+      const totalPages = data.meta?.last_page ?? data.totalPages ?? 1;
+      const col = collections.find(c => c.name === currentCollection);
+      const schemaCols = getCollectionColumns(col, items);
+
+      const sortIcon = (field) => {
+        if (currentSort === field) return '<i class="fa-solid fa-caret-up ml-1 text-emerald-600"></i>';
+        if (currentSort === `-${field}`) return '<i class="fa-solid fa-caret-down ml-1 text-emerald-600"></i>';
+        return '';
+      };
+
+      thead.innerHTML = `
+        <th class="py-3 px-4 w-8 border-r border-slate-200/60">
+          <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" class="rounded border-slate-300">
+        </th>
+        <th onclick="toggleSort('id')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
+          <i class="fa-solid fa-fingerprint text-[10px] text-emerald-600 mr-1"></i> id ${sortIcon('id')}
+        </th>
+        ${schemaCols.map(c => `
+          <th onclick="toggleSort('${c.name}')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
+            <i class="${FIELD_ICONS[c.type] || 'fa-solid fa-font'} text-[10px] text-emerald-600 mr-1"></i> ${c.name} ${sortIcon(c.name)}
+          </th>
+        `).join('')}
+        <th onclick="toggleSort('created')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
+          <i class="fa-regular fa-clock text-[10px] text-slate-400 mr-1"></i> created ${sortIcon('created')}
+        </th>
+        <th onclick="toggleSort('updated')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
+          <i class="fa-regular fa-clock text-[10px] text-slate-400 mr-1"></i> updated ${sortIcon('updated')}
+        </th>
+        <th class="py-3 px-4 w-10"></th>
+      `;
+
+      if (items.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="${schemaCols.length + 5}" class="py-16 text-center text-slate-400 font-sans">
+              <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3 text-lg">
+                <i class="fa-solid fa-seedling"></i>
+              </div>
+              <div class="text-sm font-bold text-slate-600 mb-1">No records in "${currentCollection}" yet</div>
+              <p class="text-xs text-slate-400 mb-3">Insert your first row or import a JSON dataset.</p>
+              <button onclick="openRecordDrawer(null)" class="px-4 py-2 rounded-xl padi-btn-primary text-white text-xs font-bold shadow-sm">
+                + Add First Record
+              </button>
+            </td>
+          </tr>
+        `;
+      } else {
+        tbody.innerHTML = items.map(item => {
+          const checked = selectedRecordIds.has(item.id) ? 'checked' : '';
+          return `
+            <tr onclick="openRecordDrawer('${item.id}')" class="hover:bg-emerald-50/40 cursor-pointer transition group">
+              <td onclick="event.stopPropagation()" class="py-2.5 px-4 border-r border-slate-100">
+                <input type="checkbox" ${checked} onchange="toggleSelectRecord('${item.id}', this.checked)" class="rounded border-slate-300">
+              </td>
+              <td onclick="event.stopPropagation(); copyToClipboard('${item.id}')" class="py-2.5 px-4 border-r border-slate-100 whitespace-nowrap">
+                <span class="px-2.5 py-0.5 rounded-lg bg-emerald-50 group-hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 font-semibold text-[11px] inline-flex items-center">
+                  ${item.id} <i class="fa-regular fa-copy ml-1.5 text-[9px] opacity-50"></i>
+                </span>
+              </td>
+              ${schemaCols.map(c => `<td class="py-2.5 px-4 border-r border-slate-100 max-w-[240px] truncate">${formatCell(item[c.name], c.type)}</td>`).join('')}
+              <td class="py-2.5 px-4 border-r border-slate-100 text-slate-400 text-[11px] whitespace-nowrap">${formatDateCell(item.created)}</td>
+              <td class="py-2.5 px-4 border-r border-slate-100 text-slate-400 text-[11px] whitespace-nowrap">${formatDateCell(item.updated)}</td>
+              <td class="py-2.5 px-4 text-right text-slate-400 group-hover:text-emerald-700">
+                <i class="fa-solid fa-pen-to-square text-xs"></i>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      }
+
+      document.getElementById('paginationInfo').textContent = `Showing ${items.length} of ${totalItems} total records`;
+      document.getElementById('currentPageBadge').textContent = `${pageNum} / ${totalPages}`;
+      document.getElementById('prevPageBtn').disabled = pageNum <= 1;
+      document.getElementById('nextPageBtn').disabled = pageNum >= totalPages;
+    }
+
+    function formatCell(val, type) {
+      if (val === null || val === undefined || val === '') return '<span class="text-slate-300">—</span>';
+      if (type === 'bool' || typeof val === 'boolean') {
+        const isTrue = val === true || val === 1 || val === 'true';
+        return isTrue
+          ? '<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">TRUE</span>'
+          : '<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold">FALSE</span>';
+      }
+      if (typeof val === 'object') return `<span class="text-teal-700">${JSON.stringify(val)}</span>`;
+      return String(val).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function formatDateCell(iso) {
+      if (!iso) return '';
+      return iso.slice(0, 19).replace('T', ' ');
+    }
+
+    function toggleSelectAll(checked) {
+      if (checked) {
+        currentRecords.forEach(r => selectedRecordIds.add(r.id));
+      } else {
+        selectedRecordIds.clear();
+      }
+      updateBulkDeleteBar();
+      loadRecords();
+    }
+
+    function toggleSelectRecord(id, checked) {
+      if (checked) selectedRecordIds.add(id);
+      else selectedRecordIds.delete(id);
+      updateBulkDeleteBar();
+    }
+
+    function updateBulkDeleteBar() {
+      const bar = document.getElementById('bulkDeleteBar');
+      if (selectedRecordIds.size > 0) {
+        bar.classList.remove('hidden');
+        document.getElementById('selectedCountText').textContent = `${selectedRecordIds.size} selected`;
+      } else {
+        bar.classList.add('hidden');
+      }
+    }
+
+    async function deleteSelectedRecords() {
+      if (!confirm(`Delete ${selectedRecordIds.size} selected records?`)) return;
+      for (const id of selectedRecordIds) {
+        await fetch(`/api/collections/${currentCollection}/records/${id}`, { method: 'DELETE' });
+      }
+      selectedRecordIds.clear();
+      updateBulkDeleteBar();
+      showToast('Selected records deleted');
+      loadRecords();
+    }
+
+    function copyToClipboard(text) {
+      navigator.clipboard.writeText(text);
+      showToast(`Copied "${text}" to clipboard`);
+    }
+
+    // ================= RECORD STUDIO MODAL (CREATE / EDIT) =================
+    async function openRecordDrawer(recordId) {
+      editingRecordId = recordId;
+      isRecordJsonMode = false;
+      document.getElementById('recordFormContainer').classList.remove('hidden');
+      document.getElementById('recordJsonContainer').classList.add('hidden');
+      document.getElementById('recordDrawerAlert').classList.add('hidden');
+
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      document.getElementById('recordDrawerTitle').innerHTML = recordId
+        ? `Edit <span class="font-mono text-amber-300">${col.name}</span> Record`
+        : `New <span class="font-mono text-amber-300">${col.name}</span> Record`;
+      document.getElementById('saveRecordBtn').textContent = recordId ? 'Update Record' : 'Create Record';
+      document.getElementById('drawerDeleteRecordBtn').classList.toggle('hidden', !recordId);
+
+      let record = {};
+      if (recordId) {
+        const res = await fetch(`/api/collections/${currentCollection}/records/${recordId}`);
+        if (res.ok) {
+          const data = await res.json();
+          record = data.item || data;
+        }
+      }
+
+      renderRecordDrawerForm(col, record);
+      document.getElementById('recordDrawer').classList.remove('hidden');
+    }
+
+    function renderRecordDrawerForm(col, record) {
+      const container = document.getElementById('recordFormContainer');
+      let html = `
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1 flex items-center">
+            <i class="fa-solid fa-fingerprint text-[10px] mr-1.5 text-emerald-600"></i> Record ID
+          </label>
+          <input type="text" id="recField_id" value="${record.id || ''}" ${editingRecordId ? 'readonly class="w-full bg-slate-100 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-500 cursor-not-allowed"' : 'class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-800 focus:bg-white focus:outline-none focus:border-emerald-600" placeholder="Leave empty to auto-generate 15-char ID"'}>
+        </div>
+      `;
+
+      if (col.type === 'auth') {
+        html += `
+          <div class="bg-emerald-50/50 border border-emerald-200/80 rounded-2xl p-4 space-y-3.5">
+            <div class="text-[11px] font-extrabold uppercase tracking-wider text-emerald-800 flex items-center">
+              <i class="fa-solid fa-user-shield mr-1.5"></i> Auth Account Credentials (Padi Framework Standard)
+            </div>
+            <div class="grid grid-cols-3 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">name</label>
+                <input type="text" id="recField_name" value="${record.name || ''}" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-emerald-600" placeholder="Full name">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">role</label>
+                <input type="text" id="recField_role" value="${record.role || 'user'}" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-emerald-600" placeholder="user / admin">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">status</label>
+                <input type="text" id="recField_status" value="${record.status || 'active'}" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-emerald-600" placeholder="active / suspended">
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">username</label>
+                <input type="text" id="recField_username" value="${record.username || ''}" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-emerald-600" placeholder="Auto-generated if empty">
+              </div>
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">email <span class="text-rose-500">*</span></label>
+                <input type="email" id="recField_email" value="${record.email || ''}" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-emerald-600" placeholder="user@example.com">
+              </div>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-bold text-slate-700 mb-1">${editingRecordId ? 'New password (optional)' : 'password *'}</label>
+                <input type="password" id="recField_password" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-emerald-600" placeholder="••••••••">
+              </div>
+              <div class="flex items-end pb-2">
+                <label class="inline-flex items-center space-x-2 cursor-pointer text-xs font-bold text-slate-700">
+                  <input type="checkbox" id="recField_verified" ${record.verified ? 'checked' : ''} class="rounded border-slate-300">
+                  <span>Verified Account</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      for (const f of (col.schema || [])) {
+        const val = record[f.name];
+        const reqStar = f.required ? '<span class="text-rose-500">*</span>' : '';
+        const icon = FIELD_ICONS[f.type] || 'fa-solid fa-font';
+        let inputEl = '';
+
+        switch (f.type) {
+          case 'number':
+            inputEl = `<input type="number" step="any" id="recField_${f.name}" value="${val !== undefined && val !== null ? val : ''}" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono focus:bg-white focus:outline-none focus:border-emerald-600" placeholder="0">`;
+            break;
+          case 'bool':
+            inputEl = `
+              <label class="inline-flex items-center space-x-2 cursor-pointer">
+                <input type="checkbox" id="recField_${f.name}" ${val === true || val === 1 || val === 'true' ? 'checked' : ''} class="rounded border-slate-300 w-4 h-4">
+                <span class="text-xs text-slate-700 font-semibold">True / Active</span>
+              </label>
+            `;
+            break;
+          case 'date':
+            inputEl = `<input type="datetime-local" id="recField_${f.name}" value="${val ? String(val).slice(0, 16) : ''}" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono focus:bg-white focus:outline-none focus:border-emerald-600">`;
+            break;
+          case 'json':
+            inputEl = `<textarea id="recField_${f.name}" rows="4" class="w-full bg-slate-950 text-emerald-400 border border-slate-300 rounded-xl p-3 text-xs font-mono focus:outline-none" placeholder="{ }">${typeof val === 'object' && val !== null ? JSON.stringify(val, null, 2) : (val || '')}</textarea>`;
+            break;
+          default:
+            inputEl = `<input type="${f.type === 'email' ? 'email' : (f.type === 'url' ? 'url' : 'text')}" id="recField_${f.name}" value="${val !== undefined && val !== null ? val : ''}" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:bg-white focus:outline-none focus:border-emerald-600" placeholder="Enter ${f.name}...">`;
+            break;
+        }
+
+        html += `
+          <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+              <span><i class="${icon} text-[10px] text-emerald-600 mr-1.5"></i> ${f.name} ${reqStar}</span>
+              <span class="text-[10px] font-mono text-slate-400 uppercase">${f.type}</span>
+            </label>
+            ${inputEl}
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+    }
+
+    function collectRecordFormPayload() {
+      const col = collections.find(c => c.name === currentCollection) || { schema: [] };
+      const payload = {};
+
+      const customId = document.getElementById('recField_id')?.value.trim();
+      if (!editingRecordId && customId) payload.id = customId;
+
+      if (col.type === 'auth') {
+        const n = document.getElementById('recField_name')?.value.trim();
+        const u = document.getElementById('recField_username')?.value.trim();
+        const e = document.getElementById('recField_email')?.value.trim();
+        const p = document.getElementById('recField_password')?.value;
+        const r = document.getElementById('recField_role')?.value.trim();
+        const s = document.getElementById('recField_status')?.value.trim();
+        const v = document.getElementById('recField_verified')?.checked;
+        if (n) payload.name = n;
+        if (u) payload.username = u;
+        if (e) payload.email = e;
+        if (p) payload.password = p;
+        if (r) payload.role = r;
+        if (s) payload.status = s;
+        payload.verified = v ? 1 : 0;
+      }
+
+      for (const f of (col.schema || [])) {
+        const el = document.getElementById(`recField_${f.name}`);
+        if (!el) continue;
+        if (f.type === 'bool') {
+          payload[f.name] = el.checked;
+        } else if (f.type === 'number') {
+          if (el.value !== '') payload[f.name] = Number(el.value);
+        } else if (f.type === 'json') {
+          try { payload[f.name] = JSON.parse(el.value || '{}'); }
+          catch (_) { payload[f.name] = el.value; }
+        } else {
+          payload[f.name] = el.value;
+        }
+      }
+      return payload;
+    }
+
+    function toggleRecordJsonMode() {
+      isRecordJsonMode = !isRecordJsonMode;
+      const formEl = document.getElementById('recordFormContainer');
+      const jsonEl = document.getElementById('recordJsonContainer');
+      const btn = document.getElementById('toggleJsonBtn');
+
+      if (isRecordJsonMode) {
+        document.getElementById('recordPayloadJson').value = JSON.stringify(collectRecordFormPayload(), null, 2);
+        formEl.classList.add('hidden');
+        jsonEl.classList.remove('hidden');
+        btn.textContent = 'Visual Fields';
+      } else {
+        formEl.classList.remove('hidden');
+        jsonEl.classList.add('hidden');
+        btn.textContent = '{ } Raw JSON';
+      }
+    }
+
+    async function saveRecordDrawer() {
+      const alertEl = document.getElementById('recordDrawerAlert');
+      alertEl.classList.add('hidden');
+
+      let payload = {};
+      if (isRecordJsonMode) {
+        try {
+          payload = JSON.parse(document.getElementById('recordPayloadJson').value || '{}');
+        } catch (e) {
+          alertEl.textContent = 'Invalid JSON: ' + e.message;
+          alertEl.classList.remove('hidden');
+          return;
+        }
+      } else {
+        payload = collectRecordFormPayload();
+      }
+
+      const url = editingRecordId
+        ? `/api/collections/${currentCollection}/records/${editingRecordId}`
+        : `/api/collections/${currentCollection}/records`;
+      const method = editingRecordId ? 'PATCH' : 'POST';
+
+      try {
+        const res = await fetch(url, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + (localStorage.getItem('padi_admin_token') || '')
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          closeDrawer('recordDrawer');
+          showToast(editingRecordId ? 'Record updated successfully' : 'Record created successfully');
+          loadRecords();
+        } else {
+          alertEl.textContent = data.message || 'Operation failed';
+          alertEl.classList.remove('hidden');
+        }
+      } catch (err) {
+        alertEl.textContent = err.message;
+        alertEl.classList.remove('hidden');
+      }
+    }
+
+    async function deleteRecordFromDrawer() {
+      if (!editingRecordId) return;
+      if (!confirm(`Delete record ${editingRecordId}?`)) return;
+      const res = await fetch(`/api/collections/${currentCollection}/records/${editingRecordId}`, { method: 'DELETE' });
+      if (res.ok) {
+        closeDrawer('recordDrawer');
+        showToast('Record deleted');
+        loadRecords();
+      }
+    }
+
+    // ================= SCHEMA ARCHITECT MODAL (CREATE / EDIT SCHEMA & RULES) =================
+    function openCollectionDrawer(isEdit) {
+      isEditingCollection = isEdit;
+      document.getElementById('colDrawerAlert').classList.add('hidden');
+      switchColDrawerTab('fields');
+
+      const col = isEdit ? collections.find(c => c.name === currentCollection) : null;
+      document.getElementById('colDrawerTitle').textContent = isEdit ? `Configure "${col.name}" Schema & Rules` : 'Create New Collection Schema';
+      document.getElementById('colNameInput').value = col ? col.name : '';
+      document.getElementById('colTypeInput').value = col ? col.type : 'base';
+      document.getElementById('colTypeInput').disabled = isEdit;
+      document.getElementById('colRealtimeInput').checked = col ? (col.realtime !== false) : true;
+      document.getElementById('drawerDeleteColBtn').classList.toggle('hidden', !isEdit || (col && col.name === 'users'));
+
+      document.getElementById('ruleList').value = col?.listRule || '';
+      document.getElementById('ruleView').value = col?.viewRule || '';
+      document.getElementById('ruleCreate').value = col?.createRule || '';
+      document.getElementById('ruleUpdate').value = col?.updateRule || '';
+      document.getElementById('ruleDelete').value = col?.deleteRule || '';
+
+      tempSchemaFields = col && col.schema ? JSON.parse(JSON.stringify(col.schema)) : [];
+      renderColAuthInfo();
+      renderTempSchemaFields();
+      document.getElementById('collectionDrawer').classList.remove('hidden');
+    }
+
+    function renderColAuthInfo() {
+      const type = document.getElementById('colTypeInput').value;
+      document.getElementById('colAuthSystemBadge').classList.toggle('hidden', type !== 'auth');
+    }
+
+    function switchColDrawerTab(tab) {
+      document.getElementById('colPane_fields').classList.toggle('hidden', tab !== 'fields');
+      document.getElementById('colPane_rules').classList.toggle('hidden', tab !== 'rules');
+      document.getElementById('colTab_fields').className = tab === 'fields'
+        ? 'pb-2.5 border-b-2 border-emerald-600 text-emerald-700'
+        : 'pb-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-700';
+      document.getElementById('colTab_rules').className = tab === 'rules'
+        ? 'pb-2.5 border-b-2 border-emerald-600 text-emerald-700'
+        : 'pb-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-700';
+    }
+
+    function addSchemaField(type) {
+      tempSchemaFields.push({
+        name: `field_${tempSchemaFields.length + 1}`,
+        type,
+        required: false,
+        unique: false,
+        options: {}
+      });
+      renderTempSchemaFields();
+    }
+
+    function removeSchemaField(idx) {
+      tempSchemaFields.splice(idx, 1);
+      renderTempSchemaFields();
+    }
+
+    function renderTempSchemaFields() {
+      const container = document.getElementById('colFieldsList');
+      if (tempSchemaFields.length === 0) {
+        container.innerHTML = `<div class="py-6 text-center text-xs text-slate-400 border border-dashed border-slate-300 rounded-2xl">No custom columns defined yet. Pick a data type below to add columns.</div>`;
+        return;
+      }
+
+      container.innerHTML = tempSchemaFields.map((f, idx) => `
+        <div class="flex items-center space-x-2.5 bg-slate-50/70 p-2.5 rounded-2xl border border-slate-200/90 text-xs">
+          <span class="px-2.5 py-1 rounded-xl bg-emerald-100 text-emerald-800 font-mono font-bold text-[11px] flex items-center space-x-1.5 w-24">
+            <i class="${FIELD_ICONS[f.type] || 'fa-solid fa-font'} text-emerald-600"></i>
+            <span>${f.type}</span>
+          </span>
+          <input type="text" value="${f.name}" oninput="tempSchemaFields[${idx}].name = this.value.trim()" placeholder="column_name" class="flex-1 bg-white border border-slate-300 rounded-xl px-3 py-1.5 font-mono text-xs text-slate-900 focus:outline-none focus:border-emerald-600">
+          <label class="inline-flex items-center space-x-1 text-[11px] font-semibold text-slate-600 cursor-pointer">
+            <input type="checkbox" ${f.required ? 'checked' : ''} onchange="tempSchemaFields[${idx}].required = this.checked" class="rounded border-slate-300">
+            <span>Required</span>
+          </label>
+          <label class="inline-flex items-center space-x-1 text-[11px] font-semibold text-slate-600 cursor-pointer">
+            <input type="checkbox" ${f.unique ? 'checked' : ''} onchange="tempSchemaFields[${idx}].unique = this.checked" class="rounded border-slate-300">
+            <span>Unique</span>
+          </label>
+          <button type="button" onclick="removeSchemaField(${idx})" class="w-7 h-7 rounded-xl hover:bg-rose-50 text-slate-400 hover:text-rose-600 flex items-center justify-center transition">
+            <i class="fa-solid fa-trash-can"></i>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    async function saveCollectionDrawer() {
+      const alertEl = document.getElementById('colDrawerAlert');
+      alertEl.classList.add('hidden');
+
+      const name = document.getElementById('colNameInput').value.trim().toLowerCase();
+      const type = document.getElementById('colTypeInput').value;
+      if (!name) {
+        alertEl.textContent = 'Collection name is required';
+        alertEl.classList.remove('hidden');
+        return;
+      }
+
+      const cleanSchema = tempSchemaFields.filter(f => f.name && f.name.trim() !== '');
+      const payload = {
+        name,
+        type,
+        realtime: document.getElementById('colRealtimeInput').checked,
+        schema: cleanSchema,
+        listRule: document.getElementById('ruleList').value.trim() || null,
+        viewRule: document.getElementById('ruleView').value.trim() || null,
+        createRule: document.getElementById('ruleCreate').value.trim() || null,
+        updateRule: document.getElementById('ruleUpdate').value.trim() || null,
+        deleteRule: document.getElementById('ruleDelete').value.trim() || null
+      };
+
+      const url = isEditingCollection ? `/api/collections/${currentCollection}` : '/api/collections';
+      const method = isEditingCollection ? 'PATCH' : 'POST';
+
+      try {
+        const res = await fetch(url, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + (localStorage.getItem('padi_admin_token') || '')
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          const savedCol = data.item || data;
+          closeDrawer('collectionDrawer');
+          showToast(isEditingCollection ? 'Schema updated' : 'Collection created');
+          await loadCollections(savedCol.name);
+        } else {
+          alertEl.textContent = data.message || 'Failed to save schema';
+          alertEl.classList.remove('hidden');
+        }
+      } catch (err) {
+        alertEl.textContent = err.message;
+        alertEl.classList.remove('hidden');
+      }
+    }
+
+    async function handleDeleteCurrentCollection() {
+      if (currentCollection === 'users') return showToast('Cannot delete default users collection', 'error');
+      if (!confirm(`Are you sure you want to drop collection "${currentCollection}" and all its records?`)) return;
+
+      const res = await fetch(`/api/collections/${currentCollection}`, { method: 'DELETE' });
+      if (res.ok) {
+        closeDrawer('collectionDrawer');
+        localStorage.removeItem('padi_active_col');
+        showToast(`Collection "${currentCollection}" dropped`);
+        await loadCollections('users');
+      }
+    }
+
+    // ================= PADIBASE API EXPLORER MODAL =================
+    function openApiPreviewDrawer() {
+      const col = collections.find(c => c.name === currentCollection);
+      document.getElementById('apiPreviewColName').textContent = currentCollection;
+      document.getElementById('apiTabAuth').classList.toggle('hidden', !col || col.type !== 'auth');
+      renderApiPreview('list');
+      document.getElementById('apiPreviewDrawer').classList.remove('hidden');
+    }
+
+    let currentApiPreviewUrl = "";
+    let currentApiPreviewPath = "";
+    let currentApiPreviewJs = "";
+
+    function renderApiPreview(action) {
+      const baseUrl = window.location.origin;
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const cName = col.name;
+      const content = document.getElementById('apiPreviewContent');
+
+      // Update active state on horizontal endpoint tabs
+      document.querySelectorAll('#apiPreviewTabs button[data-api-tab]').forEach(btn => {
+        const tabName = btn.getAttribute('data-api-tab');
+        const isHidden = btn.classList.contains('hidden');
+        if (tabName === action) {
+          btn.className = `${isHidden ? 'hidden ' : ''}px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs transition`;
+        } else if (tabName === 'auth') {
+          btn.className = `${isHidden ? 'hidden ' : ''}px-3.5 py-1.5 rounded-xl text-teal-700 hover:bg-teal-50 font-bold transition`;
+        } else {
+          btn.className = `${isHidden ? 'hidden ' : ''}px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white font-bold transition`;
+        }
+      });
+
+      const sampleObj = {};
+      if (col.type === 'auth') {
+        sampleObj.username = "budi123";
+        sampleObj.email = "budi@example.com";
+        sampleObj.password = "secret123456";
+      }
+      (col.schema || []).forEach(f => {
+        sampleObj[f.name] = f.type === 'number' ? 100 : (f.type === 'bool' ? true : `sample_${f.name}`);
+      });
+
+      const docs = {
+        list: {
+          title: `List & Paginate (${cName})`,
+          desc: `Query paginated ${cName} records with Padi Rust envelope (item, meta, debug).`,
+          method: 'GET',
+          badge: 'bg-emerald-100 text-emerald-800',
+          path: `/api/collections/${cName}/records?page=1&perPage=30&sort=-created`,
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records?page=1&perPage=30');\nconst { item, meta, debug } = await res.json();\nconsole.log(item, meta);`
+        },
+        view: {
+          title: `Get Single Record (${cName})`,
+          desc: `Retrieve a single ${cName} record by its 15-character ID.`,
+          method: 'GET',
+          badge: 'bg-emerald-100 text-emerald-800',
+          path: `/api/collections/${cName}/records/RECORD_ID`,
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID');\nconst { item } = await res.json();`
+        },
+        create: {
+          title: `Create Record (${cName})`,
+          desc: `Insert a new row into ${cName}.`,
+          method: 'POST',
+          badge: 'bg-sky-100 text-sky-800',
+          path: `/api/collections/${cName}/records`,
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`
+        },
+        update: {
+          title: `Update Record (${cName})`,
+          desc: `Partially update an existing ${cName} record by ID.`,
+          method: 'PATCH',
+          badge: 'bg-amber-100 text-amber-800',
+          path: `/api/collections/${cName}/records/RECORD_ID`,
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID', {\n  method: 'PATCH',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`
+        },
+        delete: {
+          title: `Delete Record (${cName})`,
+          desc: `Permanently delete a ${cName} record by ID.`,
+          method: 'DELETE',
+          badge: 'bg-rose-100 text-rose-800',
+          path: `/api/collections/${cName}/records/RECORD_ID`,
+          js: `await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID', {\n  method: 'DELETE'\n});`
+        },
+        realtime: {
+          title: `Realtime SSE Stream (${cName})`,
+          desc: `Subscribe to live changes when ${cName} has realtime enabled.`,
+          method: 'GET',
+          badge: 'bg-purple-100 text-purple-800',
+          path: `/api/realtime`,
+          js: `const evtSource = new EventSource('${baseUrl}/api/realtime');\nevtSource.onmessage = (event) => {\n  const data = JSON.parse(event.data);\n  if (data.collection === '${cName}') {\n    console.log('Mutation:', data.action, data.record);\n  }\n};`
+        },
+        auth: {
+          title: `Authenticate User (${cName})`,
+          desc: `Verify identity (username or email) & password and issue a JWT token.`,
+          method: 'POST',
+          badge: 'bg-teal-100 text-teal-800',
+          path: `/api/collections/${cName}/auth-with-password`,
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/auth-with-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    identity: 'budi123',\n    password: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`
+        }
+      };
+
+      const d = docs[action] || docs.list;
+      currentApiPreviewPath = d.path;
+      currentApiPreviewUrl = `${baseUrl}${d.path}`;
+      currentApiPreviewJs = d.js;
+
+      const sampleRecordItem = Object.assign({
+        id: "ed39194adc3d473",
+        collectionId: col.id || "eff625fdd8bd49b",
+        collectionName: cName
+      }, sampleObj, {
+        created: "2026-10-29T12:00:00Z",
+        updated: "2026-10-29T12:00:00Z"
+      });
+      delete sampleRecordItem.password;
+
+      const samplePadiResponse = action === 'list' ? {
+        message: "Success",
+        message_code: "SUCCESS",
+        success: true,
+        item: [sampleRecordItem],
+        meta: {
+          current_page: 1,
+          per_page: 30,
+          total: 1,
+          last_page: 1,
+          from: 1,
+          to: 1
+        },
+        debug: {
+          env: "development",
+          database: activeDbDriver,
+          execution_time: "0.85ms",
+          queries_count: 3,
+          queries: []
+        }
+      } : {
+        message: "Success",
+        message_code: d.method === 'POST' ? "CREATED" : "SUCCESS",
+        success: true,
+        item: sampleRecordItem,
+        debug: {
+          env: "development",
+          database: activeDbDriver,
+          execution_time: "0.42ms",
+          queries_count: 1,
+          queries: []
+        }
+      };
+
+      content.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div>
+            <h4 class="text-sm font-extrabold text-slate-900">${d.title}</h4>
+            <p class="text-slate-500 mt-0.5">${d.desc}</p>
+          </div>
+        </div>
+        <div class="flex items-center justify-between bg-emerald-50/60 p-3.5 rounded-2xl font-mono gap-2 border border-emerald-200/80">
+          <div class="flex items-center space-x-2.5 min-w-0">
+            <span class="px-2.5 py-1 rounded-lg font-extrabold text-[10px] shrink-0 ${d.badge}">${d.method}</span>
+            <span class="text-slate-900 font-bold break-all">${d.path}</span>
+          </div>
+          <div class="flex items-center space-x-2 shrink-0">
+            <button type="button" onclick="copyToClipboard(currentApiPreviewPath)" class="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-sans font-bold flex items-center space-x-1.5 transition shadow-2xs" title="Copy relative path">
+              <i class="fa-regular fa-copy text-[10px]"></i>
+              <span>Copy Path</span>
+            </button>
+            <button type="button" onclick="copyToClipboard(currentApiPreviewUrl)" class="px-3 py-1.5 rounded-xl padi-btn-primary text-white text-[11px] font-sans font-bold flex items-center space-x-1.5 transition shadow-2xs" title="Copy full URL (${currentApiPreviewUrl})">
+              <i class="fa-solid fa-link text-[10px]"></i>
+              <span>Copy Full URL</span>
+            </button>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">Fetch / SDK Snippet</div>
+              <button type="button" onclick="copyToClipboard(currentApiPreviewJs)" class="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold flex items-center space-x-1 transition">
+                <i class="fa-regular fa-copy text-[10px]"></i>
+                <span>Copy Code</span>
+              </button>
+            </div>
+            <pre class="bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto min-h-[210px]">${d.js}</pre>
+          </div>
+          ${action !== 'delete' && action !== 'realtime' ? `
+          <div>
+            <div class="flex items-center justify-between mb-1.5">
+              <div class="text-[11px] font-extrabold uppercase tracking-wider text-teal-700">Padi Rust JSON Response</div>
+              <span class="text-[10px] font-mono text-slate-400">200 OK</span>
+            </div>
+            <pre class="bg-slate-950 text-teal-300 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto max-h-[240px]">${JSON.stringify(samplePadiResponse, null, 2)}</pre>
+          </div>
+          ` : `
+          <div class="bg-slate-50 border border-slate-200 rounded-2xl p-5 flex flex-col justify-center">
+            <div class="text-xs font-extrabold text-slate-800 mb-1">PadiBase Stream Info</div>
+            <p class="text-xs text-slate-500 leading-relaxed">Events are emitted in real-time when collection records mutate and <code class="text-emerald-700 font-bold">realtime: true</code> is enabled on the collection schema.</p>
+          </div>
+          `}
+        </div>
+      `;
+    }
+
+    // ================= SETTINGS, BACKUPS, ADMINS, EXPORT/IMPORT =================
+    async function loadAppSettings() {
+      try {
+        const res = await fetch('/api/settings');
+        const data = await res.json();
+        const settings = data.item || data;
+        if (settings.meta) {
+          document.getElementById('settingAppName').value = settings.meta.appName || 'PadiBase Studio';
+          document.getElementById('settingAppUrl').value = settings.meta.appUrl || window.location.origin;
+        }
+      } catch (_) {}
+    }
+
+    async function saveAppSettings() {
+      const appName = document.getElementById('settingAppName').value.trim();
+      const appUrl = document.getElementById('settingAppUrl').value.trim();
+      const res = await fetch('/api/settings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ meta: { appName, appUrl } })
+      });
+      if (res.ok) showToast('Configuration saved');
+    }
+
+    async function loadBackups() {
+      const tbody = document.getElementById('backupsTableBody');
+      try {
+        const res = await fetch('/api/backups');
+        const data = await res.json();
+        const items = data.item || data.items || [];
+        if (items.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="4" class="py-8 text-center text-slate-400 font-sans">No database snapshots created yet.</td></tr>`;
+        } else {
+          tbody.innerHTML = items.map(b => `
+            <tr class="hover:bg-emerald-50/30">
+              <td class="py-3 px-4 font-bold text-slate-800"><i class="fa-solid fa-box-archive text-emerald-600 mr-2"></i>${b.key}</td>
+              <td class="py-3 px-4 text-slate-500">${formatBytes(b.size)}</td>
+              <td class="py-3 px-4 text-slate-400">${formatDateCell(b.created)}</td>
+              <td class="py-3 px-4 text-right space-x-2">
+                <a href="/api/backups/${b.key}" download class="text-emerald-600 hover:underline font-sans font-bold">Download</a>
+                <button onclick="handleRestoreBackup('${b.key}')" class="text-amber-600 hover:underline font-sans font-bold ml-2">Restore</button>
+                <button onclick="handleDeleteBackup('${b.key}')" class="text-rose-600 hover:underline font-sans font-bold ml-2">Delete</button>
+              </td>
+            </tr>
+          `).join('');
+        }
+      } catch (_) {}
+    }
+
+    async function handleCreateBackup() {
+      const res = await fetch('/api/backups', { method: 'POST' });
+      if (res.ok) {
+        showToast('Database snapshot created');
+        loadBackups();
+      }
+    }
+
+    async function handleRestoreBackup(key) {
+      if (!confirm(`Restore database from "${key}"? Current changes since this snapshot will be overwritten.`)) return;
+      const res = await fetch(`/api/backups/${key}/restore`, { method: 'POST' });
+      if (res.ok) {
+        showToast('Database restored successfully');
+        loadCollections();
+      }
+    }
+
+    async function handleDeleteBackup(key) {
+      if (!confirm(`Delete snapshot "${key}"?`)) return;
+      const res = await fetch(`/api/backups/${key}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast('Snapshot deleted');
+        loadBackups();
+      }
+    }
+
+    function copyExportedSchema() {
+      navigator.clipboard.writeText(JSON.stringify(collections, null, 2));
+      showToast('Schema blueprint copied to clipboard');
+    }
+
+    function downloadExportedSchema() {
+      const blob = new Blob([JSON.stringify(collections, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'padibase_schema_blueprint.json';
+      a.click();
+    }
+
+    async function submitImportCollectionsSchema() {
+      try {
+        const parsed = JSON.parse(document.getElementById('importSchemaTextarea').value || '[]');
+        const cols = Array.isArray(parsed) ? parsed : [parsed];
+        const res = await fetch('/api/collections/import', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ collections: cols })
+        });
+        if (res.ok) {
+          showToast('Schema blueprint migrated successfully!');
+          await loadCollections();
+          switchMainView('collections');
+        }
+      } catch (e) {
+        showToast('Invalid schema JSON: ' + e.message, 'error');
+      }
+    }
+
+    async function loadAdminAccounts() {
+      const tbody = document.getElementById('adminTableBody');
+      const res = await fetch('/api/admins');
+      const data = await res.json();
+      const items = data.item || data.items || [];
+      tbody.innerHTML = items.map(a => `
+        <tr class="hover:bg-emerald-50/30">
+          <td class="py-3 px-4 font-semibold text-slate-700">${a.id}</td>
+          <td class="py-3 px-4 text-slate-900 font-bold">${a.email}</td>
+          <td class="py-3 px-4 text-slate-400">${formatDateCell(a.created)}</td>
+          <td class="py-3 px-4 text-right">
+            <button onclick="handleDeleteAdmin('${a.id}')" class="text-rose-600 hover:underline font-sans font-bold">Remove</button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    async function handleCreateAdditionalAdmin() {
+      const email = document.getElementById('newAdminEmail').value.trim();
+      const password = document.getElementById('newAdminPassword').value;
+      if (!email || !password) return showToast('Email & password required', 'error');
+      const res = await fetch('/api/admins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+      if (res.ok) {
+        document.getElementById('newAdminEmail').value = '';
+        document.getElementById('newAdminPassword').value = '';
+        showToast('Superuser registered');
+        loadAdminAccounts();
+      } else {
+        const d = await res.json();
+        showToast(d.message || 'Error', 'error');
+      }
+    }
+
+    async function handleDeleteAdmin(id) {
+      if (!confirm('Remove this superuser account?')) return;
+      const res = await fetch(`/api/admins/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showToast('Superuser removed');
+        loadAdminAccounts();
+      } else {
+        const d = await res.json();
+        showToast(d.message || 'Cannot delete last admin', 'error');
+      }
+    }
+
+    // ================= DATA EXPORT & IMPORT =================
+    function handleExportCollection() {
+      const a = document.createElement('a');
+      a.href = `/api/collections/${currentCollection}/export`;
+      a.download = `${currentCollection}_export.json`;
+      a.click();
+    }
+
+    function openImportModal() {
+      document.getElementById('importColNameBadge').textContent = currentCollection;
+      document.getElementById('importJsonTextarea').value = '';
+      document.getElementById('importRecordsModal').classList.remove('hidden');
+    }
+
+    function handleImportFileSelect(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => { document.getElementById('importJsonTextarea').value = e.target.result; };
+      reader.readAsText(file);
+    }
+
+    async function submitImportRecords() {
+      try {
+        let payload = JSON.parse(document.getElementById('importJsonTextarea').value || '[]');
+        if (!Array.isArray(payload)) payload = [payload];
+        const res = await fetch(`/api/collections/${currentCollection}/import`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (res.ok) {
+          closeDrawer('importRecordsModal');
+          const count = data.item?.imported ?? data.imported ?? payload.length;
+          showToast(`Imported ${count} records`);
+          loadRecords();
+        }
+      } catch (e) {
+        showToast('Invalid JSON: ' + e.message, 'error');
+      }
+    }
+
+    // ================= REALTIME SSE =================
+    function initSSE() {
+      if (sseSource) sseSource.close();
+      sseSource = new EventSource('/api/realtime');
+      sseSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          logSSEEvent(data);
+          if (data.collection === currentCollection) loadRecords();
+        } catch (_) {}
+      };
+    }
+
+    function logSSEEvent(data) {
+      const container = document.getElementById('eventLogContainer');
+      const el = document.createElement('div');
+      el.className = "flex items-center space-x-2.5 text-xs border-b border-slate-800/80 pb-2";
+      const color = data.action === 'create' ? 'text-emerald-400' : (data.action === 'update' ? 'text-amber-400' : 'text-rose-400');
+      el.innerHTML = `
+        <span class="text-slate-500">[${new Date().toLocaleTimeString()}]</span>
+        <span class="font-extrabold uppercase px-2 py-0.5 rounded bg-white/5 ${color}">${data.action}</span>
+        <span class="text-teal-300 font-bold">${data.collection}</span>
+        <span class="text-slate-300 truncate">${JSON.stringify(data.record)}</span>
+      `;
+      container.prepend(el);
+    }
+
+    function clearEventLogs() {
+      document.getElementById('eventLogContainer').innerHTML = '';
+    }
+
+    function closeDrawer(id) {
+      document.getElementById(id).classList.add('hidden');
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes) return '0 B';
+      const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    window.onload = init;
+  </script>
+</body>
+</html>

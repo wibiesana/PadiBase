@@ -1,0 +1,61 @@
+[package]
+name = "padi-baas"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "padi_baas"
+path = "src/lib.rs"
+
+[[bin]]
+name = "padiBase"
+path = "src/main.rs"
+
+[dependencies]
+# Async runtime & Web server
+tokio = { version = "1.43", features = ["full"] }
+axum = { version = "0.8", features = ["multipart", "macros"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs", "compression-full"] }
+
+# Database (Multi-driver: SQLite, MySQL/MariaDB, PostgreSQL)
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "any",
+    "mysql",
+    "postgres",
+    "sqlite",
+    "macros",
+    "migrate",
+    "chrono",
+    "uuid",
+    "json",
+    "rust_decimal"
+] }
+rust_decimal = "1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+
+# Security & Auth
+argon2 = "0.5"
+jsonwebtoken = "9.3"
+rand = "0.8"
+
+# Utilities
+uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4.5", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2.0"
+anyhow = "1.0"
+async-trait = "0.1"
+rust-embed = "8.5"
+mime_guess = "2.0"
+futures = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
+tokio-util = { version = "0.7", features = ["io"] }
+hex = "0.4"
+
