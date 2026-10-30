@@ -1,10 +1,10 @@
 [package]
-name = "padi-baas"
+name = "PadiBase"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "padi_baas"
+name = "PadiBase"
 path = "src/lib.rs"
 
 [[bin]]
@@ -58,4 +58,7 @@ futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7", features = ["io"] }
 hex = "0.4"
+
+[profile.dev]
+incremental = false
 

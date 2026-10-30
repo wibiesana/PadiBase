@@ -2,7 +2,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use padi_baas::{api::router::create_router, AppState};
+use PadiBase::{api::router::create_router, AppState};
 use serde_json::json;
 use tower::ServiceExt;
 
@@ -10,7 +10,8 @@ use tower::ServiceExt;
 async fn test_full_padi_baas_flow() {
     let test_dir = std::path::PathBuf::from(format!("./target/test_data_{}", uuid::Uuid::new_v4().simple()));
     let _ = std::fs::remove_dir_all(&test_dir);
-    let state = AppState::new(&test_dir).await.expect("init app state");
+    let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url)).await.expect("init app state");
     let app = create_router(state);
 
     // 1. API Root & Health check
@@ -98,6 +99,10 @@ async fn test_full_padi_baas_flow() {
 
     assert_eq!(res.status(), StatusCode::OK);
 
+    let login_bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    let login_val: serde_json::Value = serde_json::from_slice(&login_bytes).unwrap();
+    let admin_token = login_val["item"]["token"].as_str().or_else(|| login_val["data"]["token"].as_str()).or_else(|| login_val["token"].as_str()).unwrap().to_string();
+
     // 5. Buat koleksi dinamis "posts"
     let col_body = serde_json::to_vec(&json!({
         "name": "posts",
@@ -140,6 +145,7 @@ async fn test_full_padi_baas_flow() {
                 .method("POST")
                 .uri("/api/collections/posts/records")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(record_body))
                 .unwrap(),
         )
@@ -178,7 +184,7 @@ async fn test_full_padi_baas_flow() {
 
 #[test]
 fn test_multi_database_url_and_env_resolution() {
-    use padi_baas::core::db::{resolve_db_config, DbDriver};
+    use PadiBase::core::db::{resolve_db_config, DbDriver};
     use std::path::Path;
 
     let dir = Path::new("./padi_data");
@@ -208,7 +214,8 @@ async fn test_per_collection_realtime_rule() {
         uuid::Uuid::new_v4().simple()
     ));
     let _ = std::fs::remove_dir_all(&test_dir);
-    let state = AppState::new(&test_dir).await.expect("init app state");
+    let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url)).await.expect("init app state");
     let mut rx = state.realtime.subscribe();
     let app = create_router(state);
 
@@ -217,6 +224,7 @@ async fn test_per_collection_realtime_rule() {
         "name": "audit_logs",
         "type": "base",
         "realtime": false,
+        "createRule": "public",
         "schema": [
             { "name": "action", "type": "text", "required": true }
         ]
@@ -262,6 +270,7 @@ async fn test_per_collection_realtime_rule() {
         "name": "audit_logs",
         "type": "base",
         "realtime": true,
+        "createRule": "public",
         "schema": [
             { "name": "action", "type": "text", "required": true }
         ]
@@ -306,3 +315,641 @@ async fn test_per_collection_realtime_rule() {
     let _ = std::fs::remove_dir_all(&test_dir);
 }
 
+
+
+#[tokio::test]
+async fn test_all_records_and_padi_rust_envelope() {
+    let test_dir = std::path::PathBuf::from(format!(
+        "./target/test_all_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let _ = std::fs::remove_dir_all(&test_dir);
+    let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url)).await.expect("init app state");
+    let app = create_router(state);
+
+    // Create collection `posts`
+    let col_body = serde_json::to_vec(&json!({
+        "name": "posts",
+        "type": "base",
+        "createRule": "public",
+        "schema": [
+            { "name": "title", "type": "text", "required": true }
+        ]
+    }))
+    .unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/collections")
+                .header("Content-Type", "application/json")
+                .body(Body::from(col_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    // Create 2 records
+    for i in 1..=2 {
+        let rec_body = serde_json::to_vec(&json!({ "title": format!("Post {}", i) })).unwrap();
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/collections/posts/records")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(rec_body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::CREATED);
+    }
+
+    // 1. Test /api/collections/posts/records/all
+    let res_all1 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/collections/posts/records/all")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_all1.status(), StatusCode::OK);
+    let bytes1 = axum::body::to_bytes(res_all1.into_body(), 1024 * 1024).await.unwrap();
+    let json_all1: serde_json::Value = serde_json::from_slice(&bytes1).unwrap();
+    assert_eq!(json_all1["success"], true);
+    assert_eq!(json_all1["item"].as_array().unwrap().len(), 2);
+
+    // 2. Test /api/collections/posts/all shortcut
+    let res_all2 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/collections/posts/all")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_all2.status(), StatusCode::OK);
+    let bytes2 = axum::body::to_bytes(res_all2.into_body(), 1024 * 1024).await.unwrap();
+    let json_all2: serde_json::Value = serde_json::from_slice(&bytes2).unwrap();
+    assert_eq!(json_all2["success"], true);
+    assert_eq!(json_all2["item"].as_array().unwrap().len(), 2);
+
+    // 3. Test /api/posts/all direct shortcut with search
+    let res_all3 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/posts/all?search=Post%201")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_all3.status(), StatusCode::OK);
+    let bytes3 = axum::body::to_bytes(res_all3.into_body(), 1024 * 1024).await.unwrap();
+    let json_all3: serde_json::Value = serde_json::from_slice(&bytes3).unwrap();
+    assert_eq!(json_all3["success"], true);
+    assert_eq!(json_all3["item"].as_array().unwrap().len(), 1);
+    assert_eq!(json_all3["item"][0]["title"], "Post 1");
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
+async fn test_eager_load_relations_student() {
+    let test_dir = std::path::PathBuf::from(format!(
+        "./target/test_rel_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let _ = std::fs::remove_dir_all(&test_dir);
+    let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
+        .await
+        .expect("init app state");
+
+    // 1. Create table `students` (with id and name)
+    state
+        .db
+        .execute(
+            r#"
+            CREATE TABLE students (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(100) NOT NULL
+            );
+            "#,
+            &[],
+        )
+        .await
+        .expect("create students table");
+
+    // 2. Create table `grades` (with id, student_id, score)
+    state
+        .db
+        .execute(
+            r#"
+            CREATE TABLE grades (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                student_id INTEGER NOT NULL,
+                score INTEGER NOT NULL,
+                FOREIGN KEY (student_id) REFERENCES students(id)
+            );
+            "#,
+            &[],
+        )
+        .await
+        .expect("create grades table");
+
+    // Insert student data
+    state
+        .db
+        .execute("INSERT INTO students (name) VALUES ('John Doe');", &[])
+        .await
+        .expect("insert student");
+
+    // Insert grade record referencing student_id = 1
+    state
+        .db
+        .execute("INSERT INTO grades (student_id, score) VALUES (1, 95);", &[])
+        .await
+        .expect("insert grade");
+
+    let app = create_router(state);
+
+    // Sync collections
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/collections/sync")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // 3. Request grades via /api/collections/grades/records/all (default auto_load_relations is false)
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/collections/grades/records/all")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let val: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let items = val["item"].as_array().expect("expected items array");
+    assert_eq!(items.len(), 1);
+    let first = &items[0];
+    assert_eq!(first["student_id"], 1);
+    // Verify default: relation is NOT automatically loaded when table setting is false
+    assert!(first.get("student").is_none() || first["student"].is_null());
+
+    // 4. Request with explicit query parameter ?with=student
+    let res_with = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/collections/grades/records/all?with=student")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_with.status(), StatusCode::OK);
+    let body_with = axum::body::to_bytes(res_with.into_body(), usize::MAX).await.unwrap();
+    let val_with: serde_json::Value = serde_json::from_slice(&body_with).unwrap();
+    let items_with = val_with["item"].as_array().expect("expected items array");
+    let first_with = &items_with[0];
+    assert!(first_with["student"].is_object(), "Student relation must be present when requested via ?with=student");
+    assert_eq!(first_with["student"]["name"], "John Doe");
+
+    // 5. Update collection setting on table: autoLoadRelations = true (simulate Dashboard toggle)
+    let patch_payload = serde_json::to_vec(&json!({
+        "name": "grades",
+        "type": "base",
+        "autoLoadRelations": true,
+        "schema": []
+    }))
+    .unwrap();
+    let res_patch = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/collections/grades")
+                .header("Content-Type", "application/json")
+                .body(Body::from(patch_payload))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_patch.status(), StatusCode::OK);
+
+    // 6. Request grades again WITHOUT query param: now should automatically eager load student relation
+    let res_auto = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/collections/grades/records/all")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_auto.status(), StatusCode::OK);
+    let body_auto = axum::body::to_bytes(res_auto.into_body(), usize::MAX).await.unwrap();
+    let val_auto: serde_json::Value = serde_json::from_slice(&body_auto).unwrap();
+    let items_auto = val_auto["item"].as_array().expect("expected items array");
+    let first_auto = &items_auto[0];
+    assert!(first_auto["student"].is_object(), "Student relation must be loaded automatically when autoLoadRelations is true");
+    assert_eq!(first_auto["student"]["name"], "John Doe");
+
+    // 7. Reset per-table setting to false, but enable global .env (AUTO_LOAD_RELATIONS=true)
+    let patch_payload2 = serde_json::to_vec(&json!({
+        "name": "grades",
+        "type": "base",
+        "autoLoadRelations": false,
+        "schema": []
+    }))
+    .unwrap();
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/collections/grades")
+                .header("Content-Type", "application/json")
+                .body(Body::from(patch_payload2))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    PadiBase::core::env::Env::set("AUTO_LOAD_RELATIONS", "true");
+    let res_global_env = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/collections/grades/records/all")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_global_env.status(), StatusCode::OK);
+    let body_global = axum::body::to_bytes(res_global_env.into_body(), usize::MAX).await.unwrap();
+    let val_global: serde_json::Value = serde_json::from_slice(&body_global).unwrap();
+    let items_global = val_global["item"].as_array().expect("expected items array");
+    let first_global = &items_global[0];
+    assert!(first_global["student"].is_object(), "Student relation must be loaded when global .env AUTO_LOAD_RELATIONS=true");
+    assert_eq!(first_global["student"]["name"], "John Doe");
+
+    // Reset env var to false
+    PadiBase::core::env::Env::set("AUTO_LOAD_RELATIONS", "false");
+
+    // ================= Test API Collection Export Endpoints =================
+    // 1. Export Master API Collection
+    let res_coll = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/api-collection")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_coll.status(), StatusCode::OK);
+    assert_eq!(
+        res_coll.headers().get("content-type").unwrap(),
+        "application/json; charset=utf-8"
+    );
+    let body_bytes = axum::body::to_bytes(res_coll.into_body(), usize::MAX).await.unwrap();
+    let coll_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(coll_json.get("info").is_some());
+    assert_eq!(coll_json["info"]["name"], "PadiBase API Collection (Full)");
+    assert_eq!(coll_json["info"]["schema"], "https://schema.getpostman.com/json/collection/v2.1.0/collection.json");
+    assert!(coll_json.get("item").is_some());
+
+    // 2. Export Master with ?download=true
+    let res_dl = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/api-collection?download=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_dl.status(), StatusCode::OK);
+    assert!(res_dl
+        .headers()
+        .get("content-disposition")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("attachment; filename=\"padi_base_api_collection.json\""));
+
+    // 3. Export Single Collection (grades)
+    let res_single = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/collections/grades/api-collection?download=true")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_single.status(), StatusCode::OK);
+    assert!(res_single
+        .headers()
+        .get("content-disposition")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("attachment; filename=\"grades_collection.json\""));
+    let body_single_bytes = axum::body::to_bytes(res_single.into_body(), usize::MAX).await.unwrap();
+    let single_json: serde_json::Value = serde_json::from_slice(&body_single_bytes).unwrap();
+    assert_eq!(single_json["info"]["name"], "Grades API Collection (PadiBase)");
+    assert!(single_json["item"].as_array().unwrap().len() >= 6);
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
+async fn test_file_upload_download_and_delete() {
+    let test_dir = std::path::PathBuf::from(format!(
+        "./target/test_file_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let _ = std::fs::remove_dir_all(&test_dir);
+    let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
+        .await
+        .expect("init app state");
+    let app = create_router(state);
+
+    // 1. Create collection `documents` with fields `title` and `file`
+    let col_body = serde_json::to_vec(&json!({
+        "name": "documents",
+        "type": "base",
+        "createRule": "public",
+        "updateRule": "public",
+        "deleteRule": "public",
+        "schema": [
+            { "name": "title", "type": "text", "required": true },
+            { "name": "file", "type": "file", "required": false }
+        ]
+    }))
+    .unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/collections")
+                .header("Content-Type", "application/json")
+                .body(Body::from(col_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    // 2. Create a record first
+    let rec_body = serde_json::to_vec(&json!({ "title": "Quarterly Report" })).unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/collections/documents/records")
+                .header("Content-Type", "application/json")
+                .body(Body::from(rec_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    let rec_json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let record_id = rec_json["item"]["id"].as_str().or_else(|| rec_json["id"].as_str()).unwrap().to_string();
+
+    // 3. Upload a file to POST /api/files/documents/{record_id}
+    let boundary = "------------------------testboundary123";
+    let file_content = b"PadiBase File Storage Content - 2026";
+    let mut multipart_body = Vec::new();
+    multipart_body.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
+    multipart_body.extend_from_slice(b"Content-Disposition: form-data; name=\"file\"; filename=\"report.txt\"\r\n");
+    multipart_body.extend_from_slice(b"Content-Type: text/plain\r\n\r\n");
+    multipart_body.extend_from_slice(file_content);
+    multipart_body.extend_from_slice(format!("\r\n--{}--\r\n", boundary).as_bytes());
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/files/documents/{}", record_id))
+                .header("Content-Type", format!("multipart/form-data; boundary={}", boundary))
+                .body(Body::from(multipart_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let upload_bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    let upload_json: serde_json::Value = serde_json::from_slice(&upload_bytes).unwrap();
+    let uploaded_item = &upload_json["item"];
+    let saved_filename = uploaded_item["uploaded"][0]["filename"].as_str().unwrap().to_string();
+    assert!(saved_filename.ends_with("_report.txt"));
+
+    // 4. Download file via GET /api/files/documents/{record_id}/{saved_filename}
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/files/documents/{}/{}", record_id, saved_filename))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        res.headers().get("content-type").unwrap().to_str().unwrap(),
+        "text/plain"
+    );
+    let downloaded_bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    assert_eq!(downloaded_bytes.as_ref(), file_content);
+
+    // 5. Delete file via DELETE /api/files/documents/{record_id}/{saved_filename}
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/files/documents/{}/{}", record_id, saved_filename))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 6. Verify file is gone (404 Not Found)
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/files/documents/{}/{}", record_id, saved_filename))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // 7. Test direct multipart create: POST /api/collections/documents/records with file attached
+    let boundary2 = "------------------------directboundary456";
+    let img_content = b"\x89PNG\r\n\x1a\nFakePngData";
+    let mut direct_body = Vec::new();
+    direct_body.extend_from_slice(format!("--{}\r\n", boundary2).as_bytes());
+    direct_body.extend_from_slice(b"Content-Disposition: form-data; name=\"title\"\r\n\r\n");
+    direct_body.extend_from_slice(b"Document with Direct File\r\n");
+    direct_body.extend_from_slice(format!("--{}\r\n", boundary2).as_bytes());
+    direct_body.extend_from_slice(b"Content-Disposition: form-data; name=\"file\"; filename=\"avatar.png\"\r\n");
+    direct_body.extend_from_slice(b"Content-Type: image/png\r\n\r\n");
+    direct_body.extend_from_slice(img_content);
+    direct_body.extend_from_slice(format!("\r\n--{}--\r\n", boundary2).as_bytes());
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/collections/documents/records")
+                .header("Content-Type", format!("multipart/form-data; boundary={}", boundary2))
+                .body(Body::from(direct_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let direct_bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    let direct_json: serde_json::Value = serde_json::from_slice(&direct_bytes).unwrap();
+    let direct_item = &direct_json["item"];
+    assert_eq!(direct_item["title"], "Document with Direct File");
+    let direct_file = direct_item["file"].as_str().unwrap();
+    assert!(direct_file.ends_with("_avatar.png"));
+
+    // Download the directly created file
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/files/documents/{}/{}", direct_item["id"].as_str().unwrap(), direct_file))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let downloaded_img = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    assert_eq!(downloaded_img.as_ref(), img_content);
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
+async fn test_settings_reload_in_memory() {
+    let test_dir = std::path::PathBuf::from(format!(
+        "./target/test_settings_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let _ = std::fs::remove_dir_all(&test_dir);
+    let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
+        .await
+        .expect("init app state");
+    let app = create_router(state);
+
+    // 1. Initial settings
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/settings")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    let json_val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(json_val["item"]["meta"]["appName"].is_string());
+
+    // 2. User updates setting
+    let updated_payload = json!({
+        "meta": {
+            "appName": "Super Padi App",
+            "appUrl": "https://myapp.com",
+            "hideControls": true
+        }
+    });
+    let patch_body = serde_json::to_vec(&updated_payload).unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/settings")
+                .header("Content-Type", "application/json")
+                .body(Body::from(patch_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 3. Get settings again: must reflect updated values reloaded into memory
+    let res2 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/settings")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res2.status(), StatusCode::OK);
+    let bytes2 = axum::body::to_bytes(res2.into_body(), 1024 * 1024).await.unwrap();
+    let json_val2: serde_json::Value = serde_json::from_slice(&bytes2).unwrap();
+    assert_eq!(json_val2["item"]["meta"]["appName"], "Super Padi App");
+    assert_eq!(json_val2["item"]["meta"]["hideControls"], true);
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}

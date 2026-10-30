@@ -9,7 +9,7 @@ use serde_json::json;
 
 use crate::core::app::AppState;
 use crate::core::auth::{create_jwt, verify_password};
-use crate::core::db::{json_get_i64, json_get_str, Val};
+use crate::core::db::{get_system_settings, json_get_i64, json_get_str, save_system_settings, Val};
 
 #[derive(Deserialize)]
 pub struct AuthWithPasswordRequest {
@@ -193,57 +193,26 @@ pub async fn delete_admin(
 pub async fn get_settings(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    let row = state
-        .db
-        .fetch_optional(
-            "SELECT `value` FROM `_params` WHERE `key` = 'settings'",
-            &[],
+    let settings = get_system_settings(&state.db).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "code": 500, "message": e.to_string() })),
         )
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "code": 500, "message": e.to_string() })),
-            )
-        })?;
+    })?;
 
-    if let Some(r) = row {
-        let val_str = json_get_str(&r, "value");
-        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(&val_str) {
-            return Ok(Json(json_val));
-        }
-    }
-
-    Ok(Json(json!({
-        "meta": {
-            "appName": "Acme - padiBase",
-            "appUrl": "http://127.0.0.1:8090",
-            "hideControls": false
-        }
-    })))
+    Ok(Json(settings))
 }
 
 pub async fn update_settings(
     State(state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    let val_str = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string());
-    let sql = if state.db.is_mysql() {
-        "INSERT INTO `_params` (`key`, `value`) VALUES ('settings', ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)"
-    } else {
-        "INSERT INTO `_params` (`key`, `value`) VALUES ('settings', ?) ON CONFLICT(`key`) DO UPDATE SET `value` = excluded.`value`"
-    };
-
-    state
-        .db
-        .execute(sql, &[Val::from(&val_str)])
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "code": 500, "message": e.to_string() })),
-            )
-        })?;
+    save_system_settings(&state.db, payload.clone()).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "code": 500, "message": e.to_string() })),
+        )
+    })?;
 
     Ok(Json(payload))
 }

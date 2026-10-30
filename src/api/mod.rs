@@ -1,4 +1,5 @@
 pub mod admins;
+pub mod api_collection;
 pub mod auth_records;
 pub mod backups;
 pub mod collections;

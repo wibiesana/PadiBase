@@ -1,0 +1,649 @@
+{
+  "info": {
+    "_postman_id": "b6cf2e16-95c9-4d4d-8064-fdb3ba18e60e",
+    "name": "PadiBase API Collection (Full)",
+    "description": "Complete REST Client API Collection for PadiBase Backend-as-a-Service, matching Padi Rust standards. Compatible with Postman, Insomnia, Thunder Client, Bruno, and VS Code REST Client.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{auth_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:8090"
+    },
+    {
+      "key": "auth_token",
+      "value": ""
+    },
+    {
+      "key": "admin_token",
+      "value": ""
+    },
+    {
+      "key": "admin_email",
+      "value": "admin@example.com"
+    },
+    {
+      "key": "admin_password",
+      "value": "password_rahasia_123"
+    },
+    {
+      "key": "record_id",
+      "value": "1"
+    }
+  ],
+  "item": [
+    {
+      "name": "⚡ System & Health",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/health"
+            },
+            "description": "Verify that PadiBase server and database engine are healthy and operational."
+          }
+        },
+        {
+          "name": "API Root & Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api"
+            },
+            "description": "Discover server identity, active database driver, and available core endpoints."
+          }
+        },
+        {
+          "name": "SSE Realtime Event Stream",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "text/event-stream"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/realtime"
+            },
+            "description": "Subscribe to real-time Server-Sent Events (SSE) broadcast for create, update, and delete actions."
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔐 Admin Gateway & Settings",
+      "item": [
+        {
+          "name": "Check Has Admins",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/admins/has-admins"
+            },
+            "description": "Check if at least one Superuser exists in the system."
+          }
+        },
+        {
+          "name": "Admin Auth with Password (Login)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "    if (pm.response.code === 200) {",
+                  "        const res = pm.response.json();",
+                  "        const token = res.data?.token || res.token;",
+                  "        if (token) {",
+                  "            pm.collectionVariables.set('auth_token', token);",
+                  "            pm.collectionVariables.set('admin_token', token);",
+                  "        }",
+                  "    }",
+                  "} catch (e) {",
+                  "    console.warn('Admin auth script bypassed:', e);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"{{admin_email}}\",\n  \"password\": \"{{admin_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admins/auth-with-password"
+            },
+            "description": "Authenticate Superuser with email and password. Automatically sets the 'auth_token' collection variable."
+          }
+        },
+        {
+          "name": "List Admins",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/admins"
+            },
+            "description": "List all superuser accounts (Requires Bearer Token)."
+          }
+        },
+        {
+          "name": "Create Superuser Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"new_admin@example.com\",\n  \"password\": \"Password_Admin_123!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/admins"
+            },
+            "description": "Create a new Superuser (Requires Bearer Token or first initialization)."
+          }
+        },
+        {
+          "name": "Get System Settings",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/settings"
+            },
+            "description": "Get PadiBase system configuration & metadata (Requires Bearer Token)."
+          }
+        },
+        {
+          "name": "Update System Settings",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"meta\": {\n    \"appName\": \"PadiBase Custom App\",\n    \"appUrl\": \"http://127.0.0.1:8090\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/settings"
+            },
+            "description": "Update system settings (Requires Bearer Token)."
+          }
+        }
+      ]
+    },
+    {
+      "name": "📦 Collections Schema Management",
+      "item": [
+        {
+          "name": "List All Collections",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections"
+            },
+            "description": "List all collections and their schema definitions."
+          }
+        },
+        {
+          "name": "Sync Collections With Database Tables",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/sync"
+            },
+            "description": "Introspect database tables and automatically synchronize schema definitions."
+          }
+        },
+        {
+          "name": "Create Collection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"posts\",\n  \"type\": \"base\",\n  \"realtime\": true,\n  \"schema\": [\n    {\n      \"name\": \"title\",\n      \"type\": \"text\",\n      \"required\": true\n    },\n    {\n      \"name\": \"content\",\n      \"type\": \"text\",\n      \"required\": false\n    },\n    {\n      \"name\": \"published\",\n      \"type\": \"bool\",\n      \"required\": false\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/collections"
+            },
+            "description": "Create a new Base or Auth collection and automatically generate SQL table."
+          }
+        },
+        {
+          "name": "Get Collection Schema By Name",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/users"
+            },
+            "description": "Get detailed schema and rule definitions for a collection."
+          }
+        }
+      ]
+    },
+    {
+      "name": "💾 System Backups",
+      "item": [
+        {
+          "name": "List Backups",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/backups"
+            },
+            "description": "List available online backup snapshot zip files."
+          }
+        },
+        {
+          "name": "Create Online Backup Snapshot",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/backups"
+            },
+            "description": "Create an atomic online backup snapshot of database and files."
+          }
+        }
+      ]
+    },
+    {
+      "name": "📂 Siswa",
+      "description": "CRUD, Padi Rust endpoints, Realtime, Import, and Export for collection 'siswa'",
+      "item": [
+        {
+          "name": "List Siswa (Paginated)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/siswa/records?page=1&perPage=30&sort=-created"
+            },
+            "description": "Fetch paginated records for 'siswa' with sorting, filtering, and standard Padi Rust envelope."
+          }
+        },
+        {
+          "name": "List All Siswa (Padi Rust records/all)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/siswa/records/all?sort_by=id&order=desc"
+            },
+            "description": "Retrieve all records for 'siswa' without pagination (Padi Rust standard)."
+          }
+        },
+        {
+          "name": "List All Siswa (Direct /api/siswa/all)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/siswa/all?sort_by=id&order=desc"
+            },
+            "description": "Clean direct route matching Padi Rust standard (GET /api/siswa/all)."
+          }
+        },
+        {
+          "name": "Get Siswa By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/siswa/records/{{siswa_id}}"
+            },
+            "description": "Get a single record from 'siswa' by its 15-character unique ID."
+          }
+        },
+        {
+          "name": "Create Siswa",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "    if (pm.response.code === 201 || pm.response.code === 200) {",
+                  "        const res = pm.response.json();",
+                  "        const item = res.data?.item || res.item || res.data || res;",
+                  "        const id = item?.id || res.id;",
+                  "        if (id) {",
+                  "            pm.collectionVariables.set('siswa_id', id);",
+                  "            pm.collectionVariables.set('record_id', id);",
+                  "        }",
+                  "    }",
+                  "} catch (e) {",
+                  "    console.warn('Script bypassed:', e);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nama\": \"Sample Nama\",\n  \"alamat\": \"Jl. Sudirman No. 123, Jakarta\",\n  \"tanggal_lahir\": \"2026-01-01\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/collections/siswa/records"
+            },
+            "description": "Insert a new record into 'siswa'. Automatically saves the created ID into variable '{siswa_id}'."
+          }
+        },
+        {
+          "name": "Update Siswa",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nama\": \"Sample Nama\",\n  \"alamat\": \"Jl. Sudirman No. 123, Jakarta\",\n  \"tanggal_lahir\": \"2026-01-01\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/collections/siswa/records/{{siswa_id}}"
+            },
+            "description": "Partially update an existing record in 'siswa'."
+          }
+        },
+        {
+          "name": "Delete Siswa",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/siswa/records/{{siswa_id}}"
+            },
+            "description": "Delete an existing record in 'siswa' by ID."
+          }
+        },
+        {
+          "name": "Export Records JSON (Siswa)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/siswa/export"
+            },
+            "description": "Export all records from collection 'siswa' as raw JSON."
+          }
+        },
+        {
+          "name": "Import Records JSON (Siswa)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n  \"nama\": \"Sample Nama\",\n  \"alamat\": \"Jl. Sudirman No. 123, Jakarta\",\n  \"tanggal_lahir\": \"2026-01-01\"\n}\n]"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/collections/siswa/import"
+            },
+            "description": "Bulk import an array of record objects into 'siswa'."
+          }
+        }
+      ]
+    },
+    {
+      "name": "📂 Users",
+      "description": "CRUD, Padi Rust endpoints, Realtime, Import, and Export for collection 'users'",
+      "item": [
+        {
+          "name": "🔐 Auth With Password (Users)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "    if (pm.response.code === 200) {",
+                  "        const res = pm.response.json();",
+                  "        const token = res.data?.token || res.token;",
+                  "        const item = res.data?.record || res.record || res.data?.item || res.item;",
+                  "        if (token) pm.collectionVariables.set('auth_token', token);",
+                  "        const id = item?.id;",
+                  "        if (id) {",
+                  "            pm.collectionVariables.set('user_id', id);",
+                  "            pm.collectionVariables.set('user_id', id);",
+                  "        }",
+                  "    }",
+                  "} catch (e) {",
+                  "    console.warn('Auth script bypassed:', e);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identity\": \"user@example.com\",\n  \"password\": \"Password123!@#\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/collections/users/auth-with-password"
+            },
+            "description": "Authenticate an auth record in collection 'users' with identity (email or username) and password. Automatically stores auth_token and ID variables."
+          }
+        },
+        {
+          "name": "List Users (Paginated)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/users/records?page=1&perPage=30&sort=-created"
+            },
+            "description": "Fetch paginated records for 'users' with sorting, filtering, and standard Padi Rust envelope."
+          }
+        },
+        {
+          "name": "List All Users (Padi Rust records/all)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/users/records/all?sort_by=id&order=desc"
+            },
+            "description": "Retrieve all records for 'users' without pagination (Padi Rust standard)."
+          }
+        },
+        {
+          "name": "List All Users (Direct /api/users/all)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/all?sort_by=id&order=desc"
+            },
+            "description": "Clean direct route matching Padi Rust standard (GET /api/users/all)."
+          }
+        },
+        {
+          "name": "Get Users By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/users/records/{{user_id}}"
+            },
+            "description": "Get a single record from 'users' by its 15-character unique ID."
+          }
+        },
+        {
+          "name": "Create Users",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "try {",
+                  "    if (pm.response.code === 201 || pm.response.code === 200) {",
+                  "        const res = pm.response.json();",
+                  "        const item = res.data?.item || res.item || res.data || res;",
+                  "        const id = item?.id || res.id;",
+                  "        if (id) {",
+                  "            pm.collectionVariables.set('user_id', id);",
+                  "            pm.collectionVariables.set('record_id', id);",
+                  "        }",
+                  "    }",
+                  "} catch (e) {",
+                  "    console.warn('Script bypassed:', e);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"user123\",\n  \"email\": \"sample@example.com\",\n  \"password\": \"Password123!@#\",\n  \"passwordConfirm\": \"Password123!@#\",\n  \"name\": \"Sample Name\",\n  \"avatar\": \"sample_attachment.jpg\",\n  \"emailVisibility\": 1,\n  \"verified\": 1,\n  \"passwordHash\": \"Secret123!@#\",\n  \"tokenKey\": \"Sample TokenKey\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/collections/users/records"
+            },
+            "description": "Insert a new record into 'users'. Automatically saves the created ID into variable '{user_id}'."
+          }
+        },
+        {
+          "name": "Update Users",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"user123_updated\",\n  \"name\": \"Sample Name\",\n  \"avatar\": \"sample_attachment.jpg\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/collections/users/records/{{user_id}}"
+            },
+            "description": "Partially update an existing record in 'users'."
+          }
+        },
+        {
+          "name": "Delete Users",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/users/records/{{user_id}}"
+            },
+            "description": "Delete an existing record in 'users' by ID."
+          }
+        },
+        {
+          "name": "Export Records JSON (Users)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/collections/users/export"
+            },
+            "description": "Export all records from collection 'users' as raw JSON."
+          }
+        },
+        {
+          "name": "Import Records JSON (Users)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n  \"username\": \"user123\",\n  \"email\": \"sample@example.com\",\n  \"password\": \"Password123!@#\",\n  \"passwordConfirm\": \"Password123!@#\",\n  \"name\": \"Sample Name\",\n  \"avatar\": \"sample_attachment.jpg\",\n  \"emailVisibility\": 1,\n  \"verified\": 1,\n  \"passwordHash\": \"Secret123!@#\",\n  \"tokenKey\": \"Sample TokenKey\"\n}\n]"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/collections/users/import"
+            },
+            "description": "Bulk import an array of record objects into 'users'."
+          }
+        }
+      ]
+    }
+  ]
+}

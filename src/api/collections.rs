@@ -230,3 +230,23 @@ pub async fn import_collections(
     }
     Ok(StatusCode::NO_CONTENT)
 }
+
+pub async fn sync(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    let synced = crate::core::db::sync_existing_tables(&state.db)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": format!("Failed to introspect tables: {}", e) })),
+            )
+        })?;
+
+    Ok(Json(json!({
+        "success": true,
+        "message": format!("Successfully synchronized {} table(s)", synced.len()),
+        "synced": synced,
+        "count": synced.len()
+    })))
+}

@@ -62,6 +62,10 @@ pub struct Collection {
     #[serde(default = "default_realtime")]
     pub realtime: bool,
 
+    /// Whether auto load relations is enabled for this collection by default (default: false)
+    #[serde(rename = "autoLoadRelations", alias = "auto_load_relations", default)]
+    pub auto_load_relations: bool,
+
     // API Rules (PocketBase rules)
     #[serde(rename = "listRule", default)]
     pub list_rule: Option<String>,
@@ -90,11 +94,12 @@ impl Collection {
             collection_type,
             schema: Vec::new(),
             realtime: true,
+            auto_load_relations: false,
             list_rule: None,
             view_rule: None,
-            create_rule: None,
-            update_rule: None,
-            delete_rule: None,
+            create_rule: Some("@request.auth.id != \"\"".to_string()),
+            update_rule: Some("@request.auth.id != \"\"".to_string()),
+            delete_rule: Some("@request.auth.id != \"\"".to_string()),
             created: now.clone(),
             updated: now,
         }

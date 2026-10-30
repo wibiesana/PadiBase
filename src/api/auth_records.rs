@@ -48,7 +48,7 @@ pub async fn auth_with_password(
 
     // Query record dari tabel auth (bisa login dengan email atau username)
     let sql = format!(
-        "SELECT `id`, `email`, `passwordHash`, `password` FROM `{}` WHERE `email` = ? OR `username` = ? LIMIT 1;",
+        "SELECT * FROM `{}` WHERE `email` = ? OR `username` = ? LIMIT 1;",
         col.name
     );
     let row = state
@@ -73,6 +73,12 @@ pub async fn auth_with_password(
 
     let id = json_get_str(&row, "id");
     let email = json_get_str(&row, "email");
+    let raw_role = json_get_str(&row, "role");
+    let role = if !raw_role.trim().is_empty() {
+        raw_role.trim().to_string()
+    } else {
+        "user".to_string()
+    };
     let password_hash = {
         let h = json_get_str(&row, "passwordHash");
         if !h.is_empty() {
@@ -94,7 +100,7 @@ pub async fn auth_with_password(
     let update_login_sql = format!("UPDATE `{}` SET `last_login_at` = ? WHERE `id` = ?;", col.name);
     let _ = state.db.execute(&update_login_sql, &[Val::from(&now_iso), Val::from(&id)]).await;
 
-    let token = create_jwt(&id, &email, "user", Some(col.id.clone()), 14).map_err(|e| {
+    let token = create_jwt(&id, &email, &role, Some(col.id.clone()), 14).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "code": 500, "message": e.to_string() })),

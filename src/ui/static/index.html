@@ -121,26 +121,31 @@
   <div id="dashboardApp" class="hidden flex-1 flex flex-col overflow-hidden">
 
     <!-- 1. TOP COMMAND BAR (Distinctive PadiBase Header — No Left Icon Rail) -->
-    <header class="h-16 padi-gradient text-white px-6 flex items-center justify-between shadow-lg z-30 shrink-0 border-b border-emerald-500/20">
+    <header class="h-16 padi-gradient text-white px-3 sm:px-6 flex items-center justify-between shadow-lg z-30 shrink-0 border-b border-emerald-500/20">
       <!-- Brand + Active DB Driver Badge -->
-      <div class="flex items-center space-x-4">
-        <a href="#/" onclick="switchMainView('collections'); return false;" class="flex items-center space-x-3 group">
-          <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-emerald-500 text-slate-950 flex items-center justify-center text-xl shadow-md group-hover:scale-105 transition">
+      <div class="flex items-center space-x-2 sm:space-x-4">
+        <!-- Mobile Sidebar Toggle -->
+        <button id="mobileSidebarToggle" onclick="toggleMobileSidebar()" class="lg:hidden p-2 -ml-1 sm:ml-0 rounded-xl text-emerald-100 hover:text-white hover:bg-white/10 transition" title="Toggle Tables Drawer">
+          <i class="fa-solid fa-bars text-base"></i>
+        </button>
+
+        <a href="#/" onclick="switchMainView('collections'); return false;" class="flex items-center space-x-2.5 sm:space-x-3 group">
+          <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-400 to-emerald-500 text-slate-950 flex items-center justify-center text-lg sm:text-xl shadow-md group-hover:scale-105 transition">
             🌾
           </div>
           <div>
-            <div class="flex items-center space-x-2">
-              <span class="font-extrabold text-base tracking-tight text-white">PadiBase</span>
-              <span class="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 font-bold">Studio</span>
+            <div class="flex items-center space-x-1.5 sm:space-x-2">
+              <span class="font-extrabold text-sm sm:text-base tracking-tight text-white">PadiBase</span>
+              <span class="text-[9px] sm:text-[10px] font-mono uppercase px-1.5 sm:px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/30 font-bold">Studio</span>
             </div>
-            <div class="text-[10px] text-emerald-200/70 font-mono">Multi-DB Rust BaaS</div>
+            <div class="text-[9px] sm:text-[10px] text-emerald-200/70 font-mono hidden sm:block">Multi-DB Rust BaaS</div>
           </div>
         </a>
 
-        <div class="h-6 w-px bg-white/15 mx-1"></div>
+        <div class="h-6 w-px bg-white/15 mx-0.5 sm:mx-1 hidden sm:block"></div>
 
         <!-- Live Database Driver Pill -->
-        <div class="hidden sm:flex items-center space-x-2 bg-white/10 border border-white/15 px-3 py-1.5 rounded-xl text-xs font-mono">
+        <div class="hidden md:flex items-center space-x-2 bg-white/10 border border-white/15 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-mono">
           <i class="fa-solid fa-server text-amber-300 text-[11px]"></i>
           <span class="text-emerald-100/70 text-[11px]">DB:</span>
           <span id="headerDbBadge" class="font-bold text-white uppercase">SQLITE</span>
@@ -148,39 +153,39 @@
       </div>
 
       <!-- Center Horizontal Navigation Pills -->
-      <nav class="flex items-center space-x-1.5 bg-slate-950/40 p-1.5 rounded-2xl border border-white/10">
-        <button id="railCollectionsBtn" onclick="switchMainView('collections')" class="px-4 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-emerald-500 text-slate-950 shadow-sm">
-          <i class="fa-solid fa-layer-group"></i>
-          <span>Data Studio</span>
+      <nav class="flex items-center space-x-1 sm:space-x-1.5 bg-slate-950/40 p-1 sm:p-1.5 rounded-2xl border border-white/10">
+        <button id="railCollectionsBtn" onclick="switchMainView('collections')" class="px-2.5 sm:px-4 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 sm:space-x-2 bg-emerald-500 text-slate-950 shadow-sm" title="Data Studio">
+          <i class="fa-solid fa-layer-group text-xs"></i>
+          <span class="hidden sm:inline">Data Studio</span>
         </button>
-        <button id="railLogsBtn" onclick="switchMainView('logs')" class="px-4 py-1.5 rounded-xl text-xs font-semibold transition flex items-center space-x-2 text-emerald-100/80 hover:text-white hover:bg-white/10 relative">
-          <i class="fa-solid fa-wave-square"></i>
-          <span>Realtime Pulse</span>
-          <span id="sseStatusDot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+        <button id="railLogsBtn" onclick="switchMainView('logs')" class="px-2.5 sm:px-4 py-1.5 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 sm:space-x-2 text-emerald-100/80 hover:text-white hover:bg-white/10 relative" title="Realtime Pulse">
+          <i class="fa-solid fa-wave-square text-xs"></i>
+          <span class="hidden sm:inline">Realtime Pulse</span>
+          <span id="sseStatusDot" class="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-400 animate-pulse"></span>
         </button>
-        <button id="railSettingsBtn" onclick="switchMainView('settings')" class="px-4 py-1.5 rounded-xl text-xs font-semibold transition flex items-center space-x-2 text-emerald-100/80 hover:text-white hover:bg-white/10">
-          <i class="fa-solid fa-sliders"></i>
-          <span>System &amp; Config</span>
+        <button id="railSettingsBtn" onclick="switchMainView('settings')" class="px-2.5 sm:px-4 py-1.5 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 sm:space-x-2 text-emerald-100/80 hover:text-white hover:bg-white/10" title="System & Config">
+          <i class="fa-solid fa-sliders text-xs"></i>
+          <span class="hidden sm:inline">System &amp; Config</span>
         </button>
       </nav>
 
       <!-- Right Quick Actions & Admin Profile -->
-      <div class="flex items-center space-x-3">
-        <button onclick="openApiPreviewDrawer()" class="hidden md:flex items-center space-x-2 px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-semibold text-amber-200 transition">
+      <div class="flex items-center space-x-2 sm:space-x-3">
+        <button onclick="openApiPreviewDrawer()" class="hidden lg:flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-semibold text-amber-200 transition">
           <i class="fa-solid fa-terminal text-[11px]"></i>
           <span>API Explorer</span>
         </button>
 
         <div class="relative group">
-          <button class="flex items-center space-x-2.5 bg-white/10 hover:bg-white/15 border border-white/15 pl-2 pr-3 py-1.5 rounded-xl transition">
+          <button class="flex items-center space-x-2 sm:space-x-2.5 bg-white/10 hover:bg-white/15 border border-white/15 pl-1.5 sm:pl-2 pr-2.5 sm:pr-3 py-1.5 rounded-xl transition">
             <span id="adminAvatarBtn" class="w-7 h-7 rounded-lg bg-amber-400 text-slate-950 font-extrabold text-xs flex items-center justify-center uppercase">
               AD
             </span>
             <div class="text-left hidden sm:block">
               <div class="text-[10px] text-emerald-200/70 leading-none">Superuser</div>
-              <div id="userEmail" class="text-xs font-mono font-semibold text-white truncate max-w-[130px] mt-0.5">admin@local</div>
+              <div id="userEmail" class="text-xs font-mono font-semibold text-white truncate max-w-[110px] md:max-w-[130px] mt-0.5">admin@local</div>
             </div>
-            <i class="fa-solid fa-chevron-down text-[10px] text-emerald-200/70"></i>
+            <i class="fa-solid fa-chevron-down text-[9px] sm:text-[10px] text-emerald-200/70"></i>
           </button>
 
           <!-- Dropdown Menu -->
@@ -205,20 +210,33 @@
     </header>
 
     <!-- ================= VIEW 1: DATA STUDIO WORKSPACE ================= -->
-    <div id="collectionsView" class="flex-1 flex overflow-hidden p-4 gap-4">
+    <div id="collectionsView" class="flex-1 flex overflow-hidden p-2 sm:p-4 gap-2 sm:gap-4 relative">
 
-      <!-- LEFT SCHEMA EXPLORER CARD -->
-      <aside class="w-64 bg-white border border-slate-200/90 rounded-2xl shadow-sm flex flex-col overflow-hidden shrink-0">
-        <div class="p-4 border-b border-slate-100 bg-gradient-to-b from-emerald-50/50 to-transparent">
+      <!-- Mobile Backdrop for Sidebar -->
+      <div id="sidebarBackdrop" onclick="toggleMobileSidebar(false)" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-40 lg:hidden transition-opacity"></div>
+
+      <!-- LEFT SCHEMA EXPLORER SIDEBAR -->
+      <aside id="schemaSidebar" class="fixed inset-y-0 left-0 z-50 w-72 max-w-[85vw] bg-white border-r border-slate-200 shadow-2xl transition-transform duration-300 ease-in-out -translate-x-full lg:translate-x-0 lg:static lg:w-64 lg:border lg:rounded-2xl lg:shadow-sm lg:z-auto flex flex-col overflow-hidden shrink-0">
+        <div class="p-3.5 sm:p-4 border-b border-slate-100 bg-gradient-to-b from-emerald-50/50 to-transparent">
           <div class="flex items-center justify-between mb-3">
             <div>
               <h3 class="text-xs font-extrabold uppercase tracking-wider text-slate-800">Schemas &amp; Tables</h3>
               <p class="text-[11px] text-slate-400">Select or build a collection</p>
             </div>
-            <button onclick="openCollectionDrawer(false)" class="px-2.5 py-1.5 rounded-xl padi-btn-primary text-white text-xs font-bold shadow-sm flex items-center space-x-1 transition" title="Create New Collection">
-              <i class="fa-solid fa-plus text-[10px]"></i>
-              <span>New</span>
-            </button>
+            <div class="flex items-center space-x-1 sm:space-x-1.5">
+              <button onclick="syncDatabaseTables()" class="px-2 py-1.5 rounded-xl border border-slate-200 hover:border-emerald-300 bg-white hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 text-xs font-bold shadow-2xs flex items-center space-x-1 transition" title="Introspect &amp; Sync DB Tables">
+                <i id="syncIcon" class="fa-solid fa-arrows-rotate text-[11px]"></i>
+                <span class="hidden sm:inline">Sync</span>
+              </button>
+              <button onclick="openCollectionDrawer(false)" class="px-2.5 py-1.5 rounded-xl padi-btn-primary text-white text-xs font-bold shadow-sm flex items-center space-x-1 transition" title="Create New Collection">
+                <i class="fa-solid fa-plus text-[10px]"></i>
+                <span>New</span>
+              </button>
+              <!-- Close button for mobile -->
+              <button onclick="toggleMobileSidebar(false)" class="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition" title="Close Tables Sidebar">
+                <i class="fa-solid fa-xmark text-sm"></i>
+              </button>
+            </div>
           </div>
           <div class="relative">
             <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs absolute left-3 top-2.5"></i>
@@ -237,75 +255,95 @@
       </aside>
 
       <!-- MAIN DATA STUDIO CANVAS CARD -->
-      <main class="flex-1 flex flex-col overflow-hidden bg-white border border-slate-200/90 rounded-2xl shadow-sm">
+      <main class="flex-1 flex flex-col overflow-hidden bg-white border border-slate-200/90 rounded-2xl shadow-sm min-w-0">
         
         <!-- Collection Studio Header Banner -->
-        <div class="px-6 py-4 border-b border-slate-200/80 bg-gradient-to-r from-emerald-50/40 via-white to-teal-50/30 flex flex-wrap items-center justify-between gap-3">
-          <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center text-base shadow-2xs">
+        <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-slate-200/80 bg-gradient-to-r from-emerald-50/40 via-white to-teal-50/30 flex flex-wrap items-center justify-between gap-3">
+          <div class="flex items-center space-x-2.5 sm:space-x-3 min-w-0">
+            <!-- Mobile Sidebar Opener in Table Canvas -->
+            <button onclick="toggleMobileSidebar(true)" class="lg:hidden w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 hover:bg-emerald-200 border border-emerald-300 flex items-center justify-center transition shadow-2xs shrink-0" title="Open Tables Sidebar">
+              <i class="fa-solid fa-bars text-xs"></i>
+            </button>
+            <div class="hidden sm:flex w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 border border-emerald-200 items-center justify-center text-base shadow-2xs shrink-0">
               <i class="fa-solid fa-table-cells-large"></i>
             </div>
-            <div>
-              <div class="flex items-center space-x-2">
-                <h2 id="currentCollectionTitle" class="text-lg font-extrabold text-slate-900 tracking-tight font-mono">users</h2>
-                <span id="collectionTypeBadge" class="text-[10px] font-mono uppercase px-2.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 font-bold">auth</span>
-                <span id="collectionRealtimeBadge" class="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold inline-flex items-center" title="Per-Collection Realtime SSE Rule">
-                  <i class="fa-solid fa-bolt mr-1 text-[9px]"></i> realtime: on
+            <div class="min-w-0">
+              <div class="flex items-center space-x-2 flex-wrap gap-y-1">
+                <h2 id="currentCollectionTitle" class="text-base sm:text-lg font-extrabold text-slate-900 tracking-tight font-mono truncate">users</h2>
+                <span id="collectionTypeBadge" class="text-[10px] font-mono uppercase px-2 sm:px-2.5 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200 font-bold shrink-0">auth</span>
+                <span id="collectionRealtimeBadge" class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold inline-flex items-center shrink-0" title="Per-Collection Realtime SSE Rule">
+                  <i class="fa-solid fa-bolt mr-1 text-[9px]"></i> <span class="hidden sm:inline">realtime:</span> on
+                </span>
+                <span id="collectionRelationsBadge" class="text-[10px] font-mono px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 font-bold inline-flex items-center shrink-0" title="Auto Load Relations (Eager Loading)">
+                  <i class="fa-solid fa-link-slash mr-1 text-[9px]"></i> <span class="hidden sm:inline">relations:</span> off
                 </span>
               </div>
-              <div id="collectionSchemaPills" class="flex items-center flex-wrap gap-1.5 mt-1 text-[11px] text-slate-400">
+              <div id="collectionSchemaPills" class="flex items-center flex-wrap gap-1.5 mt-1 text-[11px] text-slate-400 truncate">
                 <span>Active table ready for queries</span>
               </div>
             </div>
           </div>
 
-          <div class="flex items-center space-x-2">
-            <button onclick="loadRecords()" class="px-3 py-2 rounded-xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-xs font-semibold transition flex items-center" title="Reload records">
+          <div class="flex items-center flex-wrap gap-1.5 sm:gap-2">
+            <button onclick="loadRecords()" class="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl border border-slate-200 hover:border-slate-300 bg-white hover:bg-slate-50 text-slate-600 text-xs font-semibold transition flex items-center" title="Reload records">
               <i class="fa-solid fa-rotate"></i>
             </button>
-            <button onclick="openCollectionDrawer(true)" class="px-3.5 py-2 rounded-xl border border-slate-200 hover:border-emerald-300 bg-white hover:bg-emerald-50/50 text-slate-700 text-xs font-bold transition flex items-center">
-              <i class="fa-solid fa-sliders mr-1.5 text-emerald-600"></i> Schema &amp; Rules
+            <button onclick="openCollectionDrawer(true)" class="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl border border-slate-200 hover:border-emerald-300 bg-white hover:bg-emerald-50/50 text-slate-700 text-xs font-bold transition flex items-center" title="Configure Schema & Rules">
+              <i class="fa-solid fa-sliders sm:mr-1.5 text-emerald-600"></i>
+              <span class="hidden md:inline">Schema &amp; Rules</span>
             </button>
-            <button onclick="openApiPreviewDrawer()" class="px-3.5 py-2 rounded-xl border border-slate-200 hover:border-teal-300 bg-white hover:bg-teal-50/50 text-slate-700 text-xs font-bold transition flex items-center">
-              <i class="fa-solid fa-code mr-1.5 text-teal-600"></i> Endpoints
+            <button onclick="openApiPreviewDrawer()" class="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl border border-slate-200 hover:border-teal-300 bg-white hover:bg-teal-50/50 text-slate-700 text-xs font-bold transition flex items-center" title="API Endpoints Preview">
+              <i class="fa-solid fa-code sm:mr-1.5 text-teal-600"></i>
+              <span class="hidden md:inline">Endpoints</span>
             </button>
             <div class="relative group">
-              <button class="px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center">
-                <i class="fa-solid fa-file-code mr-1.5 text-amber-600"></i> JSON <i class="fa-solid fa-chevron-down ml-1.5 text-[9px]"></i>
+              <button class="px-2.5 sm:px-3.5 py-1.5 sm:py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center">
+                <i class="fa-solid fa-file-code sm:mr-1.5 text-amber-600"></i>
+                <span class="hidden sm:inline">JSON</span>
+                <i class="fa-solid fa-chevron-down ml-1 text-[9px]"></i>
               </button>
-              <div class="hidden group-hover:block absolute right-0 top-9 w-48 bg-white border border-slate-200 rounded-2xl shadow-xl p-1.5 z-40">
+              <div class="hidden group-hover:block absolute right-0 top-9 w-52 bg-white border border-slate-200 rounded-2xl shadow-xl p-1.5 z-40">
                 <button onclick="handleExportCollection()" class="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 rounded-xl flex items-center">
                   <i class="fa-solid fa-download w-5 text-emerald-600"></i> Export Records JSON
                 </button>
                 <button onclick="openImportModal()" class="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-emerald-50 rounded-xl flex items-center">
                   <i class="fa-solid fa-upload w-5 text-teal-600"></i> Import Records JSON
                 </button>
+                <div class="my-1 border-t border-slate-100"></div>
+                <button onclick="handleExportApiCollection(false)" class="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 rounded-xl flex items-center" title="Export Postman / REST Client API Collection for this collection">
+                  <i class="fa-solid fa-file-export w-5 text-indigo-600"></i> Export API Collection
+                </button>
+                <button onclick="handleExportApiCollection(true)" class="w-full text-left px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-indigo-50 rounded-xl flex items-center" title="Export complete system API collection (all collections)">
+                  <i class="fa-solid fa-layer-group w-5 text-amber-600"></i> Export Full Project API
+                </button>
               </div>
             </div>
-            <button onclick="openRecordDrawer(null)" class="px-4 py-2 rounded-xl padi-btn-primary text-white text-xs font-bold transition shadow-sm shadow-emerald-600/20 flex items-center">
-              <i class="fa-solid fa-plus mr-1.5"></i> Add Record
+            <button onclick="openRecordDrawer(null)" class="px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl padi-btn-primary text-white text-xs font-bold transition shadow-sm shadow-emerald-600/20 flex items-center" title="Add Record">
+              <i class="fa-solid fa-plus mr-1 sm:mr-1.5"></i>
+              <span>Add Record</span>
             </button>
           </div>
         </div>
 
         <!-- Query Filter Bar -->
-        <div class="px-6 py-3 bg-slate-50/70 border-b border-slate-200/80 flex items-center space-x-2.5">
-          <div class="flex-1 flex items-center bg-white border border-slate-200 focus-within:border-emerald-500 rounded-xl px-3.5 py-1.5 shadow-2xs transition">
-            <span class="text-[10px] font-mono uppercase bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-md mr-2.5 font-bold">WHERE</span>
-            <input type="text" id="recordFilterInput" onkeydown="if(event.key==='Enter') applyFilterSearch()" placeholder='Filter query e.g. nama ~ "alina" && alamat = "Ciranjang"' class="w-full bg-transparent text-xs font-mono text-slate-800 focus:outline-none">
+        <div class="px-4 sm:px-6 py-2.5 sm:py-3 bg-slate-50/70 border-b border-slate-200/80 flex items-center space-x-2">
+          <div class="flex-1 flex items-center bg-white border border-slate-200 focus-within:border-emerald-500 rounded-xl px-2.5 sm:px-3.5 py-1.5 shadow-2xs transition">
+            <span class="text-[9px] sm:text-[10px] font-mono uppercase bg-emerald-100 text-emerald-800 px-1.5 sm:px-2 py-0.5 rounded-md mr-1.5 sm:mr-2.5 font-bold shrink-0">WHERE</span>
+            <input type="text" id="recordFilterInput" onkeydown="if(event.key==='Enter') applyFilterSearch()" placeholder='Filter query e.g. nama ~ "alina"' class="w-full bg-transparent text-xs font-mono text-slate-800 focus:outline-none">
             <button id="clearFilterBtn" onclick="clearFilterSearch()" class="hidden text-slate-400 hover:text-slate-700 text-xs px-1.5">
               <i class="fa-solid fa-xmark"></i>
             </button>
           </div>
-          <button onclick="applyFilterSearch()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow-2xs flex items-center space-x-1.5">
+          <button onclick="applyFilterSearch()" class="px-3 sm:px-4 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl transition shadow-2xs flex items-center space-x-1 sm:space-x-1.5 shrink-0">
             <i class="fa-solid fa-filter text-[10px]"></i>
-            <span>Run Query</span>
+            <span class="hidden sm:inline">Run Query</span>
+            <span class="sm:hidden">Run</span>
           </button>
         </div>
 
         <!-- Records Data Grid -->
-        <div class="flex-1 overflow-auto">
-          <table class="w-full text-left border-collapse">
+        <div class="flex-1 overflow-auto" style="-webkit-overflow-scrolling: touch;">
+          <table class="w-full text-left border-collapse min-w-full">
             <thead class="bg-slate-50/90 border-b border-slate-200 text-[11px] font-mono text-slate-500 sticky top-0 z-10 select-none">
               <tr id="tableHeader">
                 <!-- Dynamic columns -->
@@ -318,23 +356,23 @@
         </div>
 
         <!-- Table Footer & Pagination -->
-        <div class="px-6 py-3 bg-slate-50/80 border-t border-slate-200/80 flex items-center justify-between text-xs text-slate-500 shrink-0">
+        <div class="px-4 sm:px-6 py-2.5 sm:py-3 bg-slate-50/80 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500 shrink-0">
           <div class="flex items-center space-x-3">
-            <span id="paginationInfo" class="font-medium">Showing 0 of 0 records</span>
-            <div id="bulkDeleteBar" class="hidden flex items-center space-x-2 bg-rose-50 border border-rose-200 px-3 py-1 rounded-xl">
+            <span id="paginationInfo" class="font-medium text-[11px] sm:text-xs">Showing 0 of 0 records</span>
+            <div id="bulkDeleteBar" class="hidden flex items-center space-x-2 bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-xl">
               <span id="selectedCountText" class="text-rose-700 font-bold text-[11px]">0 selected</span>
-              <button onclick="deleteSelectedRecords()" class="text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 px-2.5 py-0.5 rounded-lg transition">
-                Delete Selected
+              <button onclick="deleteSelectedRecords()" class="text-xs font-bold text-white bg-rose-600 hover:bg-rose-500 px-2 py-0.5 rounded-lg transition">
+                Delete
               </button>
             </div>
           </div>
-          <div class="flex items-center space-x-2">
-            <button id="prevPageBtn" onclick="changePage(-1)" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-emerald-50 text-slate-700 font-semibold disabled:opacity-40 transition">
-              <i class="fa-solid fa-chevron-left text-[10px] mr-1"></i> Prev
+          <div class="flex items-center space-x-1.5 sm:space-x-2">
+            <button id="prevPageBtn" onclick="changePage(-1)" class="px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-emerald-50 text-slate-700 font-semibold disabled:opacity-40 transition text-xs">
+              <i class="fa-solid fa-chevron-left text-[10px] sm:mr-1"></i> <span class="hidden sm:inline">Prev</span>
             </button>
-            <span id="currentPageBadge" class="px-3 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono font-bold">1 / 1</span>
-            <button id="nextPageBtn" onclick="changePage(1)" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-emerald-50 text-slate-700 font-semibold disabled:opacity-40 transition">
-              Next <i class="fa-solid fa-chevron-right text-[10px] ml-1"></i>
+            <span id="currentPageBadge" class="px-2.5 sm:px-3 py-1 rounded-lg bg-emerald-50 text-emerald-800 border border-emerald-200 font-mono font-bold text-xs">1 / 1</span>
+            <button id="nextPageBtn" onclick="changePage(1)" class="px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-emerald-50 text-slate-700 font-semibold disabled:opacity-40 transition text-xs">
+              <span class="hidden sm:inline">Next</span> <i class="fa-solid fa-chevron-right text-[10px] sm:ml-1"></i>
             </button>
           </div>
         </div>
@@ -342,64 +380,64 @@
     </div>
 
     <!-- ================= VIEW 2: REALTIME PULSE & STREAM MONITOR ================= -->
-    <div id="logsView" class="hidden flex-1 flex flex-col overflow-hidden p-6">
+    <div id="logsView" class="hidden flex-1 flex flex-col overflow-hidden p-2 sm:p-6">
       <div class="max-w-6xl w-full mx-auto flex-1 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-        <header class="px-6 py-5 border-b border-slate-200 flex items-center justify-between bg-gradient-to-r from-emerald-50/50 to-white">
+        <header class="px-4 sm:px-6 py-3.5 sm:py-5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-emerald-50/50 to-white">
           <div class="flex items-center space-x-3">
-            <div class="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-              <i class="fa-solid fa-bolt"></i>
+            <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+              <i class="fa-solid fa-bolt text-sm"></i>
             </div>
             <div>
-              <h2 class="text-base font-extrabold text-slate-900">PadiBase Realtime Event Bus (SSE)</h2>
-              <p class="text-xs text-slate-500 mt-0.5">Live record mutations broadcast from collections with <code class="text-emerald-700 font-semibold">realtime = true</code> via <code class="text-slate-700">/api/realtime</code></p>
+              <h2 class="text-sm sm:text-base font-extrabold text-slate-900">PadiBase Realtime Event Bus (SSE)</h2>
+              <p class="text-[11px] sm:text-xs text-slate-500 mt-0.5">Live record mutations via <code class="text-slate-700">/api/realtime</code></p>
             </div>
           </div>
-          <div class="flex items-center space-x-3">
-            <span class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-2"></span> Stream Connected
+          <div class="flex items-center space-x-2 sm:space-x-3">
+            <span class="inline-flex items-center px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full text-[11px] sm:text-xs font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-1.5"></span> Connected
             </span>
-            <button onclick="clearEventLogs()" class="px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700">
-              Clear Stream
+            <button onclick="clearEventLogs()" class="px-3 sm:px-3.5 py-1 sm:py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700">
+              Clear
             </button>
           </div>
         </header>
-        <div class="flex-1 p-6 overflow-y-auto bg-slate-950 font-mono text-xs space-y-2" id="eventLogContainer">
+        <div class="flex-1 p-3.5 sm:p-6 overflow-y-auto bg-slate-950 font-mono text-xs space-y-2" id="eventLogContainer">
           <div class="text-emerald-400/70">🌾 PadiBase SSE monitor ready — waiting for CREATE / UPDATE / DELETE events...</div>
         </div>
       </div>
     </div>
 
     <!-- ================= VIEW 3: SYSTEM & CONFIG WORKSPACE (TOP HORIZONTAL TABS) ================= -->
-    <div id="settingsView" class="hidden flex-1 flex flex-col overflow-hidden p-6">
+    <div id="settingsView" class="hidden flex-1 flex flex-col overflow-hidden p-2 sm:p-6">
       <div class="max-w-5xl w-full mx-auto flex-1 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         
         <!-- Settings Top Horizontal Navigation Bar -->
-        <div class="px-6 pt-5 pb-3 border-b border-slate-200 bg-gradient-to-r from-emerald-50/40 via-white to-teal-50/30 flex flex-wrap items-center justify-between gap-4">
+        <div class="px-4 sm:px-6 pt-4 pb-3 border-b border-slate-200 bg-gradient-to-r from-emerald-50/40 via-white to-teal-50/30 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 class="text-base font-extrabold text-slate-900">PadiBase System &amp; Environment</h2>
-            <p class="text-xs text-slate-500">Configure multi-DB engine settings, backups, schema migrations, and superusers.</p>
+            <h2 class="text-sm sm:text-base font-extrabold text-slate-900">PadiBase System &amp; Environment</h2>
+            <p class="text-[11px] sm:text-xs text-slate-500">Configure multi-DB engine settings, backups, schema migrations, and superusers.</p>
           </div>
-          <nav class="flex items-center space-x-1.5 bg-slate-100 p-1.5 rounded-xl">
-            <button id="setTab_app" onclick="switchSettingsTab('app')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-1.5 transition">
+          <nav class="flex items-center space-x-1 sm:space-x-1.5 bg-slate-100 p-1 sm:p-1.5 rounded-xl overflow-x-auto max-w-full">
+            <button id="setTab_app" onclick="switchSettingsTab('app')" class="px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-1.5 transition shrink-0">
               <i class="fa-solid fa-microchip"></i> <span>Engine &amp; App</span>
             </button>
-            <button id="setTab_backups" onclick="switchSettingsTab('backups')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition">
+            <button id="setTab_backups" onclick="switchSettingsTab('backups')" class="px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition shrink-0">
               <i class="fa-solid fa-box-archive"></i> <span>Snapshots</span>
             </button>
-            <button id="setTab_export" onclick="switchSettingsTab('export')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition">
+            <button id="setTab_export" onclick="switchSettingsTab('export')" class="px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition shrink-0">
               <i class="fa-solid fa-file-export"></i> <span>Export Schema</span>
             </button>
-            <button id="setTab_import" onclick="switchSettingsTab('import')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition">
+            <button id="setTab_import" onclick="switchSettingsTab('import')" class="px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition shrink-0">
               <i class="fa-solid fa-file-import"></i> <span>Import Schema</span>
             </button>
-            <button id="setTab_admins" onclick="switchSettingsTab('admins')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition">
+            <button id="setTab_admins" onclick="switchSettingsTab('admins')" class="px-2.5 sm:px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-white flex items-center space-x-1.5 transition shrink-0">
               <i class="fa-solid fa-user-shield"></i> <span>Superusers</span>
             </button>
           </nav>
         </div>
 
         <!-- Settings Content Body -->
-        <main class="flex-1 overflow-y-auto p-8 bg-slate-50/40">
+        <main class="flex-1 overflow-y-auto p-4 sm:p-8 bg-slate-50/40">
           
           <!-- SUB-TAB 1: APPLICATION & ENGINE -->
           <div id="settingsPane_app" class="max-w-3xl mx-auto space-y-6">
@@ -556,18 +594,18 @@
   </div>
 
   <!-- ================= CENTERED STUDIO MODAL 1: RECORD EDITOR ================= -->
-  <div id="recordDrawer" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
-    <div class="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
+  <div id="recordDrawer" class="hidden fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 modal-backdrop">
+    <div class="w-full max-w-2xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden">
       <!-- Modal Header -->
-      <div class="px-6 py-4 padi-gradient text-white flex items-center justify-between">
-        <div class="flex items-center space-x-2.5">
-          <span class="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-amber-300">
+      <div class="px-4 sm:px-6 py-3.5 sm:py-4 padi-gradient text-white flex items-center justify-between">
+        <div class="flex items-center space-x-2.5 min-w-0">
+          <span class="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-amber-300 shrink-0">
             <i class="fa-solid fa-pen-to-square"></i>
           </span>
-          <h3 id="recordDrawerTitle" class="font-extrabold text-base text-white">New <span class="font-mono text-amber-300">users</span> record</h3>
+          <h3 id="recordDrawerTitle" class="font-extrabold text-sm sm:text-base text-white truncate">New <span class="font-mono text-amber-300">users</span> record</h3>
         </div>
-        <div class="flex items-center space-x-2">
-          <button onclick="toggleRecordJsonMode()" id="toggleJsonBtn" class="text-[11px] font-mono px-3 py-1 rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 text-white font-semibold transition">
+        <div class="flex items-center space-x-1.5 sm:space-x-2 shrink-0">
+          <button onclick="toggleRecordJsonMode()" id="toggleJsonBtn" class="text-[10px] sm:text-[11px] font-mono px-2.5 sm:px-3 py-1 rounded-xl border border-white/20 bg-white/10 hover:bg-white/20 text-white font-semibold transition">
             { } Raw JSON
           </button>
           <button onclick="closeDrawer('recordDrawer')" class="w-8 h-8 rounded-xl hover:bg-white/15 text-white/80 flex items-center justify-center text-lg">&times;</button>
@@ -575,7 +613,7 @@
       </div>
 
       <!-- Modal Body -->
-      <div class="flex-1 overflow-y-auto p-6 space-y-5">
+      <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-5">
         <div id="recordDrawerAlert" class="hidden p-3.5 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-600 font-semibold"></div>
 
         <!-- Visual Form Mode -->
@@ -589,15 +627,15 @@
       </div>
 
       <!-- Modal Footer -->
-      <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+      <div class="px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
         <div>
-          <button id="drawerDeleteRecordBtn" onclick="deleteRecordFromDrawer()" class="hidden px-3.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition">
-            <i class="fa-solid fa-trash mr-1"></i> Delete Record
+          <button id="drawerDeleteRecordBtn" onclick="deleteRecordFromDrawer()" class="hidden px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition">
+            <i class="fa-solid fa-trash mr-1"></i> <span class="hidden sm:inline">Delete Record</span><span class="sm:hidden">Delete</span>
           </button>
         </div>
-        <div class="flex items-center space-x-2.5">
-          <button onclick="closeDrawer('recordDrawer')" class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900">Cancel</button>
-          <button onclick="saveRecordDrawer()" id="saveRecordBtn" class="px-6 py-2.5 padi-btn-primary text-white text-xs font-bold rounded-xl shadow-sm transition">
+        <div class="flex items-center space-x-2 sm:space-x-2.5">
+          <button onclick="closeDrawer('recordDrawer')" class="px-3 sm:px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900">Cancel</button>
+          <button onclick="saveRecordDrawer()" id="saveRecordBtn" class="px-4 sm:px-6 py-2 sm:py-2.5 padi-btn-primary text-white text-xs font-bold rounded-xl shadow-sm transition">
             Save Record
           </button>
         </div>
@@ -606,29 +644,29 @@
   </div>
 
   <!-- ================= CENTERED STUDIO MODAL 2: COLLECTION & SCHEMA ARCHITECT ================= -->
-  <div id="collectionDrawer" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
-    <div class="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
+  <div id="collectionDrawer" class="hidden fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 modal-backdrop">
+    <div class="w-full max-w-3xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden">
       <!-- Modal Header -->
-      <div class="px-6 py-4 padi-gradient text-white flex items-center justify-between">
-        <div class="flex items-center space-x-2.5">
-          <span class="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-emerald-300">
+      <div class="px-4 sm:px-6 py-3.5 sm:py-4 padi-gradient text-white flex items-center justify-between">
+        <div class="flex items-center space-x-2.5 min-w-0">
+          <span class="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-emerald-300 shrink-0">
             <i class="fa-solid fa-cubes"></i>
           </span>
-          <h3 id="colDrawerTitle" class="font-extrabold text-base">Schema Architect</h3>
+          <h3 id="colDrawerTitle" class="font-extrabold text-sm sm:text-base truncate">Schema Architect</h3>
         </div>
         <button onclick="closeDrawer('collectionDrawer')" class="w-8 h-8 rounded-xl hover:bg-white/15 text-white/80 flex items-center justify-center text-lg">&times;</button>
       </div>
 
       <!-- Modal Body -->
-      <div class="flex-1 overflow-y-auto p-6 space-y-5">
+      <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-5">
         <div id="colDrawerAlert" class="hidden p-3.5 rounded-xl text-xs bg-rose-50 border border-rose-200 text-rose-600 font-semibold"></div>
 
         <!-- Collection Name, Type & Per-Collection Realtime Toggle -->
-        <div class="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-200/70 space-y-3.5">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-emerald-50/50 p-3.5 sm:p-4 rounded-2xl border border-emerald-200/70 space-y-3.5">
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
             <div class="md:col-span-2">
               <label class="block text-xs font-bold text-slate-700 mb-1">Collection / Table Name <span class="text-rose-500">*</span></label>
-              <input type="text" id="colNameInput" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600" placeholder="e.g. siswa, products, orders">
+              <input type="text" id="colNameInput" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600" placeholder="e.g. articles, products, orders">
             </div>
             <div>
               <label class="block text-xs font-bold text-slate-700 mb-1">Collection Archetype</label>
@@ -638,7 +676,7 @@
               </select>
             </div>
           </div>
-          <div class="pt-3 border-t border-emerald-200/60 flex items-center justify-between">
+          <div class="pt-3 border-t border-emerald-200/60 flex flex-wrap items-center justify-between gap-2">
             <div>
               <div class="text-xs font-extrabold text-slate-800 flex items-center">
                 <i class="fa-solid fa-bolt text-emerald-600 mr-1.5"></i> Per-Collection Realtime SSE Broadcast
@@ -650,21 +688,33 @@
               <span class="text-xs font-bold text-emerald-800">Realtime Active</span>
             </label>
           </div>
+          <div class="pt-3 border-t border-emerald-200/60 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div class="text-xs font-extrabold text-slate-800 flex items-center">
+                <i class="fa-solid fa-link text-emerald-600 mr-1.5"></i> Auto Load Relations (Eager Loading)
+              </div>
+              <div class="text-[11px] text-slate-500">Automatically load foreign key relational records as nested objects (e.g. <code class="text-slate-700">author: { id, name }</code>). Default: disabled.</div>
+            </div>
+            <label class="inline-flex items-center space-x-2 cursor-pointer bg-white px-3.5 py-1.5 rounded-xl border border-emerald-300 shadow-2xs">
+              <input type="checkbox" id="colAutoLoadRelationsInput" class="rounded border-slate-300 w-4 h-4 text-emerald-600">
+              <span class="text-xs font-bold text-emerald-800">Auto Load Active</span>
+            </label>
+          </div>
         </div>
 
         <!-- Sub-tabs: Fields vs API Rules -->
-        <div class="border-b border-slate-200 flex space-x-6 text-xs font-bold">
-          <button id="colTab_fields" onclick="switchColDrawerTab('fields')" class="pb-2.5 border-b-2 border-emerald-600 text-emerald-700">
+        <div class="border-b border-slate-200 flex space-x-6 text-xs font-bold overflow-x-auto">
+          <button id="colTab_fields" onclick="switchColDrawerTab('fields')" class="pb-2.5 border-b-2 border-emerald-600 text-emerald-700 shrink-0">
             <i class="fa-solid fa-table-columns mr-1"></i> Schema Columns
           </button>
-          <button id="colTab_rules" onclick="switchColDrawerTab('rules')" class="pb-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-700">
+          <button id="colTab_rules" onclick="switchColDrawerTab('rules')" class="pb-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-700 shrink-0">
             <i class="fa-solid fa-shield-halved mr-1"></i> Access Control Rules
           </button>
         </div>
 
         <!-- TAB 1: FIELDS -->
         <div id="colPane_fields" class="space-y-4">
-          <div class="text-[11px] font-mono text-slate-500 bg-slate-100 px-3.5 py-2 rounded-xl flex items-center justify-between">
+          <div class="text-[11px] font-mono text-slate-500 bg-slate-100 px-3.5 py-2 rounded-xl flex flex-wrap items-center justify-between gap-1">
             <span>Auto columns: <strong class="text-slate-700">id</strong>, <strong class="text-slate-700">created</strong>, <strong class="text-slate-700">updated</strong></span>
             <span id="colAuthSystemBadge" class="hidden text-emerald-700 font-bold">+ username, email, password, verified</span>
           </div>
@@ -675,7 +725,7 @@
           <!-- Add New Field Picker -->
           <div class="pt-2">
             <div class="text-xs font-bold text-slate-600 mb-2">Append column by data type:</div>
-            <div class="grid grid-cols-5 gap-2 text-xs">
+            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 text-xs">
               <button type="button" onclick="addSchemaField('text')" class="py-2 px-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 bg-white hover:bg-emerald-50/50 font-semibold text-slate-700 flex items-center justify-center space-x-1.5 transition">
                 <i class="fa-solid fa-font text-emerald-600"></i> <span>Text</span>
               </button>
@@ -711,43 +761,88 @@
         </div>
 
         <!-- TAB 2: API RULES -->
-        <div id="colPane_rules" class="hidden space-y-3">
-          <p class="text-xs text-slate-500">Leave blank for public access, or define a filter expression (e.g. <code class="bg-emerald-50 text-emerald-800 px-1.5 py-0.5 rounded">@request.auth.id != ""</code>).</p>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div id="colPane_rules" class="hidden space-y-4">
+          <div class="bg-amber-50/80 border border-amber-200/80 p-3 rounded-2xl text-xs text-amber-900 leading-relaxed">
+            <span class="font-bold">🔒 Default Security Rules:</span> Create, Update, and Delete require an authenticated logged-in user by default (<code class="bg-white/80 px-1 py-0.5 rounded border border-amber-200 text-amber-950 font-mono">@request.auth.id != ""</code>). You can also restrict by role (e.g. <code class="bg-white/80 px-1 py-0.5 rounded border border-amber-200 text-amber-950 font-mono">@request.auth.role = 'creator'</code> or <code class="bg-white/80 px-1 py-0.5 rounded border border-amber-200 text-amber-950 font-mono">admin, creator</code>) or make it open to anyone (<code class="bg-white/80 px-1 py-0.5 rounded border border-amber-200 text-amber-950 font-mono">public</code>).
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">List / Search Rule</label>
-              <input type="text" id="ruleList" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder="Public (Anyone)">
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-bold text-slate-700">List / Search Rule</label>
+                <div class="space-x-1 text-[10px]">
+                  <button type="button" onclick="applyRulePreset('ruleList', 'public', 'set')" class="text-emerald-700 font-bold hover:underline">Public (Default)</button>
+                  <button type="button" onclick="applyRulePreset('ruleList', '@request.auth.id != \'\'', 'set')" class="text-slate-500 hover:text-emerald-700 underline">Auth</button>
+                  <button type="button" onclick="applyRulePreset('ruleList', '@request.auth.role = \'admin\'', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Admin</button>
+                  <button type="button" onclick="applyRulePreset('ruleList', '@request.auth.role = \'creator\'', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Creator</button>
+                </div>
+              </div>
+              <input type="text" id="ruleList" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder="Default: public (Anyone)">
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">View Rule</label>
-              <input type="text" id="ruleView" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder="Public (Anyone)">
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-bold text-slate-700">View Rule</label>
+                <div class="space-x-1 text-[10px]">
+                  <button type="button" onclick="applyRulePreset('ruleView', 'public', 'set')" class="text-emerald-700 font-bold hover:underline">Public (Default)</button>
+                  <button type="button" onclick="applyRulePreset('ruleView', '@request.auth.id != \'\'', 'set')" class="text-slate-500 hover:text-emerald-700 underline">Auth</button>
+                  <button type="button" onclick="applyRulePreset('ruleView', 'user_id = @request.auth.id', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Owner</button>
+                  <button type="button" onclick="applyRulePreset('ruleView', '@request.auth.role = \'admin\'', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Admin</button>
+                  <button type="button" onclick="applyRulePreset('ruleView', '@request.auth.role = \'creator\'', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Creator</button>
+                </div>
+              </div>
+              <input type="text" id="ruleView" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder="Default: public (Anyone)">
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Create Rule</label>
-              <input type="text" id="ruleCreate" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder="Public (Anyone)">
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-bold text-slate-700">Create Rule</label>
+                <div class="space-x-1 text-[10px]">
+                  <button type="button" onclick="applyRulePreset('ruleCreate', '@request.auth.id != \'\'', 'set')" class="text-emerald-700 font-bold hover:underline">Auth (Default)</button>
+                  <button type="button" onclick="applyRulePreset('ruleCreate', '@request.auth.role = \'admin\'', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Admin</button>
+                  <button type="button" onclick="applyRulePreset('ruleCreate', '@request.auth.role = \'creator\'', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Creator</button>
+                  <button type="button" onclick="applyRulePreset('ruleCreate', 'public', 'set')" class="text-slate-500 hover:text-emerald-700 underline">Public</button>
+                </div>
+              </div>
+              <input type="text" id="ruleCreate" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder='Default: @request.auth.id != "" (or "admin, creator")'>
             </div>
             <div>
-              <label class="block text-xs font-bold text-slate-700 mb-1">Update Rule</label>
-              <input type="text" id="ruleUpdate" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder='id = @request.auth.id'>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-bold text-slate-700">Update Rule</label>
+                <div class="space-x-1 text-[10px]">
+                  <button type="button" onclick="applyRulePreset('ruleUpdate', '@request.auth.id != \'\'', 'set')" class="text-emerald-700 font-bold hover:underline">Auth (Default)</button>
+                  <button type="button" onclick="applyRulePreset('ruleUpdate', 'user_id = @request.auth.id', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Owner</button>
+                  <button type="button" onclick="applyRulePreset('ruleUpdate', '@request.auth.role = \'admin\'', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Admin</button>
+                  <button type="button" onclick="applyRulePreset('ruleUpdate', '@request.auth.role = \'creator\'', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Creator</button>
+                  <button type="button" onclick="applyRulePreset('ruleUpdate', 'public', 'set')" class="text-slate-500 hover:text-emerald-700 underline">Public</button>
+                </div>
+              </div>
+              <input type="text" id="ruleUpdate" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder='Default: @request.auth.id != "" (or "user_id = @request.auth.id")'>
             </div>
             <div class="md:col-span-2">
-              <label class="block text-xs font-bold text-slate-700 mb-1">Delete Rule</label>
-              <input type="text" id="ruleDelete" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder='id = @request.auth.id'>
+              <div class="flex items-center justify-between mb-1">
+                <label class="block text-xs font-bold text-slate-700">Delete Rule</label>
+                <div class="space-x-1 text-[10px]">
+                  <button type="button" onclick="applyRulePreset('ruleDelete', '@request.auth.id != \'\'', 'set')" class="text-emerald-700 font-bold hover:underline">Auth (Default)</button>
+                  <button type="button" onclick="applyRulePreset('ruleDelete', 'user_id = @request.auth.id', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Owner</button>
+                  <button type="button" onclick="applyRulePreset('ruleDelete', '@request.auth.role = \'admin\'', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Admin</button>
+                  <button type="button" onclick="applyRulePreset('ruleDelete', '@request.auth.role = \'creator\'', 'append')" class="text-slate-500 hover:text-emerald-700 underline">Creator</button>
+                  <button type="button" onclick="applyRulePreset('ruleDelete', 'public', 'set')" class="text-slate-500 hover:text-emerald-700 underline">Public</button>
+                </div>
+              </div>
+              <input type="text" id="ruleDelete" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono" placeholder='Default: @request.auth.id != "" (or "user_id = @request.auth.id")'>
             </div>
           </div>
         </div>
       </div>
 
       <!-- Modal Footer -->
-      <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+      <div class="px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
         <div>
-          <button id="drawerDeleteColBtn" onclick="handleDeleteCurrentCollection()" class="hidden px-3.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl">
-            <i class="fa-solid fa-trash mr-1"></i> Drop Collection
+          <button id="drawerDeleteColBtn" onclick="handleDeleteCurrentCollection()" class="hidden px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl">
+            <i class="fa-solid fa-trash mr-1"></i> <span class="hidden sm:inline">Drop Collection</span><span class="sm:hidden">Drop</span>
           </button>
         </div>
-        <div class="flex items-center space-x-2.5">
-          <button onclick="closeDrawer('collectionDrawer')" class="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900">Cancel</button>
-          <button onclick="saveCollectionDrawer()" class="px-6 py-2.5 padi-btn-primary text-white text-xs font-bold rounded-xl shadow-sm">
+        <div class="flex items-center space-x-2 sm:space-x-2.5">
+          <button onclick="closeDrawer('collectionDrawer')" class="px-3.5 sm:px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-900">Cancel</button>
+          <button onclick="saveCollectionDrawer()" class="px-4 sm:px-6 py-2 sm:py-2.5 padi-btn-primary text-white text-xs font-bold rounded-xl shadow-sm">
             Apply Schema
           </button>
         </div>
@@ -756,50 +851,69 @@
   </div>
 
   <!-- ================= CENTERED STUDIO MODAL 3: PADIBASE API EXPLORER ================= -->
-  <div id="apiPreviewDrawer" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
-    <div class="w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
+  <div id="apiPreviewDrawer" class="hidden fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 modal-backdrop">
+    <div class="w-full max-w-4xl bg-white rounded-2xl sm:rounded-3xl shadow-2xl border border-slate-200 flex flex-col max-h-[92vh] sm:max-h-[90vh] overflow-hidden">
       <!-- Header -->
-      <div class="px-6 py-4 padi-gradient text-white flex items-center justify-between">
-        <div class="flex items-center space-x-2.5">
-          <span class="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-amber-300">
+      <div class="px-4 sm:px-6 py-3.5 sm:py-4 padi-gradient text-white flex items-center justify-between">
+        <div class="flex items-center space-x-2.5 min-w-0">
+          <span class="w-8 h-8 rounded-xl bg-white/10 flex items-center justify-center text-amber-300 shrink-0">
             <i class="fa-solid fa-code"></i>
           </span>
-          <div>
-            <h3 class="font-extrabold text-base"><span id="apiPreviewColName" class="font-mono text-amber-300">users</span> REST &amp; SSE Endpoints</h3>
-            <p class="text-[11px] text-emerald-100/75">Standard Padi Rust API Response Envelope</p>
+          <div class="min-w-0">
+            <h3 class="font-extrabold text-sm sm:text-base truncate"><span id="apiPreviewColName" class="font-mono text-amber-300">users</span> REST &amp; SSE Endpoints</h3>
+            <p class="text-[10px] sm:text-[11px] text-emerald-100/75 truncate">Standard Padi Rust API Response Envelope</p>
           </div>
         </div>
-        <button onclick="closeDrawer('apiPreviewDrawer')" class="w-8 h-8 rounded-xl hover:bg-white/15 text-white/80 flex items-center justify-center text-lg">&times;</button>
+        <div class="flex items-center space-x-2">
+          <button onclick="handleExportApiCollection(false)" class="px-2.5 sm:px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-xs font-bold text-amber-300 hover:text-amber-200 transition flex items-center space-x-1.5 shrink-0" title="Download REST Client Collection JSON">
+            <i class="fa-solid fa-file-arrow-down text-xs"></i>
+            <span class="hidden sm:inline">Export REST Client</span>
+            <span class="sm:hidden">Export</span>
+          </button>
+          <button onclick="closeDrawer('apiPreviewDrawer')" class="w-8 h-8 rounded-xl hover:bg-white/15 text-white/80 flex items-center justify-center text-lg">&times;</button>
+        </div>
       </div>
 
       <!-- Horizontal Endpoint Action Pills -->
-      <div class="px-6 py-3 bg-slate-100 border-b border-slate-200 flex items-center flex-wrap gap-1.5 text-xs font-bold" id="apiPreviewTabs">
-        <button data-api-tab="list" onclick="renderApiPreview('list')" class="px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white shadow-2xs transition">GET List / Search</button>
-        <button data-api-tab="view" onclick="renderApiPreview('view')" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition">GET Single</button>
-        <button data-api-tab="create" onclick="renderApiPreview('create')" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition">POST Create</button>
-        <button data-api-tab="update" onclick="renderApiPreview('update')" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition">PATCH Update</button>
-        <button data-api-tab="delete" onclick="renderApiPreview('delete')" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition">DELETE Record</button>
-        <button data-api-tab="realtime" onclick="renderApiPreview('realtime')" class="px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition">SSE Realtime</button>
-        <button id="apiTabAuth" data-api-tab="auth" onclick="renderApiPreview('auth')" class="hidden px-3.5 py-1.5 rounded-xl text-teal-700 hover:bg-teal-50 font-bold transition">POST Auth Login</button>
+      <div class="px-4 sm:px-6 py-2.5 sm:py-3 bg-slate-100 border-b border-slate-200 flex items-center flex-wrap gap-1.5 text-xs font-bold overflow-x-auto" id="apiPreviewTabs">
+        <button data-api-tab="list" onclick="renderApiPreview('list')" class="px-3 sm:px-3.5 py-1.5 rounded-xl bg-emerald-600 text-white shadow-2xs transition shrink-0">GET List / Search</button>
+        <button data-api-tab="all" onclick="renderApiPreview('all')" class="px-3 sm:px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition shrink-0">GET All (Padi Rust)</button>
+        <button data-api-tab="view" onclick="renderApiPreview('view')" class="px-3 sm:px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition shrink-0">GET Single</button>
+        <button data-api-tab="create" onclick="renderApiPreview('create')" class="px-3 sm:px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition shrink-0">POST Create</button>
+        <button data-api-tab="update" onclick="renderApiPreview('update')" class="px-3 sm:px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition shrink-0">PATCH Update</button>
+        <button data-api-tab="delete" onclick="renderApiPreview('delete')" class="px-3 sm:px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition shrink-0">DELETE Record</button>
+        <button data-api-tab="file" onclick="renderApiPreview('file')" class="px-3 sm:px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition shrink-0">POST Upload File</button>
+        <button data-api-tab="realtime" onclick="renderApiPreview('realtime')" class="px-3 sm:px-3.5 py-1.5 rounded-xl text-slate-600 hover:bg-white transition shrink-0">SSE Realtime</button>
+        <button id="apiTabAuth" data-api-tab="auth" onclick="renderApiPreview('auth')" class="hidden px-3 sm:px-3.5 py-1.5 rounded-xl text-teal-700 hover:bg-teal-50 font-bold transition shrink-0">POST Auth Login</button>
       </div>
 
       <!-- Endpoint Documentation Content -->
-      <div class="flex-1 overflow-y-auto p-6 space-y-5 text-xs" id="apiPreviewContent"></div>
+      <div class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-5 text-xs" id="apiPreviewContent"></div>
 
-      <div class="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex justify-end">
-        <button onclick="closeDrawer('apiPreviewDrawer')" class="px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold rounded-xl">Close Explorer</button>
+      <div class="px-4 sm:px-6 py-3 sm:py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <button onclick="handleExportApiCollection(false)" class="px-3 sm:px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow-2xs">
+            <i class="fa-solid fa-download"></i>
+            <span>Export <span class="font-mono" id="exportColBtnName">Collection</span> (.json)</span>
+          </button>
+          <button onclick="handleExportApiCollection(true)" class="hidden sm:flex px-3 sm:px-4 py-2 border border-slate-300 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition items-center space-x-1.5">
+            <i class="fa-solid fa-layer-group text-slate-500"></i>
+            <span>Export All Endpoints</span>
+          </button>
+        </div>
+        <button onclick="closeDrawer('apiPreviewDrawer')" class="px-4 sm:px-5 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 text-xs font-bold rounded-xl">Close Explorer</button>
       </div>
     </div>
   </div>
 
   <!-- ================= MODAL: IMPORT RECORDS JSON ================= -->
-  <div id="importRecordsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
-    <div class="bg-white border border-slate-200 rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden">
-      <div class="px-6 py-4 padi-gradient text-white flex items-center justify-between">
-        <h3 class="font-extrabold">Bulk Import JSON into <span id="importColNameBadge" class="font-mono text-amber-300"></span></h3>
+  <div id="importRecordsModal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 modal-backdrop">
+    <div class="bg-white border border-slate-200 rounded-2xl sm:rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+      <div class="px-4 sm:px-6 py-3.5 sm:py-4 padi-gradient text-white flex items-center justify-between">
+        <h3 class="font-extrabold text-sm sm:text-base truncate">Bulk Import JSON into <span id="importColNameBadge" class="font-mono text-amber-300"></span></h3>
         <button onclick="closeDrawer('importRecordsModal')" class="text-white/70 hover:text-white text-lg">&times;</button>
       </div>
-      <div class="p-6 space-y-4 text-xs">
+      <div class="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1">
         <div id="importAlert" class="hidden p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-600"></div>
         <div>
           <label class="block font-bold text-slate-700 mb-1">Upload JSON file</label>
@@ -810,9 +924,9 @@
           <textarea id="importJsonTextarea" rows="8" class="w-full bg-slate-950 text-emerald-400 rounded-2xl p-3.5 font-mono text-xs" placeholder='[ { "nama": "Alina", "alamat": "Ciranjang" } ]'></textarea>
         </div>
       </div>
-      <div class="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end space-x-2">
-        <button onclick="closeDrawer('importRecordsModal')" class="px-4 py-2 text-xs font-bold text-slate-600">Cancel</button>
-        <button onclick="submitImportRecords()" class="px-5 py-2 padi-btn-primary text-white text-xs font-bold rounded-xl">Import Records</button>
+      <div class="px-4 sm:px-6 py-3 sm:py-4 border-t border-slate-200 bg-slate-50 flex justify-end space-x-2">
+        <button onclick="closeDrawer('importRecordsModal')" class="px-3.5 sm:px-4 py-2 text-xs font-bold text-slate-600">Cancel</button>
+        <button onclick="submitImportRecords()" class="px-4 sm:px-5 py-2 padi-btn-primary text-white text-xs font-bold rounded-xl">Import Records</button>
       </div>
     </div>
   </div>
@@ -823,7 +937,7 @@
     let currentRecords = [];
     let selectedRecordIds = new Set();
     let currentPage = 1;
-    let currentSort = "-created";
+    let currentSort = "";
     let currentFilter = "";
     let sseSource = null;
     let activeDbDriver = "sqlite";
@@ -858,6 +972,21 @@
       container.appendChild(el);
       setTimeout(() => el.remove(), 3200);
     }
+
+    // Automatically attach admin superuser JWT token to all API requests made within the Dashboard
+    const _originalFetch = window.fetch;
+    window.fetch = async function (url, options = {}) {
+      const opts = Object.assign({}, options);
+      const token = localStorage.getItem('padi_admin_token');
+      if (token && typeof url === 'string' && url.startsWith('/api/')) {
+        const headers = new Headers(opts.headers || {});
+        if (!headers.has('Authorization')) {
+          headers.set('Authorization', `Bearer ${token}`);
+        }
+        opts.headers = headers;
+      }
+      return _originalFetch(url, opts);
+    };
 
     async function init() {
       const token = localStorage.getItem('padi_admin_token');
@@ -983,15 +1112,35 @@
     }
 
     // ================= NAVIGATION & VIEWS =================
+    function toggleMobileSidebar(force) {
+      const sidebar = document.getElementById('schemaSidebar');
+      const backdrop = document.getElementById('sidebarBackdrop');
+      if (!sidebar || !backdrop) return;
+      const isCurrentlyOpen = !sidebar.classList.contains('-translate-x-full');
+      const shouldOpen = force !== undefined ? force : !isCurrentlyOpen;
+      if (shouldOpen) {
+        sidebar.classList.remove('-translate-x-full');
+        sidebar.classList.add('translate-x-0');
+        backdrop.classList.remove('hidden');
+      } else {
+        sidebar.classList.add('-translate-x-full');
+        sidebar.classList.remove('translate-x-0');
+        backdrop.classList.add('hidden');
+      }
+    }
+
     function switchMainView(view) {
+      if (view !== 'collections' && window.innerWidth < 1024) {
+        toggleMobileSidebar(false);
+      }
       const views = ['collections', 'logs', 'settings'];
       views.forEach(v => {
         document.getElementById(`${v}View`).classList.toggle('hidden', v !== view);
         const btn = document.getElementById(`rail${v.charAt(0).toUpperCase() + v.slice(1)}Btn`);
         if (v === view) {
-          btn.className = "px-4 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 bg-emerald-500 text-slate-950 shadow-sm relative";
+          btn.className = "px-2.5 sm:px-4 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 sm:space-x-2 bg-emerald-500 text-slate-950 shadow-sm relative";
         } else {
-          btn.className = "px-4 py-1.5 rounded-xl text-xs font-semibold transition flex items-center space-x-2 text-emerald-100/80 hover:text-white hover:bg-white/10 relative";
+          btn.className = "px-2.5 sm:px-4 py-1.5 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 sm:space-x-2 text-emerald-100/80 hover:text-white hover:bg-white/10 relative";
         }
       });
 
@@ -1022,6 +1171,31 @@
     }
 
     // ================= COLLECTIONS MANAGEMENT =================
+    async function syncDatabaseTables() {
+      const syncIcon = document.getElementById('syncIcon');
+      if (syncIcon) syncIcon.classList.add('fa-spin');
+      try {
+        const res = await fetch('/api/collections/sync', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          const list = data.item?.synced || data.synced || [];
+          const count = list.length;
+          if (count > 0) {
+            showToast(`Synchronized ${count} table(s): ${list.join(', ')}`);
+          } else {
+            showToast('All database tables are already synchronized');
+          }
+          await loadCollections();
+        } else {
+          showToast(data.message || 'Failed to sync database tables', 'error');
+        }
+      } catch (err) {
+        showToast('Sync error: ' + err.message, 'error');
+      } finally {
+        if (syncIcon) syncIcon.classList.remove('fa-spin');
+      }
+    }
+
     async function loadCollections(targetCol) {
       try {
         const res = await fetch('/api/collections');
@@ -1076,7 +1250,11 @@
     }
 
     function selectCollection(name) {
+      if (window.innerWidth < 1024) {
+        toggleMobileSidebar(false);
+      }
       currentCollection = name;
+      currentSort = "";
       localStorage.setItem('padi_active_col', name);
       selectedRecordIds.clear();
       updateBulkDeleteBar();
@@ -1095,6 +1273,18 @@
         } else {
           rtBadge.className = 'text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 font-bold inline-flex items-center';
           rtBadge.innerHTML = '<i class="fa-solid fa-bolt-slash mr-1 text-[9px]"></i> realtime: off';
+        }
+      }
+
+      const relBadge = document.getElementById('collectionRelationsBadge');
+      if (relBadge) {
+        const isAutoLoad = col && (col.autoLoadRelations === true || col.auto_load_relations === true);
+        if (isAutoLoad) {
+          relBadge.className = 'text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold inline-flex items-center';
+          relBadge.innerHTML = '<i class="fa-solid fa-link mr-1 text-[9px]"></i> relations: auto';
+        } else {
+          relBadge.className = 'text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200 font-bold inline-flex items-center';
+          relBadge.innerHTML = '<i class="fa-solid fa-link-slash mr-1 text-[9px]"></i> relations: off';
         }
       }
 
@@ -1143,8 +1333,8 @@
         const params = new URLSearchParams({
           page: currentPage,
           perPage: 30,
-          sort: currentSort
         });
+        if (currentSort) params.set('sort', currentSort);
         if (currentFilter) params.set('filter', currentFilter);
 
         const res = await fetch(`/api/collections/${currentCollection}/records?${params.toString()}`);
@@ -1199,6 +1389,21 @@
       const col = collections.find(c => c.name === currentCollection);
       const schemaCols = getCollectionColumns(col, items);
 
+      // Check which timestamp columns already exist in the schema
+      const hasCreatedAt = schemaCols.some(c => c.name.toLowerCase() === 'created_at');
+      const hasUpdatedAt = schemaCols.some(c => c.name.toLowerCase() === 'updated_at');
+      const hasCreated = schemaCols.some(c => c.name.toLowerCase() === 'created');
+      const hasUpdated = schemaCols.some(c => c.name.toLowerCase() === 'updated');
+
+      // Only show extra system 'created' / 'updated' columns if they are not already in schemaCols
+      // and only if records actually have a non-empty timestamp value or if this is an empty native auth collection
+      const hasAnyCreatedVal = items.some(it => it.created && String(it.created).trim() !== '');
+      const hasAnyUpdatedVal = items.some(it => it.updated && String(it.updated).trim() !== '');
+      const isAuthOrNativeEmpty = items.length === 0 && col && (col.type === 'auth' || col.id === 'system_users');
+      const showCreatedCol = !hasCreated && !hasCreatedAt && (hasAnyCreatedVal || isAuthOrNativeEmpty);
+      const showUpdatedCol = !hasUpdated && !hasUpdatedAt && (hasAnyUpdatedVal || isAuthOrNativeEmpty);
+      const totalColCount = 2 + schemaCols.length + (showCreatedCol ? 1 : 0) + (showUpdatedCol ? 1 : 0) + 1;
+
       const sortIcon = (field) => {
         if (currentSort === field) return '<i class="fa-solid fa-caret-up ml-1 text-emerald-600"></i>';
         if (currentSort === `-${field}`) return '<i class="fa-solid fa-caret-down ml-1 text-emerald-600"></i>';
@@ -1217,19 +1422,23 @@
             <i class="${FIELD_ICONS[c.type] || 'fa-solid fa-font'} text-[10px] text-emerald-600 mr-1"></i> ${c.name} ${sortIcon(c.name)}
           </th>
         `).join('')}
-        <th onclick="toggleSort('created')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
-          <i class="fa-regular fa-clock text-[10px] text-slate-400 mr-1"></i> created ${sortIcon('created')}
-        </th>
-        <th onclick="toggleSort('updated')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
-          <i class="fa-regular fa-clock text-[10px] text-slate-400 mr-1"></i> updated ${sortIcon('updated')}
-        </th>
+        ${showCreatedCol ? `
+          <th onclick="toggleSort('created')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
+            <i class="fa-regular fa-clock text-[10px] text-slate-400 mr-1"></i> created ${sortIcon('created')}
+          </th>
+        ` : ''}
+        ${showUpdatedCol ? `
+          <th onclick="toggleSort('updated')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
+            <i class="fa-regular fa-clock text-[10px] text-slate-400 mr-1"></i> updated ${sortIcon('updated')}
+          </th>
+        ` : ''}
         <th class="py-3 px-4 w-10"></th>
       `;
 
       if (items.length === 0) {
         tbody.innerHTML = `
           <tr>
-            <td colspan="${schemaCols.length + 5}" class="py-16 text-center text-slate-400 font-sans">
+            <td colspan="${totalColCount}" class="py-16 text-center text-slate-400 font-sans">
               <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3 text-lg">
                 <i class="fa-solid fa-seedling"></i>
               </div>
@@ -1254,9 +1463,9 @@
                   ${item.id} <i class="fa-regular fa-copy ml-1.5 text-[9px] opacity-50"></i>
                 </span>
               </td>
-              ${schemaCols.map(c => `<td class="py-2.5 px-4 border-r border-slate-100 max-w-[240px] truncate">${formatCell(item[c.name], c.type)}</td>`).join('')}
-              <td class="py-2.5 px-4 border-r border-slate-100 text-slate-400 text-[11px] whitespace-nowrap">${formatDateCell(item.created)}</td>
-              <td class="py-2.5 px-4 border-r border-slate-100 text-slate-400 text-[11px] whitespace-nowrap">${formatDateCell(item.updated)}</td>
+              ${schemaCols.map(c => `<td class="py-2.5 px-4 border-r border-slate-100 max-w-[240px] truncate">${formatCell(item[c.name], c.type, item)}</td>`).join('')}
+              ${showCreatedCol ? `<td class="py-2.5 px-4 border-r border-slate-100 text-slate-400 text-[11px] whitespace-nowrap">${formatDateCell(item.created)}</td>` : ''}
+              ${showUpdatedCol ? `<td class="py-2.5 px-4 border-r border-slate-100 text-slate-400 text-[11px] whitespace-nowrap">${formatDateCell(item.updated)}</td>` : ''}
               <td class="py-2.5 px-4 text-right text-slate-400 group-hover:text-emerald-700">
                 <i class="fa-solid fa-pen-to-square text-xs"></i>
               </td>
@@ -1271,8 +1480,27 @@
       document.getElementById('nextPageBtn').disabled = pageNum >= totalPages;
     }
 
-    function formatCell(val, type) {
+    function formatCell(val, type, item) {
       if (val === null || val === undefined || val === '') return '<span class="text-slate-300">—</span>';
+      if (type === 'file' || (typeof val === 'string' && /\.(jpg|jpeg|png|gif|webp|svg|pdf|docx|xlsx|zip|mp4|mp3|txt)$/i.test(val))) {
+        const isImg = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(String(val));
+        const recId = item ? item.id : '';
+        const url = `/api/files/${currentCollection}/${recId}/${val}`;
+        if (isImg && item) {
+          return `
+            <a href="${url}" target="_blank" onclick="event.stopPropagation()" class="inline-flex items-center space-x-1.5 text-xs text-indigo-700 hover:text-indigo-900 group/img">
+              <img src="${url}" class="w-6 h-6 rounded-md object-cover border border-slate-200 inline-block shrink-0 shadow-2xs" onerror="this.style.display='none'">
+              <span class="font-mono text-[11px] truncate max-w-[120px] group-hover/img:underline">${val}</span>
+            </a>
+          `;
+        }
+        return `
+          <a href="${url}" target="_blank" onclick="event.stopPropagation()" class="px-2 py-0.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-[11px] font-mono inline-flex items-center space-x-1 transition">
+            <i class="fa-solid fa-paperclip text-[10px]"></i>
+            <span class="truncate max-w-[120px]">${val}</span>
+          </a>
+        `;
+      }
       if (type === 'bool' || typeof val === 'boolean') {
         const isTrue = val === true || val === 1 || val === 'true';
         return isTrue
@@ -1285,7 +1513,15 @@
 
     function formatDateCell(iso) {
       if (!iso) return '';
-      return iso.slice(0, 19).replace('T', ' ');
+      if (typeof iso === 'number' || (/^\d+$/.test(String(iso)) && String(iso).length >= 10)) {
+        const num = Number(iso);
+        const ms = num < 10000000000 ? num * 1000 : num;
+        const d = new Date(ms);
+        if (!isNaN(d.getTime())) {
+          return d.toISOString().slice(0, 19).replace('T', ' ');
+        }
+      }
+      return String(iso).slice(0, 19).replace('T', ' ');
     }
 
     function toggleSelectAll(checked) {
@@ -1439,6 +1675,34 @@
           case 'json':
             inputEl = `<textarea id="recField_${f.name}" rows="4" class="w-full bg-slate-950 text-emerald-400 border border-slate-300 rounded-xl p-3 text-xs font-mono focus:outline-none" placeholder="{ }">${typeof val === 'object' && val !== null ? JSON.stringify(val, null, 2) : (val || '')}</textarea>`;
             break;
+          case 'file':
+            const currentFile = val || '';
+            const isImg = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(currentFile);
+            inputEl = `
+              <div class="space-y-2">
+                ${editingRecordId && currentFile ? `
+                  <div class="flex items-center justify-between p-2.5 rounded-xl bg-indigo-50/70 border border-indigo-200/80">
+                    <div class="flex items-center space-x-2.5 min-w-0">
+                      ${isImg ? `<img src="/api/files/${currentCollection}/${editingRecordId}/${currentFile}" class="w-9 h-9 rounded-lg object-cover border border-indigo-300 shrink-0">` : `<div class="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-700 shrink-0"><i class="fa-solid fa-file"></i></div>`}
+                      <div class="min-w-0 truncate">
+                        <a href="/api/files/${currentCollection}/${editingRecordId}/${currentFile}" target="_blank" class="text-xs font-mono font-bold text-indigo-700 hover:underline truncate block">
+                          ${currentFile}
+                        </a>
+                        <span class="text-[10px] text-slate-400">Click to view/download</span>
+                      </div>
+                    </div>
+                    <button type="button" onclick="deleteCurrentRecordFile('${f.name}', '${currentFile}')" class="px-2.5 py-1 text-xs font-bold text-rose-600 hover:bg-rose-100/60 rounded-lg transition shrink-0" title="Delete this attachment">
+                      <i class="fa-solid fa-trash-can mr-1 text-[11px]"></i> Remove
+                    </button>
+                  </div>
+                ` : ''}
+                <div class="flex items-center space-x-2">
+                  <input type="file" id="recFieldFile_${f.name}" data-field-name="${f.name}" class="flex-1 text-xs text-slate-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-bold file:bg-emerald-100 file:text-emerald-800 hover:file:bg-emerald-200 cursor-pointer border border-slate-300 rounded-xl bg-slate-50 p-1.5 focus:outline-none">
+                  <input type="hidden" id="recField_${f.name}" value="${currentFile}">
+                </div>
+              </div>
+            `;
+            break;
           default:
             inputEl = `<input type="${f.type === 'email' ? 'email' : (f.type === 'url' ? 'url' : 'text')}" id="recField_${f.name}" value="${val !== undefined && val !== null ? val : ''}" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:bg-white focus:outline-none focus:border-emerald-600" placeholder="Enter ${f.name}...">`;
             break;
@@ -1539,14 +1803,40 @@
         : `/api/collections/${currentCollection}/records`;
       const method = editingRecordId ? 'PATCH' : 'POST';
 
+      // Check if any file input has a file selected
+      const fileInputs = document.querySelectorAll('#recordFormContainer input[type="file"]');
+      let hasFiles = false;
+      fileInputs.forEach(fi => { if (fi.files && fi.files.length > 0) hasFiles = true; });
+
+      let bodyData;
+      let headers = {
+        'Authorization': 'Bearer ' + (localStorage.getItem('padi_admin_token') || '')
+      };
+
+      if (!isRecordJsonMode && hasFiles) {
+        const formData = new FormData();
+        for (const [k, v] of Object.entries(payload)) {
+          if (v !== undefined && v !== null) {
+            formData.append(k, typeof v === 'object' ? JSON.stringify(v) : v);
+          }
+        }
+        fileInputs.forEach(fi => {
+          const fieldName = fi.getAttribute('data-field-name');
+          if (fieldName && fi.files && fi.files[0]) {
+            formData.append(fieldName, fi.files[0]);
+          }
+        });
+        bodyData = formData;
+      } else {
+        headers['Content-Type'] = 'application/json';
+        bodyData = JSON.stringify(payload);
+      }
+
       try {
         const res = await fetch(url, {
           method,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + (localStorage.getItem('padi_admin_token') || '')
-          },
-          body: JSON.stringify(payload)
+          headers,
+          body: bodyData
         });
         const data = await res.json();
         if (res.ok) {
@@ -1563,6 +1853,28 @@
       }
     }
 
+    async function deleteCurrentRecordFile(fieldName, filename) {
+      if (!editingRecordId) return;
+      if (!confirm(`Remove file "${filename}"?`)) return;
+      try {
+        const res = await fetch(`/api/files/${currentCollection}/${editingRecordId}/${filename}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': 'Bearer ' + (localStorage.getItem('padi_admin_token') || '')
+          }
+        });
+        if (res.ok) {
+          showToast(`File "${filename}" removed.`);
+          openRecordDrawer(editingRecordId);
+          loadRecords();
+        } else {
+          showToast('Failed to delete file', 'error');
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
     async function deleteRecordFromDrawer() {
       if (!editingRecordId) return;
       if (!confirm(`Delete record ${editingRecordId}?`)) return;
@@ -1575,6 +1887,25 @@
     }
 
     // ================= SCHEMA ARCHITECT MODAL (CREATE / EDIT SCHEMA & RULES) =================
+    function applyRulePreset(inputId, snippet, mode = 'append') {
+      const el = document.getElementById(inputId);
+      if (!el) return;
+      const current = el.value.trim();
+
+      if (mode === 'set' || !current || current === 'public' || current === '@request.auth.id != ""' || current === "@request.auth.id != ''") {
+        el.value = snippet;
+        return;
+      }
+
+      // If already contains this snippet, do not duplicate
+      if (current.includes(snippet)) {
+        return;
+      }
+
+      // Append dynamically with ||
+      el.value = `${current} || ${snippet}`;
+    }
+
     function openCollectionDrawer(isEdit) {
       isEditingCollection = isEdit;
       document.getElementById('colDrawerAlert').classList.add('hidden');
@@ -1586,13 +1917,21 @@
       document.getElementById('colTypeInput').value = col ? col.type : 'base';
       document.getElementById('colTypeInput').disabled = isEdit;
       document.getElementById('colRealtimeInput').checked = col ? (col.realtime !== false) : true;
+      document.getElementById('colAutoLoadRelationsInput').checked = col ? (col.autoLoadRelations === true || col.auto_load_relations === true) : false;
       document.getElementById('drawerDeleteColBtn').classList.toggle('hidden', !isEdit || (col && col.name === 'users'));
 
-      document.getElementById('ruleList').value = col?.listRule || '';
-      document.getElementById('ruleView').value = col?.viewRule || '';
-      document.getElementById('ruleCreate').value = col?.createRule || '';
-      document.getElementById('ruleUpdate').value = col?.updateRule || '';
-      document.getElementById('ruleDelete').value = col?.deleteRule || '';
+      function resolveDefaultRule(val, defaultVal) {
+        if (!val || typeof val !== 'string' || val.trim() === '') {
+          return defaultVal;
+        }
+        return val;
+      }
+
+      document.getElementById('ruleList').value = resolveDefaultRule(col?.listRule, 'public');
+      document.getElementById('ruleView').value = resolveDefaultRule(col?.viewRule, 'public');
+      document.getElementById('ruleCreate').value = resolveDefaultRule(col?.createRule, '@request.auth.id != ""');
+      document.getElementById('ruleUpdate').value = resolveDefaultRule(col?.updateRule, '@request.auth.id != ""');
+      document.getElementById('ruleDelete').value = resolveDefaultRule(col?.deleteRule, '@request.auth.id != ""');
 
       tempSchemaFields = col && col.schema ? JSON.parse(JSON.stringify(col.schema)) : [];
       renderColAuthInfo();
@@ -1678,12 +2017,13 @@
         name,
         type,
         realtime: document.getElementById('colRealtimeInput').checked,
+        autoLoadRelations: document.getElementById('colAutoLoadRelationsInput').checked,
         schema: cleanSchema,
-        listRule: document.getElementById('ruleList').value.trim() || null,
-        viewRule: document.getElementById('ruleView').value.trim() || null,
-        createRule: document.getElementById('ruleCreate').value.trim() || null,
-        updateRule: document.getElementById('ruleUpdate').value.trim() || null,
-        deleteRule: document.getElementById('ruleDelete').value.trim() || null
+        listRule: document.getElementById('ruleList').value.trim() || 'public',
+        viewRule: document.getElementById('ruleView').value.trim() || 'public',
+        createRule: document.getElementById('ruleCreate').value.trim() || '@request.auth.id != ""',
+        updateRule: document.getElementById('ruleUpdate').value.trim() || '@request.auth.id != ""',
+        deleteRule: document.getElementById('ruleDelete').value.trim() || '@request.auth.id != ""'
       };
 
       const url = isEditingCollection ? `/api/collections/${currentCollection}` : '/api/collections';
@@ -1731,6 +2071,8 @@
     function openApiPreviewDrawer() {
       const col = collections.find(c => c.name === currentCollection);
       document.getElementById('apiPreviewColName').textContent = currentCollection;
+      const exportNameEl = document.getElementById('exportColBtnName');
+      if (exportNameEl) exportNameEl.textContent = currentCollection;
       document.getElementById('apiTabAuth').classList.toggle('hidden', !col || col.type !== 'auth');
       renderApiPreview('list');
       document.getElementById('apiPreviewDrawer').classList.remove('hidden');
@@ -1778,6 +2120,14 @@
           path: `/api/collections/${cName}/records?page=1&perPage=30&sort=-created`,
           js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records?page=1&perPage=30');\nconst { item, meta, debug } = await res.json();\nconsole.log(item, meta);`
         },
+        all: {
+          title: `Get All Records (${cName})`,
+          desc: `Query ALL records without pagination matching Padi Rust API format (/api/${cName}/all or /records/all).`,
+          method: 'GET',
+          badge: 'bg-emerald-100 text-emerald-800',
+          path: `/api/collections/${cName}/records/all?sort_by=id&order=desc`,
+          js: `// Format 1: BaaS records/all endpoint\nconst res = await fetch('${baseUrl}/api/collections/${cName}/records/all?sort_by=id&order=desc');\nconst { item, debug } = await res.json();\nconsole.log(item);\n\n// Format 2: Direct Padi Rust route:\n// const res = await fetch('${baseUrl}/api/${cName}/all?sort_by=id&order=desc');`
+        },
         view: {
           title: `Get Single Record (${cName})`,
           desc: `Retrieve a single ${cName} record by its 15-character ID.`,
@@ -1818,6 +2168,14 @@
           path: `/api/realtime`,
           js: `const evtSource = new EventSource('${baseUrl}/api/realtime');\nevtSource.onmessage = (event) => {\n  const data = JSON.parse(event.data);\n  if (data.collection === '${cName}') {\n    console.log('Mutation:', data.action, data.record);\n  }\n};`
         },
+        file: {
+          title: `Upload Attachment File (${cName})`,
+          desc: `Upload files via multipart/form-data. Files are saved in storage and automatically linked to the record.`,
+          method: 'POST',
+          badge: 'bg-indigo-100 text-indigo-800',
+          path: `/api/files/${cName}/RECORD_ID`,
+          js: `// Method 1: Upload via dedicated file endpoint\nconst formData = new FormData();\nformData.append('avatar', fileInputElement.files[0]);\n\nconst res = await fetch('${baseUrl}/api/files/${cName}/RECORD_ID', {\n  method: 'POST',\n  body: formData\n});\nconst result = await res.json();\nconsole.log(result.uploaded);\n\n// Method 2: Serve / download file\n// GET ${baseUrl}/api/files/${cName}/RECORD_ID/filename.jpg`
+        },
         auth: {
           title: `Authenticate User (${cName})`,
           desc: `Verify identity (username or email) & password and issue a JWT token.`,
@@ -1833,14 +2191,19 @@
       currentApiPreviewUrl = `${baseUrl}${d.path}`;
       currentApiPreviewJs = d.js;
 
+      const hasCreated = (col.schema || []).some(f => f.name.toLowerCase() === 'created');
+      const hasUpdated = (col.schema || []).some(f => f.name.toLowerCase() === 'updated');
+      const hasColId = (col.schema || []).some(f => f.name.toLowerCase() === 'collectionid');
+      const hasColName = (col.schema || []).some(f => f.name.toLowerCase() === 'collectionname');
+
       const sampleRecordItem = Object.assign({
-        id: "ed39194adc3d473",
-        collectionId: col.id || "eff625fdd8bd49b",
-        collectionName: cName
-      }, sampleObj, {
-        created: "2026-10-29T12:00:00Z",
-        updated: "2026-10-29T12:00:00Z"
-      });
+        id: "1"
+      }, sampleObj);
+
+      if (hasColId) sampleRecordItem.collectionId = col.id || "eff625fdd8bd49b";
+      if (hasColName) sampleRecordItem.collectionName = cName;
+      if (hasCreated) sampleRecordItem.created = "2026-10-29T12:00:00Z";
+      if (hasUpdated) sampleRecordItem.updated = "2026-10-29T12:00:00Z";
       delete sampleRecordItem.password;
 
       const samplePadiResponse = action === 'list' ? {
@@ -1863,6 +2226,18 @@
           queries_count: 3,
           queries: []
         }
+      } : (action === 'all' ? {
+        message: "Success",
+        message_code: "SUCCESS",
+        success: true,
+        item: [sampleRecordItem],
+        debug: {
+          env: "development",
+          database: activeDbDriver,
+          execution_time: "0.45ms",
+          queries_count: 1,
+          queries: [`SELECT * FROM \`${cName}\` ORDER BY \`id\` DESC;`]
+        }
       } : {
         message: "Success",
         message_code: d.method === 'POST' ? "CREATED" : "SUCCESS",
@@ -1875,7 +2250,7 @@
           queries_count: 1,
           queries: []
         }
-      };
+      });
 
       content.innerHTML = `
         <div class="flex items-center justify-between">
@@ -2091,6 +2466,21 @@
       a.href = `/api/collections/${currentCollection}/export`;
       a.download = `${currentCollection}_export.json`;
       a.click();
+    }
+
+    function handleExportApiCollection(isFull = false) {
+      const a = document.createElement('a');
+      if (isFull) {
+        a.href = `/api/api-collection?download=true`;
+        a.download = `padi_base_api_collection.json`;
+      } else {
+        a.href = `/api/collections/${currentCollection}/api-collection?download=true`;
+        a.download = `${currentCollection}_collection.json`;
+      }
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast(isFull ? 'Exported Master API Collection (.json)' : `Exported ${currentCollection} API Collection (.json)`);
     }
 
     function openImportModal() {

@@ -11,7 +11,7 @@ use crate::core::app::AppState;
 use crate::core::response::padi_response_middleware;
 use crate::ui::serve_admin_ui;
 
-use super::{admins, auth_records, backups, collections, files, health, realtime, records};
+use super::{admins, api_collection, auth_records, backups, collections, files, health, realtime, records};
 
 pub fn create_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
@@ -24,6 +24,18 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api", get(health::api_root))
         .route("/api/", get(health::api_root))
         .route("/api/health", get(health::health_check))
+        // API Collection Export (Postman / REST Client)
+        .route("/api/api-collection", get(api_collection::export_all))
+        .route("/api/api-collection.json", get(api_collection::export_all))
+        .route("/api/export/api-collection", get(api_collection::export_all))
+        .route(
+            "/api/collections/{collection}/api-collection",
+            get(api_collection::export_single),
+        )
+        .route(
+            "/api/collections/{collection}/export-api-collection",
+            get(api_collection::export_single),
+        )
         // Admins & Settings
         .route("/api/admins/has-admins", get(admins::has_admins))
         .route("/api/admins/auth-with-password", post(admins::auth_with_password))
@@ -32,6 +44,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/settings", get(admins::get_settings).patch(admins::update_settings))
         // Collections
         .route("/api/collections", get(collections::list).post(collections::create))
+        .route("/api/collections/sync", post(collections::sync).get(collections::sync))
         .route("/api/collections/import", put(collections::import_collections))
         .route(
             "/api/collections/{name_or_id}",
@@ -43,6 +56,22 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/collections/{collection}/records",
             get(records::list).post(records::create),
+        )
+        .route(
+            "/api/collections/{collection}/records/all",
+            get(records::all),
+        )
+        .route(
+            "/api/collections/{collection}/all",
+            get(records::all),
+        )
+        .route(
+            "/api/{collection}/all",
+            get(records::all),
+        )
+        .route(
+            "/{collection}/all",
+            get(records::all),
         )
         .route(
             "/api/collections/{collection}/records/{id}",
@@ -65,10 +94,14 @@ pub fn create_router(state: AppState) -> Router {
         )
         // Realtime SSE
         .route("/api/realtime", get(realtime::realtime_sse))
-        // File downloads
+        // File upload, download & management
+        .route(
+            "/api/files/{collection}/{record_id}",
+            post(files::upload_file),
+        )
         .route(
             "/api/files/{collection}/{record_id}/{filename}",
-            get(files::get_file),
+            get(files::get_file).delete(files::delete_file),
         )
         // System Backups
         .route("/api/backups", get(backups::list_backups).post(backups::create_backup))
@@ -79,16 +112,20 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/backups/{filename}/restore", post(backups::restore_backup))
         // Admin UI Dashboard
         .route(
-            "/_/",
+            "/dashboard",
             get(|| async { serve_admin_ui(Path(Some("index.html".to_string()))).await }),
+        )
+        .route(
+            "/dashboard/",
+            get(|| async { serve_admin_ui(Path(Some("index.html".to_string()))).await }),
+        )
+        .route(
+            "/dashboard/{*path}",
+            get(|Path(path): Path<String>| async move { serve_admin_ui(Path(Some(path))).await }),
         )
         .route(
             "/",
             get(|| async { serve_admin_ui(Path(Some("index.html".to_string()))).await }),
-        )
-        .route(
-            "/_{file}",
-            get(|Path(file): Path<String>| async move { serve_admin_ui(Path(Some(file))).await }),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),

@@ -3,20 +3,33 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::db::{json_get_i64, json_get_str, DbPool, Val};
+use super::db::{json_get_i64, json_get_str, DbPool, TableMetadata, Val};
 use super::schema::{generate_id, Collection, CollectionType, FieldType};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct Record {
     pub id: String,
-    pub created: String,
-    pub updated: String,
-    #[serde(rename = "collectionId")]
-    pub collection_id: String,
-    #[serde(rename = "collectionName")]
-    pub collection_name: String,
-    #[serde(flatten)]
     pub data: Map<String, Value>,
+}
+
+impl Serialize for Record {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+
+        // Pastikan id selalu ada di urutan teratas
+        if !self.data.contains_key("id") {
+            map.serialize_entry("id", &self.id)?;
+        }
+
+        for (k, v) in &self.data {
+            map.serialize_entry(k, v)?;
+        }
+        map.end()
+    }
 }
 
 pub struct PaginatedRecords {
@@ -43,50 +56,95 @@ impl Serialize for PaginatedRecords {
     }
 }
 
+fn pk_to_val(id: &str, meta: &TableMetadata) -> Val {
+    if meta.pk_is_int {
+        if let Ok(num) = id.parse::<i64>() {
+            return Val::Int(num);
+        }
+    }
+    Val::from(id)
+}
+
 pub async fn create_record(
     pool: &DbPool,
     col: &Collection,
     mut payload: Map<String, Value>,
 ) -> Result<Record> {
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
     let now = Utc::now().to_rfc3339();
-    let id = payload
-        .get("id")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .unwrap_or_else(generate_id);
 
-    payload.insert("id".to_string(), Value::String(id.clone()));
-    payload.insert("created".to_string(), Value::String(now.clone()));
-    payload.insert("updated".to_string(), Value::String(now.clone()));
+    // Primary key detection
+    let custom_id = payload
+        .get(&meta.pk_column)
+        .or_else(|| payload.get("id"))
+        .cloned();
+
+    let generated_str_id = if !meta.pk_is_auto_increment && custom_id.is_none() {
+        Some(generate_id())
+    } else {
+        None
+    };
+
+    if let Some(ref gid) = generated_str_id {
+        payload.insert(meta.pk_column.clone(), Value::String(gid.clone()));
+        if meta.pk_column != "id" && meta.has_column("id") {
+            payload.insert("id".to_string(), Value::String(gid.clone()));
+        }
+    }
+
+    if meta.has_created && !payload.contains_key("created") {
+        payload.insert("created".to_string(), Value::String(now.clone()));
+    }
+    if meta.has_updated && !payload.contains_key("updated") {
+        payload.insert("updated".to_string(), Value::String(now.clone()));
+    }
+    if meta.has_created_at && !payload.contains_key("created_at") {
+        let is_int_type = meta
+            .columns
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case("created_at") && c.data_type.contains("int"));
+        if is_int_type {
+            payload.insert("created_at".to_string(), Value::from(Utc::now().timestamp()));
+        } else {
+            payload.insert("created_at".to_string(), Value::String(now.clone()));
+        }
+    }
+    if meta.has_updated_at && !payload.contains_key("updated_at") {
+        let is_int_type = meta
+            .columns
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case("updated_at") && c.data_type.contains("int"));
+        if is_int_type {
+            payload.insert("updated_at".to_string(), Value::from(Utc::now().timestamp()));
+        } else {
+            payload.insert("updated_at".to_string(), Value::String(now.clone()));
+        }
+    }
 
     if col.collection_type == CollectionType::Auth {
         if let Some(pass_val) = payload.remove("password") {
             if let Some(pass_str) = pass_val.as_str() {
                 let hash = crate::core::auth::hash_password(pass_str)?;
-                payload.insert("passwordHash".to_string(), Value::String(hash.clone()));
-                payload.insert("password".to_string(), Value::String(hash));
+                if meta.has_column("passwordHash") {
+                    payload.insert("passwordHash".to_string(), Value::String(hash.clone()));
+                }
+                if meta.has_column("password") {
+                    payload.insert("password".to_string(), Value::String(hash));
+                }
             }
         }
-        if !payload.contains_key("tokenKey") {
+        if meta.has_column("tokenKey") && !payload.contains_key("tokenKey") {
             payload.insert(
                 "tokenKey".to_string(),
                 Value::String(crate::core::auth::generate_token_key()),
             );
         }
 
-        if !payload.contains_key("role") {
+        if meta.has_column("role") && !payload.contains_key("role") {
             payload.insert("role".to_string(), Value::String("user".to_string()));
         }
-        if !payload.contains_key("status") {
+        if meta.has_column("status") && !payload.contains_key("status") {
             payload.insert("status".to_string(), Value::String("active".to_string()));
-        }
-
-        // Keep created_at & updated_at in sync with created & updated (Padi standard)
-        if !payload.contains_key("created_at") {
-            payload.insert("created_at".to_string(), Value::String(now.clone()));
-        }
-        if !payload.contains_key("updated_at") {
-            payload.insert("updated_at".to_string(), Value::String(now.clone()));
         }
 
         // Auto-generate username if not provided
@@ -95,12 +153,12 @@ pub async fn create_record(
             .and_then(|u| u.as_str())
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false);
-        if !has_username {
+        if !has_username && meta.has_column("username") {
             let default_username =
                 if let Some(email) = payload.get("email").and_then(|e| e.as_str()) {
                     email.split('@').next().unwrap_or("user").to_string()
                 } else {
-                    format!("user_{}", &id[..6.min(id.len())])
+                    format!("user_{}", Utc::now().timestamp_subsec_millis())
                 };
             payload.insert("username".to_string(), Value::String(default_username));
         }
@@ -111,9 +169,33 @@ pub async fn create_record(
     let mut params = Vec::new();
 
     for (k, v) in &payload {
+        // Lewati primary key jika auto-increment dan nilainya kosong/null
+        if k.eq_ignore_ascii_case(&meta.pk_column) && meta.pk_is_auto_increment {
+            let is_empty = v.is_null()
+                || v.as_str().map(|s| s.trim().is_empty()).unwrap_or(false)
+                || v.as_i64() == Some(0);
+            if is_empty {
+                continue;
+            }
+        }
+        if !meta.has_column(k) {
+            continue;
+        }
         keys.push(format!("`{}`", k));
         placeholders.push("?");
         params.push(Val::from(v));
+    }
+
+    if pool.is_postgres() {
+        let pg_keys = keys.join(", ").replace('`', "\"");
+        let sql = format!(
+            "INSERT INTO \"{}\" ({}) VALUES ({}) RETURNING *;",
+            col.name,
+            pg_keys,
+            placeholders.join(", ")
+        );
+        let row = pool.fetch_one(&sql, &params).await?;
+        return json_row_to_record(&row, col, &meta);
     }
 
     let sql = format!(
@@ -123,19 +205,51 @@ pub async fn create_record(
         placeholders.join(", ")
     );
 
-    pool.execute(&sql, &params).await?;
+    let (_, last_id) = pool.execute(&sql, &params).await?;
 
-    get_record(pool, col, &id)
+    let lookup_id = if let Some(ref gid) = generated_str_id {
+        gid.clone()
+    } else if let Some(ref cid) = custom_id {
+        if let Some(s) = cid.as_str() {
+            s.to_string()
+        } else if let Some(n) = cid.as_i64() {
+            n.to_string()
+        } else {
+            cid.to_string()
+        }
+    } else if let Some(lid) = last_id {
+        lid.to_string()
+    } else {
+        return Err(anyhow!("Record created but could not resolve primary key"));
+    };
+
+    get_record(pool, col, &lookup_id)
         .await?
         .ok_or_else(|| anyhow!("Record was not created"))
 }
 
 pub async fn get_record(pool: &DbPool, col: &Collection, id: &str) -> Result<Option<Record>> {
-    let sql = format!("SELECT * FROM `{}` WHERE `id` = ? LIMIT 1;", col.name);
-    let row_opt = pool.fetch_optional(&sql, &[Val::from(id)]).await?;
+    get_record_with(pool, col, id, None).await
+}
+
+pub async fn get_record_with(
+    pool: &DbPool,
+    col: &Collection,
+    id: &str,
+    with_relations: Option<&[&str]>,
+) -> Result<Option<Record>> {
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
+    let sql = format!(
+        "SELECT * FROM `{}` WHERE `{}` = ? LIMIT 1;",
+        col.name, meta.pk_column
+    );
+    let row_opt = pool.fetch_optional(&sql, &[pk_to_val(id, &meta)]).await?;
 
     if let Some(row) = row_opt {
-        Ok(Some(json_row_to_record(&row, col)?))
+        let rec = json_row_to_record(&row, col, &meta)?;
+        let mut items = vec![rec];
+        let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations).await;
+        Ok(items.pop())
     } else {
         Ok(None)
     }
@@ -147,21 +261,42 @@ pub async fn update_record(
     id: &str,
     mut payload: Map<String, Value>,
 ) -> Result<Record> {
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
     let now = Utc::now().to_rfc3339();
+
+    payload.remove(&meta.pk_column);
     payload.remove("id");
     payload.remove("created");
+    payload.remove("created_at");
     payload.remove("collectionId");
     payload.remove("collectionName");
-    payload.insert("updated".to_string(), Value::String(now.clone()));
+
+    if meta.has_updated {
+        payload.insert("updated".to_string(), Value::String(now.clone()));
+    }
+    if meta.has_updated_at {
+        let is_int_type = meta
+            .columns
+            .iter()
+            .any(|c| c.name.eq_ignore_ascii_case("updated_at") && c.data_type.contains("int"));
+        if is_int_type {
+            payload.insert("updated_at".to_string(), Value::from(Utc::now().timestamp()));
+        } else {
+            payload.insert("updated_at".to_string(), Value::String(now.clone()));
+        }
+    }
 
     if col.collection_type == CollectionType::Auth {
-        payload.insert("updated_at".to_string(), Value::String(now.clone()));
         if let Some(pass_val) = payload.remove("password") {
             if let Some(pass_str) = pass_val.as_str() {
                 if !pass_str.trim().is_empty() {
                     let hash = crate::core::auth::hash_password(pass_str)?;
-                    payload.insert("passwordHash".to_string(), Value::String(hash.clone()));
-                    payload.insert("password".to_string(), Value::String(hash));
+                    if meta.has_column("passwordHash") {
+                        payload.insert("passwordHash".to_string(), Value::String(hash.clone()));
+                    }
+                    if meta.has_column("password") {
+                        payload.insert("password".to_string(), Value::String(hash));
+                    }
                 }
             }
         }
@@ -171,15 +306,19 @@ pub async fn update_record(
     let mut params = Vec::new();
 
     for (k, v) in &payload {
+        if !meta.has_column(k) {
+            continue;
+        }
         set_clauses.push(format!("`{}` = ?", k));
         params.push(Val::from(v));
     }
-    params.push(Val::from(id));
+    params.push(pk_to_val(id, &meta));
 
     let sql = format!(
-        "UPDATE `{}` SET {} WHERE `id` = ?;",
+        "UPDATE `{}` SET {} WHERE `{}` = ?;",
         col.name,
-        set_clauses.join(", ")
+        set_clauses.join(", "),
+        meta.pk_column
     );
 
     let (rows_affected, _) = pool.execute(&sql, &params).await?;
@@ -193,8 +332,9 @@ pub async fn update_record(
 }
 
 pub async fn delete_record(pool: &DbPool, col: &Collection, id: &str) -> Result<bool> {
-    let sql = format!("DELETE FROM `{}` WHERE `id` = ?;", col.name);
-    let (rows_affected, _) = pool.execute(&sql, &[Val::from(id)]).await?;
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
+    let sql = format!("DELETE FROM `{}` WHERE `{}` = ?;", col.name, meta.pk_column);
+    let (rows_affected, _) = pool.execute(&sql, &[pk_to_val(id, &meta)]).await?;
     Ok(rows_affected > 0)
 }
 
@@ -241,6 +381,239 @@ fn parse_pocketbase_filter(raw: &str, col: &Collection) -> String {
     format!("WHERE {}", expr)
 }
 
+fn build_filter_and_sort_sql(
+    meta: &TableMetadata,
+    col: &Collection,
+    sort: Option<&str>,
+    filter: Option<&str>,
+) -> (String, String) {
+    let filter_sql = filter
+        .map(|f| parse_pocketbase_filter(f, col))
+        .unwrap_or_default();
+
+    let default_sort = if meta.has_created {
+        "ORDER BY `created` DESC".to_string()
+    } else if meta.has_created_at {
+        "ORDER BY `created_at` DESC".to_string()
+    } else {
+        format!("ORDER BY `{}` DESC", meta.pk_column)
+    };
+
+    let sort_sql = if let Some(s) = sort {
+        if !s.trim().is_empty() {
+            let mut valid_parts = Vec::new();
+            for item in s.split(',') {
+                let item = item.trim();
+                let (raw_col, is_desc) = if let Some(stripped) = item.strip_prefix('-') {
+                    (stripped, true)
+                } else if let Some(stripped) = item.strip_prefix('+') {
+                    (stripped, false)
+                } else {
+                    (item, false)
+                };
+
+                let target_col = if meta.has_column(raw_col) {
+                    Some(raw_col.to_string())
+                } else if raw_col.eq_ignore_ascii_case("created") && meta.has_created_at {
+                    Some("created_at".to_string())
+                } else if raw_col.eq_ignore_ascii_case("updated") && meta.has_updated_at {
+                    Some("updated_at".to_string())
+                } else if raw_col.eq_ignore_ascii_case("id") && meta.pk_column != "id" {
+                    Some(meta.pk_column.clone())
+                } else {
+                    None
+                };
+
+                if let Some(c) = target_col {
+                    if is_desc {
+                        valid_parts.push(format!("`{}` DESC", c));
+                    } else {
+                        valid_parts.push(format!("`{}` ASC", c));
+                    }
+                }
+            }
+
+            if !valid_parts.is_empty() {
+                format!("ORDER BY {}", valid_parts.join(", "))
+            } else {
+                default_sort
+            }
+        } else {
+            default_sort
+        }
+    } else {
+        default_sort
+    };
+
+    (filter_sql, sort_sql)
+}
+
+pub async fn eager_load_relations(
+    pool: &DbPool,
+    table_name: &str,
+    auto_load_default: bool,
+    records: &mut [Record],
+    with_relations: Option<&[&str]>,
+) -> Result<()> {
+    if records.is_empty() {
+        return Ok(());
+    }
+
+    if let Some(with_list) = with_relations {
+        if with_list.iter().any(|w| w.eq_ignore_ascii_case("none") || w.eq_ignore_ascii_case("false")) {
+            return Ok(());
+        }
+    } else {
+        // Cek global option dari .env (AUTO_LOAD_RELATIONS).
+        // Jika true: semua relasi di-load secara eager loading.
+        // Jika false: fallback ke pengaturan per-tabel di dashboard (auto_load_default).
+        let global_auto_load = crate::core::env::Env::get_or("AUTO_LOAD_RELATIONS", "false")
+            .eq_ignore_ascii_case("true");
+
+        if !global_auto_load && !auto_load_default {
+            return Ok(());
+        }
+    }
+
+    let all_relations = super::db::get_table_relations(pool, table_name).await?;
+    if all_relations.is_empty() {
+        return Ok(());
+    }
+
+    let target_relations: Vec<&super::db::DetectedRelation> = if let Some(with_list) = with_relations {
+        if with_list.iter().any(|w| *w == "*" || w.eq_ignore_ascii_case("all")) {
+            all_relations.iter().collect()
+        } else {
+            all_relations
+                .iter()
+                .filter(|r| {
+                    with_list.iter().any(|w| {
+                        w.eq_ignore_ascii_case(&r.relation_name) || w.eq_ignore_ascii_case(&r.column)
+                    })
+                })
+                .collect()
+        }
+    } else {
+        all_relations.iter().collect()
+    };
+
+    for rel in target_relations {
+        let mut ids = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for rec in records.iter() {
+            let val_opt = rec.data.get(&rel.column).or_else(|| rec.data.get(&rel.relation_name));
+            if let Some(val) = val_opt {
+                if val.is_null() {
+                    continue;
+                }
+                let id_str = match val {
+                    Value::String(s) => s.trim().to_string(),
+                    Value::Number(n) => n.to_string(),
+                    _ => String::new(),
+                };
+                if !id_str.is_empty() && id_str != "0" && seen.insert(id_str.clone()) {
+                    if let Ok(num) = id_str.parse::<i64>() {
+                        ids.push(Val::Int(num));
+                    } else {
+                        ids.push(Val::from(id_str));
+                    }
+                }
+            }
+        }
+
+        if ids.is_empty() {
+            continue;
+        }
+
+        let placeholders = vec!["?"; ids.len()].join(", ");
+        let cols_select = if rel.display_col == rel.target_pk {
+            format!("`{}`", rel.target_pk)
+        } else {
+            format!("`{}`, `{}`", rel.target_pk, rel.display_col)
+        };
+
+        let sql = format!(
+            "SELECT {} FROM `{}` WHERE `{}` IN ({});",
+            cols_select, rel.target_table, rel.target_pk, placeholders
+        );
+
+        let rows = pool.fetch_all(&sql, &ids).await.unwrap_or_default();
+
+        let mut map: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+        for row in rows {
+            let pk_val = json_get_str(&row, &rel.target_pk);
+            let pk_val = if pk_val.is_empty() {
+                json_get_str(&row, "id")
+            } else {
+                pk_val
+            };
+
+            let mut rel_obj = Map::new();
+            if let Some(obj) = row.as_object() {
+                for (k, v) in obj {
+                    rel_obj.insert(k.clone(), v.clone());
+                }
+            }
+            if !rel_obj.contains_key("id") && !pk_val.is_empty() {
+                rel_obj.insert("id".to_string(), Value::String(pk_val.clone()));
+            }
+
+            map.insert(pk_val, Value::Object(rel_obj));
+        }
+
+        for rec in records.iter_mut() {
+            let fk_val = rec.data.get(&rel.column).cloned();
+            if let Some(val) = fk_val {
+                let id_str = match val {
+                    Value::String(ref s) => s.trim().to_string(),
+                    Value::Number(ref n) => n.to_string(),
+                    _ => String::new(),
+                };
+                if let Some(related_data) = map.get(&id_str) {
+                    rec.data.insert(rel.relation_name.clone(), related_data.clone());
+                } else if !id_str.is_empty() && id_str != "0" {
+                    rec.data.insert(rel.relation_name.clone(), Value::Null);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+pub async fn get_all_records(
+    pool: &DbPool,
+    col: &Collection,
+    sort: Option<&str>,
+    filter: Option<&str>,
+) -> Result<Vec<Record>> {
+    get_all_records_with(pool, col, sort, filter, None).await
+}
+
+pub async fn get_all_records_with(
+    pool: &DbPool,
+    col: &Collection,
+    sort: Option<&str>,
+    filter: Option<&str>,
+    with_relations: Option<&[&str]>,
+) -> Result<Vec<Record>> {
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
+    let (filter_sql, sort_sql) = build_filter_and_sort_sql(&meta, col, sort, filter);
+
+    let sql = format!("SELECT * FROM `{}` {} {};", col.name, filter_sql, sort_sql);
+    let rows = pool.fetch_all(&sql, &[]).await?;
+
+    let mut items = Vec::new();
+    for row in rows {
+        items.push(json_row_to_record(&row, col, &meta)?);
+    }
+
+    let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations).await;
+
+    Ok(items)
+}
+
 pub async fn list_records(
     pool: &DbPool,
     col: &Collection,
@@ -249,36 +622,35 @@ pub async fn list_records(
     sort: Option<&str>,
     filter: Option<&str>,
 ) -> Result<PaginatedRecords> {
+    list_records_with(pool, col, page, per_page, sort, filter, None).await
+}
+
+pub async fn list_records_with(
+    pool: &DbPool,
+    col: &Collection,
+    page: i64,
+    per_page: i64,
+    sort: Option<&str>,
+    filter: Option<&str>,
+    with_relations: Option<&[&str]>,
+) -> Result<PaginatedRecords> {
+    if per_page <= 0 {
+        let items = get_all_records_with(pool, col, sort, filter, with_relations).await?;
+        let total_items = items.len() as i64;
+        return Ok(PaginatedRecords {
+            page: 1,
+            per_page: total_items,
+            total_items,
+            total_pages: 1,
+            items,
+        });
+    }
+
     let page = if page < 1 { 1 } else { page };
-    let per_page = if per_page < 1 { 30 } else { per_page };
     let offset = (page - 1) * per_page;
 
-    let filter_sql = filter
-        .map(|f| parse_pocketbase_filter(f, col))
-        .unwrap_or_default();
-
-    let sort_sql = if let Some(s) = sort {
-        if !s.trim().is_empty() {
-            let parts: Vec<String> = s
-                .split(',')
-                .map(|item| {
-                    let item = item.trim();
-                    if let Some(stripped) = item.strip_prefix('-') {
-                        format!("`{}` DESC", stripped)
-                    } else if let Some(stripped) = item.strip_prefix('+') {
-                        format!("`{}` ASC", stripped)
-                    } else {
-                        format!("`{}` ASC", item)
-                    }
-                })
-                .collect();
-            format!("ORDER BY {}", parts.join(", "))
-        } else {
-            "ORDER BY `created` DESC".to_string()
-        }
-    } else {
-        "ORDER BY `created` DESC".to_string()
-    };
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
+    let (filter_sql, sort_sql) = build_filter_and_sort_sql(&meta, col, sort, filter);
 
     // Count query
     let count_sql = format!(
@@ -304,8 +676,10 @@ pub async fn list_records(
 
     let mut items = Vec::new();
     for row in rows {
-        items.push(json_row_to_record(&row, col)?);
+        items.push(json_row_to_record(&row, col, &meta)?);
     }
+
+    let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations).await;
 
     Ok(PaginatedRecords {
         page,
@@ -337,21 +711,17 @@ fn canonical_field_name<'a>(raw_name: &'a str, col: &'a Collection) -> &'a str {
     raw_name
 }
 
-fn json_row_to_record(row: &Value, col: &Collection) -> Result<Record> {
+fn json_row_to_record(row: &Value, col: &Collection, meta: &TableMetadata) -> Result<Record> {
     let mut data = Map::new();
-    let id = json_get_str(row, "id");
-    let created = json_get_str(row, "created");
-    let updated = json_get_str(row, "updated");
+    let id_str = json_get_str(row, &meta.pk_column);
+    let id_str = if id_str.is_empty() {
+        json_get_str(row, "id")
+    } else {
+        id_str
+    };
 
     if let Some(obj) = row.as_object() {
         for (raw_name, raw_val) in obj {
-            if raw_name.eq_ignore_ascii_case("id")
-                || raw_name.eq_ignore_ascii_case("created")
-                || raw_name.eq_ignore_ascii_case("updated")
-            {
-                continue;
-            }
-
             // Do not expose sensitive credentials in record output (matching padi_rust / padi_go / padi_php hidden fields)
             if raw_name.eq_ignore_ascii_case("passwordHash")
                 || raw_name.eq_ignore_ascii_case("password")
@@ -398,12 +768,12 @@ fn json_row_to_record(row: &Value, col: &Collection) -> Result<Record> {
         }
     }
 
+    if !data.contains_key("id") && !id_str.is_empty() {
+        data.insert("id".to_string(), Value::String(id_str.clone()));
+    }
+
     Ok(Record {
-        id,
-        created,
-        updated,
-        collection_id: col.id.clone(),
-        collection_name: col.name.clone(),
+        id: id_str,
         data,
     })
 }

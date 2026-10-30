@@ -6,7 +6,7 @@ use crate::core::app::AppState;
 pub async fn api_root(State(state): State<AppState>) -> impl IntoResponse {
     Json(json!({
         "name": "padiBase",
-        "description": "High performance PocketBase-inspired Backend-as-a-Service written in Rust",
+        "description": "High performance Backend-as-a-Service written in Rust",
         "version": env!("CARGO_PKG_VERSION"),
         "status": "online",
         "database": state.db.driver_name(),
@@ -18,7 +18,7 @@ pub async fn api_root(State(state): State<AppState>) -> impl IntoResponse {
             "collections": "/api/collections",
             "realtime_sse": "/api/realtime",
             "backups": "/api/backups",
-            "dashboard_ui": "/_/"
+            "dashboard_ui": "/dashboard/"
         }
     }))
 }

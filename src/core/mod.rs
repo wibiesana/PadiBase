@@ -1,3 +1,4 @@
+pub mod api_collection;
 pub mod app;
 pub mod auth;
 pub mod db;
