@@ -628,6 +628,48 @@ async fn execute_custom_endpoint_inner(
         }
     }
 
+    let non_comment_content: String = ep
+        .sql
+        .lines()
+        .filter(|line| !line.trim().starts_with("--"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let trimmed_sql = non_comment_content.trim();
+
+    // 1. Direct Static JSON Response (e.g. { "message": "hello" } or ["hello", "world"])
+    if (trimmed_sql.starts_with('{') && trimmed_sql.ends_with('}'))
+        || (trimmed_sql.starts_with('[') && trimmed_sql.ends_with(']'))
+    {
+        if let Ok(json_val) = serde_json::from_str::<Value>(trimmed_sql) {
+            return Ok(Json(json_val));
+        }
+    }
+
+    // 2. Direct Quoted String Literal (e.g. 'hello' or "hello")
+    if (trimmed_sql.starts_with('\'') && trimmed_sql.ends_with('\'') && trimmed_sql.len() >= 2)
+        || (trimmed_sql.starts_with('"') && trimmed_sql.ends_with('"') && trimmed_sql.len() >= 2)
+    {
+        let inner = &trimmed_sql[1..trimmed_sql.len() - 1];
+        return Ok(Json(json!({ "message": inner })));
+    }
+
+    // 3. Direct Plain Text / Mock String without SQL keywords (e.g. "hello", "pong", "OK")
+    let first_word = trimmed_sql
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_uppercase();
+
+    let sql_keywords = [
+        "SELECT", "INSERT", "UPDATE", "DELETE", "WITH", "PRAGMA", "SHOW", "EXPLAIN",
+        "CREATE", "DROP", "ALTER", "REPLACE",
+    ];
+
+    if !trimmed_sql.is_empty() && !sql_keywords.contains(&first_word.as_str()) && !trimmed_sql.contains(';') {
+        // Plain text scalar message without needing SQL syntax
+        return Ok(Json(json!({ "message": trimmed_sql })));
+    }
+
     let statements = split_sql_statements(&ep.sql);
     if statements.is_empty() {
         return Err((

@@ -452,6 +452,7 @@ let currentCollection = "users";
       if (view === 'endpoints') {
         updateCustomEpUrlPreview();
         loadCustomEndpoints();
+        populateQbTables();
       } else if (view === 'settings') {
         renderQuickMatrixTable();
         loadAppSettings();
@@ -466,14 +467,53 @@ let currentCollection = "users";
     let currentCustomEpId = null;
 
     function isOverrideEndpointPath(rawPath) {
-      const clean = (rawPath || '').trim().replace(/^\/+/, '');
-      return clean.startsWith('api/') || clean.startsWith('collections/');
+      if (!rawPath) return false;
+      const clean = rawPath.trim().replace(/^\/+/, '').toLowerCase();
+
+      // Core built-in system routes
+      if (clean === 'api/health' || clean === 'api/collections' || clean === 'api/realtime') {
+        return true;
+      }
+
+      // Built-in collection default routes (e.g. api/collections/banks/delete-all, api/collections/banks/records)
+      for (const c of (collections || [])) {
+        const colName = (c.name || '').toLowerCase();
+        if (!colName) continue;
+
+        const prefix = `api/collections/${colName}/`;
+        if (clean.startsWith(prefix)) {
+          const action = clean.substring(prefix.length);
+          if (
+            action === 'records' ||
+            action === 'records/all' ||
+            action.startsWith('records/') ||
+            action === 'delete-all' ||
+            action === 'truncate' ||
+            action === 'import' ||
+            action === 'export' ||
+            action === 'auth-with-password' ||
+            action === 'request-password-reset' ||
+            action === 'confirm-password-reset' ||
+            action === 'request-verification' ||
+            action === 'confirm-verification'
+          ) {
+            return true;
+          }
+        }
+
+        // Legacy / framework full dump route: api/{collection}/all
+        if (clean === `api/${colName}/all`) {
+          return true;
+        }
+      }
+
+      return false;
     }
 
     function onCustomEpPrefixChange(val) {
       const customInput = document.getElementById('epCustomPrefixInput');
       if (customInput) {
-        if (val === 'custom') {
+        if (val === 'custom' || val === '__custom__') {
           customInput.classList.remove('hidden');
           customInput.focus();
         } else {
@@ -484,39 +524,75 @@ let currentCollection = "users";
     }
 
     function getSelectedPrefix() {
-      const sel = document.getElementById('epPrefixSelect')?.value || '/api/';
-      if (sel === 'custom') {
+      const sel = document.getElementById('epPrefixSelect')?.value;
+      if (sel === 'custom' || sel === '__custom__') {
         let p = (document.getElementById('epCustomPrefixInput')?.value || '').trim();
-        if (!p) return '/';
-        if (!p.startsWith('/')) p = '/' + p;
+        if (!p) return '';
         if (!p.endsWith('/')) p = p + '/';
         return p;
       }
-      return sel;
+      return sel !== undefined && sel !== null ? sel : '';
     }
 
     function getCombinedEndpointPath() {
-      const rawSlug = (document.getElementById('epPathInput')?.value || '').trim();
+      let rawSlug = (document.getElementById('epPathInput')?.value || '').trim();
       if (!rawSlug) return '';
-      // If user typed a full route directly e.g. "api/..." or "/..."
-      if (rawSlug.startsWith('/') || rawSlug.startsWith('api/') || rawSlug.startsWith('collections/')) {
-        return rawSlug.replace(/^\/+/, '');
+      rawSlug = rawSlug.replace(/^\/+/, '');
+
+      const prefix = getSelectedPrefix(); // e.g. "", "v1/", "custom/", "collections/", "/", or custom
+
+      // If user selected root "/" (outside /api)
+      if (prefix === '/') {
+        return rawSlug;
       }
-      const prefix = getSelectedPrefix();
-      const combined = `${prefix}${rawSlug.replace(/^\/+/, '')}`.replace(/^\/+/, '');
-      return combined;
+
+      // If custom prefix outside /api (starts with '/')
+      if (prefix.startsWith('/') && !prefix.startsWith('/api')) {
+        return `${prefix.replace(/^\/+/, '')}${rawSlug}`;
+      }
+
+      // If user typed full path starting with "api/"
+      if (rawSlug.startsWith('api/')) {
+        return rawSlug;
+      }
+
+      // Default BaaS API routes: always prepend "api/"
+      const subPrefix = prefix.replace(/^\/?api\/?/, '').replace(/^\/+/, '');
+      const cleanSub = subPrefix ? (subPrefix.endsWith('/') ? subPrefix : subPrefix + '/') : '';
+
+      // Don't duplicate if user already typed the sub-prefix (e.g. typed "collections/banks" with prefix "collections/")
+      if (cleanSub && rawSlug.startsWith(cleanSub)) {
+        return `api/${rawSlug}`;
+      }
+
+      return `api/${cleanSub}${rawSlug}`;
     }
 
     function resolveEndpointFullPath(rawPath) {
       const clean = (rawPath || '').trim().replace(/^\/+/, '');
-      if (!clean) return '/api/coba';
+      if (!clean) return '/api/endpoint';
       return `/${clean}`;
     }
 
     function updateCustomEpUrlPreview() {
-      const combined = getCombinedEndpointPath() || 'coba';
-      const fullPath = resolveEndpointFullPath(combined);
-      const isOverride = isOverrideEndpointPath(combined);
+      const combined = getCombinedEndpointPath();
+      const prefix = getSelectedPrefix();
+
+      let fullPath;
+      if (combined) {
+        fullPath = `/${combined}`;
+      } else {
+        // Placeholder when path input is empty
+        if (prefix === '/') {
+          fullPath = '/endpoint';
+        } else if (prefix) {
+          fullPath = `/api/${prefix.replace(/^\/?api\/?/, '')}endpoint`.replace(/\/+/g, '/');
+        } else {
+          fullPath = '/api/endpoint';
+        }
+      }
+
+      const isOverride = isOverrideEndpointPath(combined || fullPath);
       const el = document.getElementById('epLiveUrlPreview');
       if (el) {
         el.textContent = `${window.location.origin}${fullPath}`;
@@ -675,7 +751,7 @@ let currentCollection = "users";
       document.getElementById('epNameInput').value = '';
       document.getElementById('epMethodInput').value = 'GET';
       const prefixEl = document.getElementById('epPrefixSelect');
-      if (prefixEl) prefixEl.value = '/api/';
+      if (prefixEl) prefixEl.value = '';
       const customPrefixEl = document.getElementById('epCustomPrefixInput');
       if (customPrefixEl) {
         customPrefixEl.value = '';
@@ -683,6 +759,7 @@ let currentCollection = "users";
       }
       document.getElementById('epPathInput').value = '';
       document.getElementById('epAuthRuleInput').value = 'public';
+      updateRoleDropdownUI('epAuthRuleInput');
       document.getElementById('epTransactionInput').checked = false;
       document.getElementById('epSingleRowInput').checked = false;
       document.getElementById('epSqlInput').value = `SELECT * FROM \`${currentCollection || 'users'}\` LIMIT :limit;`;
@@ -712,22 +789,22 @@ let currentCollection = "users";
       const customPrefixEl = document.getElementById('epCustomPrefixInput');
       const pathEl = document.getElementById('epPathInput');
 
-      if (p.startsWith('api/custom/')) {
-        if (prefixEl) prefixEl.value = '/api/custom/';
+      if (p.startsWith('api/collections/')) {
+        if (prefixEl) prefixEl.value = 'collections/';
+        if (customPrefixEl) customPrefixEl.classList.add('hidden');
+        if (pathEl) pathEl.value = p.substring('api/collections/'.length);
+      } else if (p.startsWith('api/custom/')) {
+        if (prefixEl) prefixEl.value = 'custom/';
         if (customPrefixEl) customPrefixEl.classList.add('hidden');
         if (pathEl) pathEl.value = p.substring('api/custom/'.length);
       } else if (p.startsWith('api/v1/')) {
-        if (prefixEl) prefixEl.value = '/api/v1/';
+        if (prefixEl) prefixEl.value = 'v1/';
         if (customPrefixEl) customPrefixEl.classList.add('hidden');
         if (pathEl) pathEl.value = p.substring('api/v1/'.length);
       } else if (p.startsWith('api/')) {
-        if (prefixEl) prefixEl.value = '/api/';
+        if (prefixEl) prefixEl.value = '';
         if (customPrefixEl) customPrefixEl.classList.add('hidden');
         if (pathEl) pathEl.value = p.substring('api/'.length);
-      } else if (!p.includes('/')) {
-        if (prefixEl) prefixEl.value = '/api/';
-        if (customPrefixEl) customPrefixEl.classList.add('hidden');
-        if (pathEl) pathEl.value = p;
       } else {
         if (prefixEl) prefixEl.value = '/';
         if (customPrefixEl) customPrefixEl.classList.add('hidden');
@@ -735,6 +812,7 @@ let currentCollection = "users";
       }
 
       document.getElementById('epAuthRuleInput').value = ep.authRule || ep.auth_rule || 'public';
+      updateRoleDropdownUI('epAuthRuleInput');
       document.getElementById('epTransactionInput').checked = Boolean(ep.transaction);
       document.getElementById('epSingleRowInput').checked = Boolean(ep.singleRow || ep.single_row);
       document.getElementById('epSqlInput').value = ep.sql || '';
@@ -742,35 +820,595 @@ let currentCollection = "users";
       updateCustomEpUrlPreview();
     }
 
+    // ================= VISUAL QUERY BUILDER =================
+    let qbEditorMode = 'code'; // 'code' | 'visual'
+    let qbCurrentAction = 'SELECT'; // 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'COUNT'
+    let qbSelectedTable = '';
+    let qbSelectedColumns = new Set();
+    let qbFilterConditions = []; // Array of { logic: 'AND', col: '', op: '=', val: ':val' }
+
+    function qbEscapeAttr(str) {
+      if (str === null || str === undefined) return '';
+      return String(str).replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function switchEndpointEditorMode(mode) {
+      qbEditorMode = mode;
+      const codeBtn = document.getElementById('epModeCodeBtn');
+      const visualBtn = document.getElementById('epModeVisualBtn');
+      const codePane = document.getElementById('epSqlEditorPane');
+      const visualPane = document.getElementById('epVisualBuilderPane');
+
+      if (mode === 'visual') {
+        if (codeBtn) {
+          codeBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 text-slate-500 hover:text-slate-800 cursor-pointer";
+        }
+        if (visualBtn) {
+          visualBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 bg-white shadow-2xs text-amber-600 font-extrabold cursor-pointer";
+        }
+        if (codePane) codePane.classList.add('hidden');
+        if (visualPane) visualPane.classList.remove('hidden');
+
+        initQueryBuilder();
+      } else {
+        if (codeBtn) {
+          codeBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 bg-white shadow-2xs text-emerald-600 font-extrabold cursor-pointer";
+        }
+        if (visualBtn) {
+          visualBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 text-slate-500 hover:text-slate-800 cursor-pointer";
+        }
+        if (codePane) codePane.classList.remove('hidden');
+        if (visualPane) visualPane.classList.add('hidden');
+      }
+    }
+
+    function initQueryBuilder() {
+      populateQbTables();
+      if (!qbSelectedTable && collections.length > 0) {
+        qbSelectedTable = currentCollection || collections[0].name;
+        const sel = document.getElementById('qbTableSelect');
+        if (sel) sel.value = qbSelectedTable;
+        onQbTableChange(qbSelectedTable, false);
+      }
+    }
+
+    function populateQbTables() {
+      const sel = document.getElementById('qbTableSelect');
+      if (!sel) return;
+      const current = sel.value || qbSelectedTable || currentCollection;
+      sel.innerHTML = '<option value="">-- Choose a table --</option>' +
+        collections.map(c => `<option value="${c.name}" ${c.name === current ? 'selected' : ''}>${c.name} (${c.type || 'base'})</option>`).join('');
+    }
+
+    function getTableFieldsList(tableName) {
+      if (!tableName) return [];
+      const col = collections.find(c => c.name === tableName);
+      const cols = [{ name: 'id', type: 'text' }];
+      if (col && col.type === 'auth') {
+        cols.push(
+          { name: 'email', type: 'email' },
+          { name: 'username', type: 'text' },
+          { name: 'role', type: 'select' },
+          { name: 'verified', type: 'bool' }
+        );
+      }
+      if (col && Array.isArray(col.schema)) {
+        for (const f of col.schema) {
+          if (!cols.some(c => c.name === f.name)) {
+            cols.push({ name: f.name, type: f.type || 'text' });
+          }
+        }
+      }
+      if (!cols.some(c => c.name === 'created_at')) cols.push({ name: 'created_at', type: 'number' });
+      if (!cols.some(c => c.name === 'updated_at')) cols.push({ name: 'updated_at', type: 'number' });
+      return cols;
+    }
+
+    function onQbTableChange(tableName, shouldBuild = true) {
+      qbSelectedTable = tableName;
+      qbSelectedColumns.clear();
+
+      const fields = getTableFieldsList(tableName);
+      // Default: select all fields
+      fields.forEach(f => qbSelectedColumns.add(f.name));
+
+      renderQbColumns();
+      populateQbOrderByOptions();
+
+      // Clear or adapt filters to new table
+      qbFilterConditions = [];
+      renderQbFilters();
+
+      if (shouldBuild) {
+        buildSqlFromQb();
+      }
+    }
+
+    function setQbAction(action) {
+      qbCurrentAction = action;
+      ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'COUNT'].forEach(act => {
+        const btn = document.getElementById(`qbAction_${act}`);
+        if (!btn) return;
+        if (act === action) {
+          btn.className = "py-1.5 px-2 rounded-lg text-center transition bg-emerald-600 text-white shadow-2xs font-extrabold";
+        } else {
+          btn.className = "py-1.5 px-2 rounded-lg text-center transition text-slate-600 hover:text-slate-900";
+        }
+      });
+
+      const colsSec = document.getElementById('qbColumnsSection');
+      const orderSec = document.getElementById('qbOrderLimitSection');
+      const colsLabel = document.getElementById('qbColumnsLabel');
+
+      if (colsSec) {
+        if (action === 'DELETE' || action === 'COUNT') {
+          colsSec.classList.add('hidden');
+        } else {
+          colsSec.classList.remove('hidden');
+          if (action === 'SELECT') {
+            if (colsLabel) colsLabel.textContent = 'Select Columns to Return';
+          } else if (action === 'INSERT') {
+            if (colsLabel) colsLabel.textContent = 'Columns to Insert (Values)';
+          } else if (action === 'UPDATE') {
+            if (colsLabel) colsLabel.textContent = 'Columns to Update (SET)';
+          }
+        }
+      }
+
+      if (orderSec) {
+        if (action === 'SELECT') {
+          orderSec.classList.remove('hidden');
+        } else {
+          orderSec.classList.add('hidden');
+        }
+      }
+
+      // Sync HTTP method recommendation
+      const methodEl = document.getElementById('epMethodInput');
+      if (methodEl) {
+        if (action === 'SELECT' || action === 'COUNT') methodEl.value = 'GET';
+        else if (action === 'INSERT') methodEl.value = 'POST';
+        else if (action === 'UPDATE') methodEl.value = 'PATCH';
+        else if (action === 'DELETE') methodEl.value = 'DELETE';
+      }
+
+      buildSqlFromQb();
+    }
+
+    function renderQbColumns() {
+      const container = document.getElementById('qbColumnsContainer');
+      if (!container) return;
+
+      const fields = getTableFieldsList(qbSelectedTable);
+      if (fields.length === 0) {
+        container.innerHTML = '<span class="text-xs text-slate-400 italic">No table selected or table has no columns.</span>';
+        return;
+      }
+
+      container.innerHTML = fields.map(f => {
+        const isSelected = qbSelectedColumns.has(f.name);
+        return `
+          <button type="button" onclick="qbToggleColumn('${f.name}')" class="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition border flex items-center space-x-1.5 cursor-pointer ${
+            isSelected 
+              ? 'bg-emerald-50 border-emerald-400 text-emerald-800 font-bold shadow-2xs' 
+              : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'
+          }">
+            <i class="fa-solid ${isSelected ? 'fa-check text-emerald-600' : 'fa-plus text-slate-300'} text-[10px]"></i>
+            <span>${f.name}</span>
+            <span class="text-[10px] text-slate-400 font-sans">(${f.type})</span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function qbToggleColumn(colName) {
+      if (qbSelectedColumns.has(colName)) {
+        qbSelectedColumns.delete(colName);
+      } else {
+        qbSelectedColumns.add(colName);
+      }
+      renderQbColumns();
+      buildSqlFromQb();
+    }
+
+    function qbSelectAllColumns(selectAll) {
+      const fields = getTableFieldsList(qbSelectedTable);
+      if (selectAll) {
+        fields.forEach(f => qbSelectedColumns.add(f.name));
+      } else {
+        qbSelectedColumns.clear();
+      }
+      renderQbColumns();
+      buildSqlFromQb();
+    }
+
+    function populateQbOrderByOptions() {
+      const sel = document.getElementById('qbOrderByCol');
+      if (!sel) return;
+      const current = sel.value;
+      const fields = getTableFieldsList(qbSelectedTable);
+      sel.innerHTML = '<option value="">(None - Natural)</option>' +
+        fields.map(f => `<option value="${f.name}" ${f.name === current ? 'selected' : ''}>${f.name}</option>`).join('');
+    }
+
+    function addQbFilterRow() {
+      const fields = getTableFieldsList(qbSelectedTable);
+      const defaultCol = fields.find(f => f.name === 'status')?.name || fields[0]?.name || 'id';
+      qbFilterConditions.push({
+        logic: qbFilterConditions.length === 0 ? 'WHERE' : 'AND',
+        col: defaultCol,
+        op: '=',
+        val: `:${defaultCol}`
+      });
+      renderQbFilters();
+      buildSqlFromQb();
+    }
+
+    function removeQbFilterRow(idx) {
+      qbFilterConditions.splice(idx, 1);
+      renderQbFilters();
+      buildSqlFromQb();
+    }
+
+    function onQbFilterChange(idx, key, val) {
+      if (qbFilterConditions[idx]) {
+        qbFilterConditions[idx][key] = val;
+        if (key === 'col' && (!qbFilterConditions[idx].val || qbFilterConditions[idx].val.startsWith(':'))) {
+          qbFilterConditions[idx].val = `:${val}`;
+        }
+        renderQbFilters();
+        buildSqlFromQb();
+      }
+    }
+
+    function renderQbFilters() {
+      const container = document.getElementById('qbFiltersContainer');
+      if (!container) return;
+
+      if (qbFilterConditions.length === 0) {
+        container.innerHTML = '<div id="qbEmptyFiltersNotice" class="text-xs text-slate-400 italic py-1">No filter conditions. All matching rows will be affected.</div>';
+        return;
+      }
+
+      const fields = getTableFieldsList(qbSelectedTable);
+
+      container.innerHTML = qbFilterConditions.map((cond, idx) => {
+        return `
+          <div class="flex items-center space-x-2 bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs">
+            ${idx > 0 ? `
+              <select onchange="onQbFilterChange(${idx}, 'logic', this.value)" class="bg-white border border-slate-300 rounded-lg px-2 py-1 font-bold text-indigo-700 text-xs font-mono">
+                <option value="AND" ${cond.logic === 'AND' ? 'selected' : ''}>AND</option>
+                <option value="OR" ${cond.logic === 'OR' ? 'selected' : ''}>OR</option>
+              </select>
+            ` : `
+              <span class="px-2.5 py-1 text-slate-500 font-mono font-bold text-xs">WHERE</span>
+            `}
+
+            <!-- Column -->
+            <select onchange="onQbFilterChange(${idx}, 'col', this.value)" class="bg-white border border-slate-300 rounded-lg px-2 py-1 font-mono text-xs text-slate-800">
+              ${fields.map(f => `<option value="${f.name}" ${f.name === cond.col ? 'selected' : ''}>${f.name}</option>`).join('')}
+            </select>
+
+            <!-- Operator -->
+            <select onchange="onQbFilterChange(${idx}, 'op', this.value)" class="bg-white border border-slate-300 rounded-lg px-2 py-1 font-mono font-bold text-xs text-slate-800">
+              <option value="=" ${cond.op === '=' ? 'selected' : ''}>= (Equal)</option>
+              <option value="!=" ${cond.op === '!=' ? 'selected' : ''}>!= (Not Equal)</option>
+              <option value=">" ${cond.op === '>' ? 'selected' : ''}>&gt; (Greater)</option>
+              <option value=">=" ${cond.op === '>=' ? 'selected' : ''}>&gt;= (Greater or Equal)</option>
+              <option value="<" ${cond.op === '<' ? 'selected' : ''}>&lt; (Less)</option>
+              <option value="<=" ${cond.op === '<=' ? 'selected' : ''}>&lt;= (Less or Equal)</option>
+              <option value="LIKE" ${cond.op === 'LIKE' ? 'selected' : ''}>LIKE (%term%)</option>
+              <option value="IN" ${cond.op === 'IN' ? 'selected' : ''}>IN (:list)</option>
+              <option value="IS NULL" ${cond.op === 'IS NULL' ? 'selected' : ''}>IS NULL</option>
+              <option value="IS NOT NULL" ${cond.op === 'IS NOT NULL' ? 'selected' : ''}>IS NOT NULL</option>
+            </select>
+
+            <!-- Value / Param -->
+            ${cond.op !== 'IS NULL' && cond.op !== 'IS NOT NULL' ? `
+              <input type="text" oninput="onQbFilterChange(${idx}, 'val', this.value)" value="${qbEscapeAttr(cond.val || '')}" placeholder=":${cond.col || 'param'}" class="flex-1 bg-white border border-slate-300 rounded-lg px-2.5 py-1 font-mono text-xs">
+            ` : ''}
+
+            <!-- Delete -->
+            <button type="button" onclick="removeQbFilterRow(${idx})" class="p-1.5 text-slate-400 hover:text-rose-600 transition rounded-lg hover:bg-rose-50 cursor-pointer" title="Remove condition">
+              <i class="fa-solid fa-trash-can text-xs"></i>
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function applyQbPlainText(message = 'hello') {
+      const nameEl = document.getElementById('epNameInput');
+      const pathEl = document.getElementById('epPathInput');
+      const methodEl = document.getElementById('epMethodInput');
+      const singleEl = document.getElementById('epSingleRowInput');
+      const sqlEl = document.getElementById('epSqlInput');
+      const paramsEl = document.getElementById('epTestParamsInput');
+
+      if (nameEl && !nameEl.value) nameEl.value = 'Hello Message API';
+      if (pathEl && !pathEl.value) pathEl.value = 'hello';
+      if (methodEl) methodEl.value = 'GET';
+      if (singleEl) singleEl.checked = true;
+
+      // Direct string response without SQL
+      if (sqlEl) sqlEl.value = `'${message}'`;
+      if (paramsEl) paramsEl.value = '{}';
+
+      updateCustomEpUrlPreview();
+      showToast(`Set direct plain text '${message}' (No SQL)`);
+    }
+
+    function buildSqlFromQb(force = false) {
+      const autoSync = document.getElementById('qbAutoSyncCheckbox')?.checked;
+      if (!autoSync && !force) return;
+
+      const table = qbSelectedTable || 'users';
+      const allFields = getTableFieldsList(table);
+      let sql = '';
+      const paramsObj = {};
+
+      // Determine WHERE clause
+      let whereClause = '';
+      if (qbFilterConditions.length > 0) {
+        const parts = qbFilterConditions.map((c, i) => {
+          const prefix = i === 0 ? '' : ` ${c.logic} `;
+          if (c.op === 'IS NULL' || c.op === 'IS NOT NULL') {
+            return `${prefix}\`${c.col}\` ${c.op}`;
+          } else if (c.op === 'LIKE') {
+            const paramName = (c.val || `:${c.col}`).replace(/^:/, '');
+            paramsObj[paramName] = "test";
+            return `${prefix}\`${c.col}\` LIKE '%' || :${paramName} || '%'`;
+          } else {
+            const val = c.val || `:${c.col}`;
+            if (val.startsWith(':')) {
+              const pName = val.replace(/^:/, '');
+              paramsObj[pName] = pName === 'id' ? "1" : (pName.includes('limit') ? 10 : "active");
+            }
+            return `${prefix}\`${c.col}\` ${c.op} ${val}`;
+          }
+        });
+        whereClause = `\nWHERE ${parts.join('')}`;
+      }
+
+      if (qbCurrentAction === 'SELECT') {
+        let colsList = '*';
+        if (qbSelectedColumns.size > 0 && qbSelectedColumns.size < allFields.length) {
+          colsList = Array.from(qbSelectedColumns).map(c => `\`${c}\``).join(', ');
+        }
+
+        const orderByCol = document.getElementById('qbOrderByCol')?.value;
+        const orderDir = document.getElementById('qbOrderDir')?.value || 'DESC';
+        let orderClause = '';
+        if (orderByCol) {
+          orderClause = `\nORDER BY \`${orderByCol}\` ${orderDir}`;
+        }
+
+        const limitVal = document.getElementById('qbLimitInput')?.value?.trim();
+        const offsetVal = document.getElementById('qbOffsetInput')?.value?.trim();
+        let limitClause = '';
+        if (limitVal) {
+          limitClause = `\nLIMIT ${limitVal}`;
+          if (limitVal.startsWith(':')) paramsObj[limitVal.replace(/^:/, '')] = 10;
+        }
+        if (offsetVal) {
+          limitClause += ` OFFSET ${offsetVal}`;
+          if (offsetVal.startsWith(':')) paramsObj[offsetVal.replace(/^:/, '')] = 0;
+        }
+
+        sql = `SELECT ${colsList}\nFROM \`${table}\`${whereClause}${orderClause}${limitClause};`;
+
+      } else if (qbCurrentAction === 'INSERT') {
+        const targetCols = qbSelectedColumns.size > 0 
+          ? Array.from(qbSelectedColumns).filter(c => c !== 'id' && c !== 'created_at' && c !== 'updated_at')
+          : allFields.map(f => f.name).filter(c => c !== 'id' && c !== 'created_at' && c !== 'updated_at');
+
+        const colNames = targetCols.map(c => `\`${c}\``).join(', ');
+        const valNames = targetCols.map(c => `:${c}`).join(', ');
+
+        targetCols.forEach(c => {
+          const f = allFields.find(x => x.name === c);
+          paramsObj[c] = f?.type === 'number' ? 100 : (f?.type === 'bool' ? true : `sample_${c}`);
+        });
+
+        sql = `INSERT INTO \`${table}\` (${colNames})\nVALUES (${valNames});`;
+
+      } else if (qbCurrentAction === 'UPDATE') {
+        const targetCols = qbSelectedColumns.size > 0 
+          ? Array.from(qbSelectedColumns).filter(c => c !== 'id' && c !== 'created_at' && c !== 'updated_at')
+          : allFields.map(f => f.name).filter(c => c !== 'id' && c !== 'created_at' && c !== 'updated_at');
+
+        const setClauses = targetCols.map(c => `\`${c}\` = :${c}`).join(', ');
+
+        targetCols.forEach(c => {
+          const f = allFields.find(x => x.name === c);
+          paramsObj[c] = f?.type === 'number' ? 200 : (f?.type === 'bool' ? false : `updated_${c}`);
+        });
+
+        const effectiveWhere = whereClause ? whereClause : '\nWHERE `id` = :id';
+        if (!whereClause) paramsObj['id'] = "1";
+
+        sql = `UPDATE \`${table}\`\nSET ${setClauses}${effectiveWhere};`;
+
+      } else if (qbCurrentAction === 'DELETE') {
+        const effectiveWhere = whereClause ? whereClause : '\nWHERE `id` = :id';
+        if (!whereClause) paramsObj['id'] = "1";
+
+        sql = `DELETE FROM \`${table}\`${effectiveWhere};`;
+
+      } else if (qbCurrentAction === 'COUNT') {
+        sql = `SELECT COUNT(*) AS total_count\nFROM \`${table}\`${whereClause};`;
+        const singleEl = document.getElementById('epSingleRowInput');
+        if (singleEl) singleEl.checked = true;
+      }
+
+      const sqlEl = document.getElementById('epSqlInput');
+      if (sqlEl) sqlEl.value = sql;
+
+      const paramsEl = document.getElementById('epTestParamsInput');
+      if (paramsEl && Object.keys(paramsObj).length > 0) {
+        paramsEl.value = JSON.stringify(paramsObj, null, 2);
+      }
+    }
+
     function applySqlEndpointTemplate(kind) {
-      const table = currentCollection || 'users';
+      if (!kind) return;
+      const table = currentCollection || 'orders';
+      const nameEl = document.getElementById('epNameInput');
       const sqlEl = document.getElementById('epSqlInput');
       const methodEl = document.getElementById('epMethodInput');
       const txEl = document.getElementById('epTransactionInput');
+      const singleEl = document.getElementById('epSingleRowInput');
       const paramsEl = document.getElementById('epTestParamsInput');
+      const pathEl = document.getElementById('epPathInput');
+
       if (!sqlEl) return;
 
-      if (kind === 'select') {
-        sqlEl.value = `SELECT * FROM \`${table}\`\nWHERE \`id\` = :id OR :id IS NULL\nORDER BY \`created\` DESC\nLIMIT :limit;`;
-        if (methodEl) methodEl.value = 'GET';
-        if (txEl) txEl.checked = false;
-        if (paramsEl) paramsEl.value = '{\n  "limit": 10\n}';
-      } else if (kind === 'stats') {
-        sqlEl.value = `SELECT COUNT(*) as \`total_records\`\nFROM \`${table}\`;`;
-        if (methodEl) methodEl.value = 'GET';
-        if (txEl) txEl.checked = false;
-        if (paramsEl) paramsEl.value = '{}';
-      } else if (kind === 'join') {
-        sqlEl.value = `SELECT a.*, u.email as user_email\nFROM \`${table}\` a\nLEFT JOIN \`users\` u ON a.user_id = u.id\nLIMIT :limit;`;
-        if (methodEl) methodEl.value = 'GET';
-        if (txEl) txEl.checked = false;
-        if (paramsEl) paramsEl.value = '{\n  "limit": 20\n}';
-      } else if (kind === 'tx') {
-        sqlEl.value = `UPDATE \`${table}\` SET \`updated\` = :now WHERE \`id\` = :id;\nSELECT * FROM \`${table}\` WHERE \`id\` = :id;`;
-        if (methodEl) methodEl.value = 'POST';
-        if (txEl) txEl.checked = true;
-        if (paramsEl) paramsEl.value = `{\n  "id": "1",\n  "now": "${new Date().toISOString()}"\n}`;
+      switch (kind) {
+        case 'simple_text':
+          if (nameEl && !nameEl.value) nameEl.value = 'Hello World Direct Text';
+          if (pathEl && !pathEl.value) pathEl.value = 'hello';
+          if (methodEl) methodEl.value = 'GET';
+          if (txEl) txEl.checked = false;
+          if (singleEl) singleEl.checked = true;
+          // Direct string response without SQL
+          sqlEl.value = `'hello'`;
+          if (paramsEl) {
+            paramsEl.value = '{}';
+          }
+          break;
+
+        case 'kasir_transaction':
+          if (nameEl && !nameEl.value) nameEl.value = 'POS Cashier Checkout Transaction';
+          if (pathEl && !pathEl.value) pathEl.value = 'pos/checkout';
+          if (methodEl) methodEl.value = 'POST';
+          if (txEl) txEl.checked = true;
+          if (singleEl) singleEl.checked = false;
+          sqlEl.value = `-- ================================================================\n-- 🛒 POS / Cashier Checkout (Multi-Table Atomic Transaction)\n-- All queries below run inside a single database transaction.\n-- If any error occurs or stock is insufficient, all changes are ROLLED BACK.\n-- ================================================================\n\n-- 1. Insert into Header Table (orders / sales)\nINSERT INTO \`orders\` (\`id\`, \`customer_name\`, \`total_amount\`, \`payment_method\`, \`cashier_id\`, \`status\`)\nVALUES (:order_id, :customer_name, :total_amount, :payment_method, :cashier_id, 'completed');\n\n-- 2. Insert into Detail Table (order_items / sale_details)\nINSERT INTO \`order_items\` (\`order_id\`, \`product_id\`, \`product_name\`, \`quantity\`, \`price\`, \`subtotal\`)\nVALUES (:order_id, :product_id, :product_name, :quantity, :price, :subtotal);\n\n-- 3. Deduct product inventory stock in Products Table\nUPDATE \`products\`\nSET \`stock\` = \`stock\` - :quantity\nWHERE \`id\` = :product_id AND \`stock\` >= :quantity;`;
+          if (paramsEl) {
+            paramsEl.value = JSON.stringify({
+              order_id: `ORD-${Date.now().toString().slice(-6)}`,
+              customer_name: "Walk-in Customer",
+              total_amount: 150.00,
+              payment_method: "cash",
+              cashier_id: "cashier_01",
+              product_id: "PRD-001",
+              product_name: "Premium Coffee Beans 1kg",
+              quantity: 2,
+              price: 75.00,
+              subtotal: 150.00
+            }, null, 2);
+          }
+          break;
+
+        case 'multi_table_insert':
+          if (nameEl && !nameEl.value) nameEl.value = 'Multi-Table Transaction (Table 1 + Table 2)';
+          if (pathEl && !pathEl.value) pathEl.value = 'transactions/create';
+          if (methodEl) methodEl.value = 'POST';
+          if (txEl) txEl.checked = true;
+          if (singleEl) singleEl.checked = false;
+          sqlEl.value = `-- ================================================================\n-- 📦 Multi-Table Transaction: Insert Table 1 & Table 2 Atomically\n-- ================================================================\n\n-- 1. Insert into Primary Table (Header / Parent Record)\nINSERT INTO \`transactions\` (\`id\`, \`reference_no\`, \`amount\`, \`notes\`)\nVALUES (:trx_id, :ref_no, :amount, :notes);\n\n-- 2. Insert into Secondary Table (Log / Detail / Audit Trail)\nINSERT INTO \`transaction_logs\` (\`transaction_id\`, \`action\`, \`user_id\`, \`details\`)\nVALUES (:trx_id, 'CREATED', :user_id, :details);`;
+          if (paramsEl) {
+            paramsEl.value = JSON.stringify({
+              trx_id: `TRX-${Date.now().toString().slice(-6)}`,
+              ref_no: `INV/${new Date().getFullYear()}/001`,
+              amount: 250.00,
+              notes: "Service Subscription Payment",
+              user_id: "usr_admin",
+              details: "Created via Custom SQL API"
+            }, null, 2);
+          }
+          break;
+
+        case 'dashboard_summary':
+          if (nameEl && !nameEl.value) nameEl.value = 'Dashboard Metrics & Summary';
+          if (pathEl && !pathEl.value) pathEl.value = 'dashboard/summary';
+          if (methodEl) methodEl.value = 'GET';
+          if (txEl) txEl.checked = false;
+          if (singleEl) singleEl.checked = true;
+          sqlEl.value = `-- ================================================================\n-- 📊 Dashboard Metrics: Total Records, Status Counts & Revenue\n-- Enable "Single Row Result" to return a clean single JSON object.\n-- ================================================================\nSELECT\n  COUNT(*) AS \`total_records\`,\n  COUNT(CASE WHEN \`status\` = 'active' OR \`status\` = 'completed' THEN 1 END) AS \`active_count\`,\n  COUNT(CASE WHEN \`status\` = 'pending' THEN 1 END) AS \`pending_count\`,\n  COALESCE(SUM(\`total_amount\`), 0) AS \`total_revenue\`,\n  COALESCE(AVG(\`total_amount\`), 0) AS \`average_amount\`,\n  MAX(\`created_at\`) AS \`latest_activity\`\nFROM \`${table}\`;`;
+          if (paramsEl) paramsEl.value = '{}';
+          break;
+
+        case 'dashboard_trends':
+          if (nameEl && !nameEl.value) nameEl.value = 'Dashboard Status & Trends Breakdown';
+          if (pathEl && !pathEl.value) pathEl.value = 'dashboard/trends';
+          if (methodEl) methodEl.value = 'GET';
+          if (txEl) txEl.checked = false;
+          if (singleEl) singleEl.checked = false;
+          sqlEl.value = `-- ================================================================\n-- 📈 Dashboard Trends / Breakdown by Status or Category\n-- ================================================================\nSELECT\n  \`status\`,\n  COUNT(*) AS \`count\`,\n  COALESCE(SUM(\`total_amount\`), 0) AS \`total_value\`\nFROM \`${table}\`\nGROUP BY \`status\`\nORDER BY \`count\` DESC;`;
+          if (paramsEl) paramsEl.value = '{}';
+          break;
+
+        case 'search_pagination':
+          if (nameEl && !nameEl.value) nameEl.value = 'Search Records with Pagination';
+          if (pathEl && !pathEl.value) pathEl.value = 'search/items';
+          if (methodEl) methodEl.value = 'GET';
+          if (txEl) txEl.checked = false;
+          if (singleEl) singleEl.checked = false;
+          sqlEl.value = `-- ================================================================\n-- 🔍 Search & Filter Records with Limit & Offset Pagination\n-- ================================================================\nSELECT *\nFROM \`${table}\`\nWHERE (:search IS NULL OR :search = '' OR \`name\` LIKE '%' || :search || '%')\nORDER BY \`id\` DESC\nLIMIT :limit OFFSET :offset;`;
+          if (paramsEl) {
+            paramsEl.value = JSON.stringify({
+              search: "",
+              limit: 10,
+              offset: 0
+            }, null, 2);
+          }
+          break;
+
+        case 'join_relation':
+          if (nameEl && !nameEl.value) nameEl.value = 'Orders with Customer Details';
+          if (pathEl && !pathEl.value) pathEl.value = 'reports/orders-joined';
+          if (methodEl) methodEl.value = 'GET';
+          if (txEl) txEl.checked = false;
+          if (singleEl) singleEl.checked = false;
+          sqlEl.value = `-- ================================================================\n-- 🔗 JOIN Query: Combine Header Table with Related Customer Data\n-- ================================================================\nSELECT \n  o.\`id\` AS order_id,\n  o.\`total_amount\`,\n  o.\`status\`,\n  u.\`name\` AS customer_name,\n  u.\`email\` AS customer_email\nFROM \`orders\` o\nLEFT JOIN \`users\` u ON o.\`customer_id\` = u.\`id\`\nORDER BY o.\`id\` DESC\nLIMIT :limit;`;
+          if (paramsEl) {
+            paramsEl.value = JSON.stringify({
+              limit: 20
+            }, null, 2);
+          }
+          break;
+
+        case 'upsert':
+          if (nameEl && !nameEl.value) nameEl.value = 'Upsert Record (Insert or Update)';
+          if (pathEl && !pathEl.value) pathEl.value = 'records/upsert';
+          if (methodEl) methodEl.value = 'POST';
+          if (txEl) txEl.checked = true;
+          if (singleEl) singleEl.checked = false;
+          sqlEl.value = `-- ================================================================\n-- 🔄 Upsert: Insert if new, or Update if Primary Key exists\n-- ================================================================\nINSERT INTO \`${table}\` (\`id\`, \`name\`, \`status\`)\nVALUES (:id, :name, :status)\nON CONFLICT (\`id\`) DO UPDATE SET\n  \`name\` = excluded.\`name\`,\n  \`status\` = excluded.\`status\`;`;
+          if (paramsEl) {
+            paramsEl.value = JSON.stringify({
+              id: "REC-001",
+              name: "Sample Record",
+              status: "active"
+            }, null, 2);
+          }
+          break;
+
+        case 'bulk_update':
+          if (nameEl && !nameEl.value) nameEl.value = 'Bulk Update Status';
+          if (pathEl && !pathEl.value) pathEl.value = 'records/update-status';
+          if (methodEl) methodEl.value = 'POST';
+          if (txEl) txEl.checked = true;
+          if (singleEl) singleEl.checked = false;
+          sqlEl.value = `-- ================================================================\n-- ✏️ Update Record Status with Parameters\n-- ================================================================\nUPDATE \`${table}\`\nSET \`status\` = :status, \`updated_at\` = :updated_at\nWHERE \`id\` = :id;`;
+          if (paramsEl) {
+            paramsEl.value = JSON.stringify({
+              id: "1",
+              status: "approved",
+              updated_at: Math.floor(Date.now() / 1000).toString()
+            }, null, 2);
+          }
+          break;
+
+        default:
+          sqlEl.value = `SELECT * FROM \`${table}\` LIMIT :limit;`;
+          if (paramsEl) paramsEl.value = '{\n  "limit": 10\n}';
+          break;
       }
+
+      updateCustomEpUrlPreview();
+      showToast('SQL Template applied.');
     }
 
     function insertSqlToken(token) {

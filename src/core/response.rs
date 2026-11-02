@@ -13,7 +13,7 @@ use axum::{
 use serde_json::{json, Map, Value};
 
 use super::app::AppState;
-use super::db::{current_queries, current_query_count, REQUEST_QUERIES};
+use super::db::REQUEST_QUERIES;
 use super::env::{Env, ResponseFormat};
 
 tokio::task_local! {
@@ -43,7 +43,13 @@ pub fn status_code_name(code: u16) -> &'static str {
 
 /// Transform a JSON value into Padi Rust Api Framework response format (`full` | `simple` | `raw`)
 /// using O(1) in-place moves instead of deep cloning.
-pub fn format_padi_json(status: u16, raw: Value, db_driver: &str, elapsed_ms: f64) -> Value {
+pub fn format_padi_json(
+    status: u16,
+    raw: Value,
+    db_driver: &str,
+    elapsed_ms: f64,
+    queries: &[super::db::QueryLog],
+) -> Value {
     let format = Env::response_format();
     if format == ResponseFormat::Raw {
         return raw;
@@ -168,8 +174,8 @@ pub fn format_padi_json(status: u16, raw: Value, db_driver: &str, elapsed_ms: f6
                 "env": app_env,
                 "database": db_driver,
                 "execution_time": format!("{:.2}ms", elapsed_ms),
-                "queries_count": current_query_count(),
-                "queries": current_queries(),
+                "queries_count": queries.len(),
+                "queries": queries,
                 "timestamp": chrono::Local::now().to_rfc3339(),
             }),
         );
@@ -225,15 +231,18 @@ pub async fn padi_response_middleware(
         }
     };
 
-    let res = if debug_enabled {
+    let (res, captured_queries) = if debug_enabled {
         let queries = std::sync::Arc::new(std::sync::Mutex::new(Vec::with_capacity(4)));
-        REQUEST_QUERIES
+        let q_clone = queries.clone();
+        let r = REQUEST_QUERIES
             .scope(queries, async move {
                 REQUEST_START.scope(start, exec_req).await
             })
-            .await
+            .await;
+        let logs = q_clone.lock().map(|l| l.clone()).unwrap_or_default();
+        (r, logs)
     } else {
-        exec_req.await
+        (exec_req.await, Vec::new())
     };
 
     if Env::response_format() == ResponseFormat::Raw && !debug_enabled {
@@ -278,7 +287,13 @@ pub async fn padi_response_middleware(
         return Response::from_parts(parts, Body::from(bytes));
     };
 
-    let formatted = format_padi_json(status.as_u16(), raw_json, db_driver, elapsed_ms);
+    let formatted = format_padi_json(
+        status.as_u16(),
+        raw_json,
+        db_driver,
+        elapsed_ms,
+        &captured_queries,
+    );
     let out_bytes = serde_json::to_vec(&formatted).unwrap_or_else(|_| bytes.to_vec());
 
     parts.headers.remove(header::CONTENT_LENGTH);
