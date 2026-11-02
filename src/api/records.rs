@@ -13,7 +13,7 @@ use crate::core::auth::{authenticate_headers, check_permission, RecordAction};
 use crate::core::db::get_collection_by_name_or_id;
 use crate::core::realtime::RealtimeMessage;
 use crate::core::record::{
-    create_record, delete_record, get_all_records, get_all_records_with, get_record,
+    create_record, delete_record, get_all_records, get_all_records_with_limit, get_record,
     get_record_with, list_records_with, update_record,
 };
 
@@ -22,6 +22,7 @@ pub struct SingleParams {
     pub with: Option<String>,
     pub expand: Option<String>,
     pub auto_load: Option<bool>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Deserialize, Default)]
@@ -35,6 +36,7 @@ pub struct ListParams {
     pub with: Option<String>,
     pub expand: Option<String>,
     pub auto_load: Option<bool>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Deserialize, Default)]
@@ -55,6 +57,13 @@ pub struct AllParams {
     pub with: Option<String>,
     pub expand: Option<String>,
     pub auto_load: Option<bool>,
+    pub limit: Option<usize>,
+    #[serde(rename = "perPage")]
+    pub per_page_camel: Option<usize>,
+    #[serde(rename = "per_page")]
+    pub per_page: Option<usize>,
+    pub offset: Option<usize>,
+    pub skip: Option<usize>,
 }
 
 pub fn parse_with_param(
@@ -81,6 +90,34 @@ pub fn parse_with_param(
         return Some(vec!["*".to_string()]);
     }
     None
+}
+
+pub async fn validate_role_if_present(
+    db: &crate::core::db::DbPool,
+    payload: &Map<String, Value>,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    if let Some(role_val) = payload.get("role") {
+        if let Some(role_str) = role_val.as_str() {
+            let trimmed = role_str.trim();
+            if !trimmed.is_empty() {
+                let valid_roles = crate::core::db::get_available_roles(db).await;
+                if !valid_roles.iter().any(|r| r.eq_ignore_ascii_case(trimmed)) {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({
+                            "code": 400,
+                            "message": format!(
+                                "Role '{}' is not available. Available roles are: {}",
+                                trimmed,
+                                valid_roles.join(", ")
+                            )
+                        })),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn resolve_all_sort_and_filter(params: &AllParams) -> (Option<String>, Option<String>) {
@@ -158,12 +195,20 @@ pub async fn list(
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
 
     if params.all.unwrap_or(false) || params.per_page == Some(-1) || params.per_page == Some(0) {
-        let records = get_all_records_with(
+        let requested_limit = params.limit;
+        let effective_limit = match requested_limit {
+            Some(l) if l > 0 => std::cmp::min(l, 5000),
+            _ => 5000,
+        };
+
+        let records = get_all_records_with_limit(
             &state.db,
             &col,
             params.sort.as_deref(),
             params.filter.as_deref(),
             with_refs.as_deref(),
+            Some(effective_limit),
+            None,
         )
         .await
         .map_err(|e| {
@@ -231,12 +276,22 @@ pub async fn all(
     let with_vec = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
 
-    let records = get_all_records_with(
+    // Capped at maximum 5000 records to prevent excessive data fetching, while allowing user to specify a custom limit <= 5000
+    let requested_limit = params.limit.or(params.per_page).or(params.per_page_camel);
+    let effective_limit = match requested_limit {
+        Some(l) if l > 0 => std::cmp::min(l, 5000),
+        _ => 5000,
+    };
+    let offset = params.offset.or(params.skip);
+
+    let records = get_all_records_with_limit(
         &state.db,
         &col,
         sort_clause.as_deref(),
         filter_clause.as_deref(),
         with_refs.as_deref(),
+        Some(effective_limit),
+        offset,
     )
     .await
     .map_err(|e| {
@@ -256,9 +311,20 @@ pub async fn get_one(
     headers: axum::http::HeaderMap,
 ) -> Result<Response, (StatusCode, Json<Value>)> {
     if id.eq_ignore_ascii_case("all") {
-        return all(State(state), Path(collection_name), Query(AllParams::default()), headers)
-            .await
-            .map(|r| r.into_response());
+        return all(
+            State(state),
+            Path(collection_name),
+            Query(AllParams {
+                with: params.with,
+                expand: params.expand,
+                auto_load: params.auto_load,
+                limit: params.limit,
+                ..Default::default()
+            }),
+            headers,
+        )
+        .await
+        .map(|r| r.into_response());
     }
     let col = get_collection_by_name_or_id(&state.db, &collection_name)
         .await
@@ -408,7 +474,20 @@ pub async fn create(
     let auth = authenticate_headers(req.headers())?;
     check_permission(RecordAction::Create, &col, auth.as_ref(), None)?;
 
-    let (payload, pending_files) = parse_request_payload(req, &state).await?;
+    let (mut payload, pending_files) = parse_request_payload(req, &state).await?;
+    validate_role_if_present(&state.db, &payload).await?;
+
+    let auth_user_id = auth.as_ref().map(|c| c.sub.clone());
+    if col.blameable || col.collection_type == crate::core::schema::CollectionType::Auth {
+        if let Some(ref uid) = auth_user_id {
+            if !payload.contains_key("created_by") {
+                payload.insert("created_by".to_string(), Value::String(uid.clone()));
+            }
+            if !payload.contains_key("updated_by") {
+                payload.insert("updated_by".to_string(), Value::String(uid.clone()));
+            }
+        }
+    }
 
     let mut record = create_record(&state.db, &col, payload)
         .await
@@ -500,6 +579,7 @@ pub async fn update(
     )?;
 
     let (mut payload, pending_files) = parse_request_payload(req, &state).await?;
+    validate_role_if_present(&state.db, &payload).await?;
 
     // Save any uploaded files directly to storage for this record
     if !pending_files.is_empty() {
@@ -507,9 +587,45 @@ pub async fn update(
         let _ = tokio::fs::create_dir_all(&rec_dir).await;
 
         for (field_name, safe_name, data) in pending_files {
+            // Delete old file if present in existing record for this field to override cleanly
+            if let Some(old_val) = existing.data.get(&field_name).and_then(|v| v.as_str()) {
+                if !old_val.is_empty() && old_val != safe_name {
+                    let old_dest = rec_dir.join(old_val);
+                    if old_dest.exists() {
+                        let _ = tokio::fs::remove_file(&old_dest).await;
+                    }
+                }
+            }
+
             let dest = rec_dir.join(&safe_name);
             let _ = tokio::fs::write(&dest, &data).await;
             payload.insert(field_name, Value::String(safe_name));
+        }
+    }
+
+    // Check if any file field was explicitly set to null/empty string to remove the file
+    for field in &col.schema {
+        if field.field_type == crate::core::schema::FieldType::File {
+            if let Some(new_val) = payload.get(&field.name) {
+                if new_val.is_null() || new_val.as_str() == Some("") {
+                    if let Some(old_val) = existing.data.get(&field.name).and_then(|v| v.as_str()) {
+                        if !old_val.is_empty() {
+                            let rec_dir = state.storage_dir.join(&col.name).join(&id);
+                            let old_dest = rec_dir.join(old_val);
+                            if old_dest.exists() {
+                                let _ = tokio::fs::remove_file(&old_dest).await;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let auth_user_id = auth.as_ref().map(|c| c.sub.clone());
+    if col.blameable || col.collection_type == crate::core::schema::CollectionType::Auth {
+        if let Some(ref uid) = auth_user_id {
+            payload.insert("updated_by".to_string(), Value::String(uid.clone()));
         }
     }
 
@@ -590,6 +706,12 @@ pub async fn delete(
     })?;
 
     if deleted {
+        // Remove storage directory for this record to clean up all uploaded files
+        let rec_dir = state.storage_dir.join(&col.name).join(&id);
+        if rec_dir.exists() {
+            let _ = tokio::fs::remove_dir_all(&rec_dir).await;
+        }
+
         // Realtime broadcast event (only if enabled on this collection)
         if col.realtime {
             state.realtime.broadcast(RealtimeMessage {

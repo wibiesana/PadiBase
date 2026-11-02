@@ -953,3 +953,427 @@ async fn test_settings_reload_in_memory() {
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }
+
+
+#[tokio::test]
+async fn test_auth_flow_and_transactions() {
+    let test_dir = std::path::PathBuf::from(format!(
+        "./target/test_tx_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let _ = std::fs::remove_dir_all(&test_dir);
+    let sqlite_url = format!(
+        "sqlite://{}/data.db",
+        test_dir.display().to_string().replace('\\', "/")
+    );
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
+        .await
+        .expect("init app state");
+    let app = create_router(state);
+
+    // 1. Setup Admin
+    let admin_body = serde_json::to_vec(&json!({
+        "email": "admin@tx.local",
+        "password": "adminpassword123"
+    }))
+    .unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admins")
+                .header("Content-Type", "application/json")
+                .body(Body::from(admin_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    let login_admin = serde_json::to_vec(&json!({
+        "identity": "admin@tx.local",
+        "password": "adminpassword123"
+    }))
+    .unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admins/auth-with-password")
+                .header("Content-Type", "application/json")
+                .body(Body::from(login_admin))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    let val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let admin_token = val["item"]["token"].as_str().unwrap().to_string();
+
+    // 2. Test Register Endpoint (`POST /api/auth/register`)
+    let reg_body = serde_json::to_vec(&json!({
+        "email": "budi@example.com",
+        "username": "budisantoso",
+        "name": "Budi Santoso",
+        "password": "PasswordAwal123",
+        "passwordConfirm": "PasswordAwal123"
+    }))
+    .unwrap();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/register")
+                .header("Content-Type", "application/json")
+                .body(Body::from(reg_body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let reg_bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    let reg_val: serde_json::Value = serde_json::from_slice(&reg_bytes).unwrap();
+    let user_token = reg_val["item"]["token"].as_str().unwrap().to_string();
+    assert_eq!(reg_val["item"]["record"]["email"], "budi@example.com");
+
+    // Duplicate email registration must return 400
+    let res_dup = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/register")
+                .header("Content-Type", "application/json")
+                .body(Body::from(reg_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_dup.status(), StatusCode::BAD_REQUEST);
+
+    // 3. Test `/api/auth/me`
+    let res_me = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/auth/me")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_me.status(), StatusCode::OK);
+
+    // 4. Test Forgot Password & Reset Password
+    let forgot_body = serde_json::to_vec(&json!({
+        "email": "budi@example.com"
+    }))
+    .unwrap();
+    let res_forgot = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/forgot-password")
+                .header("Content-Type", "application/json")
+                .body(Body::from(forgot_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_forgot.status(), StatusCode::OK);
+    let forgot_bytes = axum::body::to_bytes(res_forgot.into_body(), 1024 * 1024).await.unwrap();
+    let forgot_val: serde_json::Value = serde_json::from_slice(&forgot_bytes).unwrap();
+    let reset_token = forgot_val["item"]["reset_token"].as_str().unwrap().to_string();
+
+    let reset_body = serde_json::to_vec(&json!({
+        "token": reset_token,
+        "password": "PasswordBaru456",
+        "passwordConfirm": "PasswordBaru456"
+    }))
+    .unwrap();
+    let res_reset = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/reset-password")
+                .header("Content-Type", "application/json")
+                .body(Body::from(reset_body.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_reset.status(), StatusCode::OK);
+
+    // Reusing the same reset token must fail (single-use rotation)
+    let res_reset_reuse = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/reset-password")
+                .header("Content-Type", "application/json")
+                .body(Body::from(reset_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_reset_reuse.status(), StatusCode::BAD_REQUEST);
+
+    // Login with new password must succeed
+    let login_new = serde_json::to_vec(&json!({
+        "email": "budi@example.com",
+        "password": "PasswordBaru456"
+    }))
+    .unwrap();
+    let res_login_new = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/login")
+                .header("Content-Type", "application/json")
+                .body(Body::from(login_new))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_login_new.status(), StatusCode::OK);
+
+    // 5. Test Change Password while logged in
+    let change_pw_body = serde_json::to_vec(&json!({
+        "oldPassword": "PasswordBaru456",
+        "newPassword": "PasswordFinal789",
+        "passwordConfirm": "PasswordFinal789"
+    }))
+    .unwrap();
+    let res_change = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/change-password")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::from(change_pw_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_change.status(), StatusCode::OK);
+
+    // 6. Test Atomic Transactions (`POST /api/transactions`) & Custom Transfer (`POST /api/custom/transfer`)
+    let col_wallets = serde_json::to_vec(&json!({
+        "name": "wallets",
+        "type": "base",
+        "schema": [
+            { "name": "owner", "type": "text", "required": true },
+            { "name": "balance", "type": "number", "required": true }
+        ]
+    }))
+    .unwrap();
+    let res_col = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/collections")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .body(Body::from(col_wallets))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_col.status(), StatusCode::CREATED);
+
+    // 6a. Execute batch transaction creating 2 wallets atomically
+    let tx_create = serde_json::to_vec(&json!({
+        "operations": [
+            {
+                "action": "create",
+                "collection": "wallets",
+                "data": { "id": "wallet_a", "owner": "Alice", "balance": 1000 }
+            },
+            {
+                "action": "create",
+                "collection": "wallets",
+                "data": { "id": "wallet_b", "owner": "Bob", "balance": 500 }
+            }
+        ]
+    }))
+    .unwrap();
+    let res_tx = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/transactions")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::from(tx_create))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_tx.status(), StatusCode::OK);
+
+    // 6b. Test atomic rollback when step 2 fails (updating wallet_a then updating non-existent wallet_z)
+    let tx_fail = serde_json::to_vec(&json!({
+        "operations": [
+            {
+                "action": "update",
+                "collection": "wallets",
+                "id": "wallet_a",
+                "data": { "balance": 999999 }
+            },
+            {
+                "action": "update",
+                "collection": "wallets",
+                "id": "non_existent_wallet",
+                "data": { "balance": 100 }
+            }
+        ]
+    }))
+    .unwrap();
+    let res_tx_fail = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/transactions")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::from(tx_fail))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_tx_fail.status(), StatusCode::NOT_FOUND);
+
+    // Verify wallet_a balance is STILL 1000 (rolled back!)
+    let res_check = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/collections/wallets/records/wallet_a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let check_bytes = axum::body::to_bytes(res_check.into_body(), 1024 * 1024).await.unwrap();
+    let check_val: serde_json::Value = serde_json::from_slice(&check_bytes).unwrap();
+    assert_eq!(check_val["item"]["balance"].as_f64(), Some(1000.0));
+
+    // 7. Test Custom Atomic Transfer (`POST /api/custom/transfer`: 250 from wallet_a to wallet_b)
+    let transfer_body = serde_json::to_vec(&json!({
+        "collection": "wallets",
+        "from_id": "wallet_a",
+        "to_id": "wallet_b",
+        "field": "balance",
+        "amount": 250
+    }))
+    .unwrap();
+    let res_transfer = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/custom/transfer")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::from(transfer_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_transfer.status(), StatusCode::OK);
+
+    // 8. Test Admin Custom SQL Query (`POST /api/sql`) to verify total balance is still 1500
+    let sql_body = serde_json::to_vec(&json!({
+        "sql": "SELECT SUM(`balance`) as `total_balance` FROM `wallets` WHERE `balance` > ?",
+        "params": [0]
+    }))
+    .unwrap();
+    let res_sql = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/sql")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .body(Body::from(sql_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_sql.status(), StatusCode::OK);
+    let sql_bytes = axum::body::to_bytes(res_sql.into_body(), 1024 * 1024).await.unwrap();
+    let sql_val: serde_json::Value = serde_json::from_slice(&sql_bytes).unwrap();
+    let sql_rows = if sql_val.get("item").and_then(|v| v.as_array()).is_some() {
+        &sql_val["item"]
+    } else {
+        &sql_val["items"]
+    };
+    let total_num = sql_rows[0]["total_balance"]
+        .as_f64()
+        .or_else(|| sql_rows[0]["total_balance"].as_i64().map(|v| v as f64));
+    assert_eq!(total_num, Some(1500.0));
+
+    // 9. Test Dynamic Custom SQL Endpoints saved in DB (`POST /api/endpoints` & `GET /api/custom/wallet-summary`)
+    let create_ep_body = serde_json::to_vec(&json!({
+        "name": "Wallet Summary",
+        "path": "wallet-summary",
+        "method": "GET",
+        "sql": "SELECT `owner`, `balance` FROM `wallets` WHERE `balance` >= :min_balance ORDER BY `balance` DESC;",
+        "description": "Get wallets above minimum balance",
+        "authRule": "public",
+        "transaction": false,
+        "singleRow": false
+    }))
+    .unwrap();
+    let res_create_ep = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/endpoints")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .body(Body::from(create_ep_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_create_ep.status(), StatusCode::CREATED);
+
+    // Call the newly created dynamic endpoint: `GET /api/custom/wallet-summary?min_balance=700`
+    let res_exec_ep = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/custom/wallet-summary?min_balance=700")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_exec_ep.status(), StatusCode::OK);
+    let ep_bytes = axum::body::to_bytes(res_exec_ep.into_body(), 1024 * 1024).await.unwrap();
+    let ep_val: serde_json::Value = serde_json::from_slice(&ep_bytes).unwrap();
+    let items = ep_val.get("item").or(ep_val.get("items")).and_then(|v| v.as_array()).unwrap();
+    assert_eq!(items.len(), 2);
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}

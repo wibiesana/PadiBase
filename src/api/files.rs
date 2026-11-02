@@ -43,10 +43,11 @@ pub fn sanitize_filename(original: &str) -> String {
     }
 }
 
-/// Download / serve static attachment file
+/// Download / serve static attachment file (with inline preview, download flag & browser caching)
 pub async fn get_file(
     State(state): State<AppState>,
     Path((collection, record_id, filename)): Path<(String, String, String)>,
+    axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
     // Sanitize parameters to avoid path traversal
     if filename.contains("..") || collection.contains("..") || record_id.contains("..") {
@@ -80,11 +81,27 @@ pub async fn get_file(
     let stream = ReaderStream::new(file);
     let body = Body::from_stream(stream);
 
+    let is_download = query.get("download").map(|v| v == "true" || v == "1").unwrap_or(false);
+    let disposition = if is_download {
+        format!("attachment; filename=\"{}\"", filename)
+    } else {
+        format!("inline; filename=\"{}\"", filename)
+    };
+
     let res = Response::builder()
         .header(
             header::CONTENT_TYPE,
             HeaderValue::from_str(mime.as_ref())
                 .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+        )
+        .header(
+            header::CONTENT_DISPOSITION,
+            HeaderValue::from_str(&disposition)
+                .unwrap_or(HeaderValue::from_static("inline")),
+        )
+        .header(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=604800, stale-while-revalidate=86400"),
         )
         .body(body)
         .map_err(|e| {
@@ -179,6 +196,16 @@ pub async fn upload_file(
                     Json(json!({ "code": 500, "message": format!("Failed to save file: {}", e) })),
                 )
             })?;
+
+            // If updating, delete the previous file from storage to avoid orphaned files
+            if let Some(old_val) = record.data.get(&field_name).and_then(|v| v.as_str()) {
+                if !old_val.is_empty() && old_val != safe_name {
+                    let old_dest = rec_dir.join(old_val);
+                    if old_dest.exists() {
+                        let _ = tokio::fs::remove_file(&old_dest).await;
+                    }
+                }
+            }
 
             let file_url = format!("/api/files/{}/{}/{}", col.name, record_id, safe_name);
             let mime = from_path(&safe_name).first_or_octet_stream().to_string();

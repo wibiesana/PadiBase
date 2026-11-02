@@ -3,7 +3,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::db::{json_get_i64, json_get_str, DbPool, TableMetadata, Val};
+use super::db::{json_get_i64, json_get_str, DbPool, DbTx, TableMetadata, Val};
 use super::schema::{generate_id, Collection, CollectionType, FieldType};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -65,6 +65,20 @@ fn pk_to_val(id: &str, meta: &TableMetadata) -> Val {
     Val::from(id)
 }
 
+fn resolve_timestamp_val(meta: &TableMetadata, col_name: &str, rfc_now: &str) -> Value {
+    let col = meta.columns.iter().find(|c| c.name.eq_ignore_ascii_case(col_name));
+    if let Some(c) = col {
+        let dt = c.data_type.to_lowercase();
+        if dt.contains("int") {
+            return Value::from(Utc::now().timestamp());
+        }
+        if dt.contains("date") || dt.contains("time") {
+            return Value::String(Utc::now().format("%Y-%m-%d %H:%M:%S").to_string());
+        }
+    }
+    Value::String(rfc_now.to_string())
+}
+
 pub async fn create_record(
     pool: &DbPool,
     col: &Collection,
@@ -99,26 +113,10 @@ pub async fn create_record(
         payload.insert("updated".to_string(), Value::String(now.clone()));
     }
     if meta.has_created_at && !payload.contains_key("created_at") {
-        let is_int_type = meta
-            .columns
-            .iter()
-            .any(|c| c.name.eq_ignore_ascii_case("created_at") && c.data_type.contains("int"));
-        if is_int_type {
-            payload.insert("created_at".to_string(), Value::from(Utc::now().timestamp()));
-        } else {
-            payload.insert("created_at".to_string(), Value::String(now.clone()));
-        }
+        payload.insert("created_at".to_string(), resolve_timestamp_val(&meta, "created_at", &now));
     }
     if meta.has_updated_at && !payload.contains_key("updated_at") {
-        let is_int_type = meta
-            .columns
-            .iter()
-            .any(|c| c.name.eq_ignore_ascii_case("updated_at") && c.data_type.contains("int"));
-        if is_int_type {
-            payload.insert("updated_at".to_string(), Value::from(Utc::now().timestamp()));
-        } else {
-            payload.insert("updated_at".to_string(), Value::String(now.clone()));
-        }
+        payload.insert("updated_at".to_string(), resolve_timestamp_val(&meta, "updated_at", &now));
     }
 
     if col.collection_type == CollectionType::Auth {
@@ -268,6 +266,7 @@ pub async fn update_record(
     payload.remove("id");
     payload.remove("created");
     payload.remove("created_at");
+    payload.remove("created_by");
     payload.remove("collectionId");
     payload.remove("collectionName");
 
@@ -275,15 +274,7 @@ pub async fn update_record(
         payload.insert("updated".to_string(), Value::String(now.clone()));
     }
     if meta.has_updated_at {
-        let is_int_type = meta
-            .columns
-            .iter()
-            .any(|c| c.name.eq_ignore_ascii_case("updated_at") && c.data_type.contains("int"));
-        if is_int_type {
-            payload.insert("updated_at".to_string(), Value::from(Utc::now().timestamp()));
-        } else {
-            payload.insert("updated_at".to_string(), Value::String(now.clone()));
-        }
+        payload.insert("updated_at".to_string(), resolve_timestamp_val(&meta, "updated_at", &now));
     }
 
     if col.collection_type == CollectionType::Auth {
@@ -335,6 +326,250 @@ pub async fn delete_record(pool: &DbPool, col: &Collection, id: &str) -> Result<
     let meta = super::db::get_table_metadata(pool, &col.name).await?;
     let sql = format!("DELETE FROM `{}` WHERE `{}` = ?;", col.name, meta.pk_column);
     let (rows_affected, _) = pool.execute(&sql, &[pk_to_val(id, &meta)]).await?;
+    Ok(rows_affected > 0)
+}
+
+pub async fn get_record_tx(
+    tx: &mut DbTx<'_>,
+    pool: &DbPool,
+    col: &Collection,
+    id: &str,
+) -> Result<Option<Record>> {
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
+    let sql = format!(
+        "SELECT * FROM `{}` WHERE `{}` = ? LIMIT 1;",
+        col.name, meta.pk_column
+    );
+    let row_opt = tx.fetch_optional(pool, &sql, &[pk_to_val(id, &meta)]).await?;
+    if let Some(row) = row_opt {
+        Ok(Some(json_row_to_record(&row, col, &meta)?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub async fn create_record_tx(
+    tx: &mut DbTx<'_>,
+    pool: &DbPool,
+    col: &Collection,
+    mut payload: Map<String, Value>,
+) -> Result<Record> {
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
+    let now = Utc::now().to_rfc3339();
+
+    let custom_id = payload
+        .get(&meta.pk_column)
+        .or_else(|| payload.get("id"))
+        .cloned();
+
+    let generated_str_id = if !meta.pk_is_auto_increment && custom_id.is_none() {
+        Some(generate_id())
+    } else {
+        None
+    };
+
+    if let Some(ref gid) = generated_str_id {
+        payload.insert(meta.pk_column.clone(), Value::String(gid.clone()));
+        if meta.pk_column != "id" && meta.has_column("id") {
+            payload.insert("id".to_string(), Value::String(gid.clone()));
+        }
+    }
+
+    if meta.has_created && !payload.contains_key("created") {
+        payload.insert("created".to_string(), Value::String(now.clone()));
+    }
+    if meta.has_updated && !payload.contains_key("updated") {
+        payload.insert("updated".to_string(), Value::String(now.clone()));
+    }
+    if meta.has_created_at && !payload.contains_key("created_at") {
+        payload.insert("created_at".to_string(), resolve_timestamp_val(&meta, "created_at", &now));
+    }
+    if meta.has_updated_at && !payload.contains_key("updated_at") {
+        payload.insert("updated_at".to_string(), resolve_timestamp_val(&meta, "updated_at", &now));
+    }
+
+    if col.collection_type == CollectionType::Auth {
+        if let Some(pass_val) = payload.remove("password") {
+            if let Some(pass_str) = pass_val.as_str() {
+                let hash = crate::core::auth::hash_password(pass_str)?;
+                if meta.has_column("passwordHash") {
+                    payload.insert("passwordHash".to_string(), Value::String(hash.clone()));
+                }
+                if meta.has_column("password") {
+                    payload.insert("password".to_string(), Value::String(hash));
+                }
+            }
+        }
+        if meta.has_column("tokenKey") && !payload.contains_key("tokenKey") {
+            payload.insert(
+                "tokenKey".to_string(),
+                Value::String(crate::core::auth::generate_token_key()),
+            );
+        }
+        if meta.has_column("role") && !payload.contains_key("role") {
+            payload.insert("role".to_string(), Value::String("user".to_string()));
+        }
+        if meta.has_column("status") && !payload.contains_key("status") {
+            payload.insert("status".to_string(), Value::String("active".to_string()));
+        }
+        let has_username = payload
+            .get("username")
+            .and_then(|u| u.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+        if !has_username && meta.has_column("username") {
+            let default_username =
+                if let Some(email) = payload.get("email").and_then(|e| e.as_str()) {
+                    email.split('@').next().unwrap_or("user").to_string()
+                } else {
+                    format!("user_{}", Utc::now().timestamp_subsec_millis())
+                };
+            payload.insert("username".to_string(), Value::String(default_username));
+        }
+    }
+
+    let mut keys = Vec::new();
+    let mut placeholders = Vec::new();
+    let mut params = Vec::new();
+
+    for (k, v) in &payload {
+        if k.eq_ignore_ascii_case(&meta.pk_column) && meta.pk_is_auto_increment {
+            let is_empty = v.is_null()
+                || v.as_str().map(|s| s.trim().is_empty()).unwrap_or(false)
+                || v.as_i64() == Some(0);
+            if is_empty {
+                continue;
+            }
+        }
+        if !meta.has_column(k) {
+            continue;
+        }
+        keys.push(format!("`{}`", k));
+        placeholders.push("?");
+        params.push(Val::from(v));
+    }
+
+    if pool.is_postgres() {
+        let pg_keys = keys.join(", ").replace('`', "\"");
+        let sql = format!(
+            "INSERT INTO \"{}\" ({}) VALUES ({}) RETURNING *;",
+            col.name,
+            pg_keys,
+            placeholders.join(", ")
+        );
+        let row = tx.fetch_one(pool, &sql, &params).await?;
+        return json_row_to_record(&row, col, &meta);
+    }
+
+    let sql = format!(
+        "INSERT INTO `{}` ({}) VALUES ({});",
+        col.name,
+        keys.join(", "),
+        placeholders.join(", ")
+    );
+
+    let (_, last_id) = tx.execute(pool, &sql, &params).await?;
+
+    let lookup_id = if let Some(ref gid) = generated_str_id {
+        gid.clone()
+    } else if let Some(ref cid) = custom_id {
+        if let Some(s) = cid.as_str() {
+            s.to_string()
+        } else if let Some(n) = cid.as_i64() {
+            n.to_string()
+        } else {
+            cid.to_string()
+        }
+    } else if let Some(lid) = last_id {
+        lid.to_string()
+    } else {
+        return Err(anyhow!("Record created in transaction but could not resolve primary key"));
+    };
+
+    get_record_tx(tx, pool, col, &lookup_id)
+        .await?
+        .ok_or_else(|| anyhow!("Record was not created in transaction"))
+}
+
+pub async fn update_record_tx(
+    tx: &mut DbTx<'_>,
+    pool: &DbPool,
+    col: &Collection,
+    id: &str,
+    mut payload: Map<String, Value>,
+) -> Result<Record> {
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
+    let now = Utc::now().to_rfc3339();
+
+    payload.remove(&meta.pk_column);
+    payload.remove("id");
+    payload.remove("created");
+    payload.remove("created_at");
+    payload.remove("created_by");
+    payload.remove("collectionId");
+    payload.remove("collectionName");
+
+    if meta.has_updated {
+        payload.insert("updated".to_string(), Value::String(now.clone()));
+    }
+    if meta.has_updated_at {
+        payload.insert("updated_at".to_string(), resolve_timestamp_val(&meta, "updated_at", &now));
+    }
+
+    if col.collection_type == CollectionType::Auth {
+        if let Some(pass_val) = payload.remove("password") {
+            if let Some(pass_str) = pass_val.as_str() {
+                if !pass_str.trim().is_empty() {
+                    let hash = crate::core::auth::hash_password(pass_str)?;
+                    if meta.has_column("passwordHash") {
+                        payload.insert("passwordHash".to_string(), Value::String(hash.clone()));
+                    }
+                    if meta.has_column("password") {
+                        payload.insert("password".to_string(), Value::String(hash));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut set_clauses = Vec::new();
+    let mut params = Vec::new();
+
+    for (k, v) in &payload {
+        if !meta.has_column(k) {
+            continue;
+        }
+        set_clauses.push(format!("`{}` = ?", k));
+        params.push(Val::from(v));
+    }
+    params.push(pk_to_val(id, &meta));
+
+    let sql = format!(
+        "UPDATE `{}` SET {} WHERE `{}` = ?;",
+        col.name,
+        set_clauses.join(", "),
+        meta.pk_column
+    );
+
+    let (rows_affected, _) = tx.execute(pool, &sql, &params).await?;
+    if rows_affected == 0 {
+        return Err(anyhow!("Record not found: {}", id));
+    }
+
+    get_record_tx(tx, pool, col, id)
+        .await?
+        .ok_or_else(|| anyhow!("Record not found after update in transaction"))
+}
+
+pub async fn delete_record_tx(
+    tx: &mut DbTx<'_>,
+    pool: &DbPool,
+    col: &Collection,
+    id: &str,
+) -> Result<bool> {
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
+    let sql = format!("DELETE FROM `{}` WHERE `{}` = ?;", col.name, meta.pk_column);
+    let (rows_affected, _) = tx.execute(pool, &sql, &[pk_to_val(id, &meta)]).await?;
     Ok(rows_affected > 0)
 }
 
@@ -598,10 +833,39 @@ pub async fn get_all_records_with(
     filter: Option<&str>,
     with_relations: Option<&[&str]>,
 ) -> Result<Vec<Record>> {
+    get_all_records_with_limit(pool, col, sort, filter, with_relations, None, None).await
+}
+
+pub async fn get_all_records_with_limit(
+    pool: &DbPool,
+    col: &Collection,
+    sort: Option<&str>,
+    filter: Option<&str>,
+    with_relations: Option<&[&str]>,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> Result<Vec<Record>> {
     let meta = super::db::get_table_metadata(pool, &col.name).await?;
     let (filter_sql, sort_sql) = build_filter_and_sort_sql(&meta, col, sort, filter);
 
-    let sql = format!("SELECT * FROM `{}` {} {};", col.name, filter_sql, sort_sql);
+    let limit_clause = match limit {
+        Some(lim) => {
+            if let Some(off) = offset {
+                format!("LIMIT {} OFFSET {}", lim, off)
+            } else {
+                format!("LIMIT {}", lim)
+            }
+        }
+        None => {
+            if let Some(off) = offset {
+                format!("LIMIT 5000 OFFSET {}", off)
+            } else {
+                String::new()
+            }
+        }
+    };
+
+    let sql = format!("SELECT * FROM `{}` {} {} {};", col.name, filter_sql, sort_sql, limit_clause);
     let rows = pool.fetch_all(&sql, &[]).await?;
 
     let mut items = Vec::new();

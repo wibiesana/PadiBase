@@ -159,6 +159,19 @@ File yang dihasilkan di folder `./api_collection/`:
 - `PATCH /api/collections/:collection/records/:id` : Update record (memerlukan user login secara default)
 - `DELETE /api/collections/:collection/records/:id` : Hapus record (memerlukan user login secara default)
 
+### 🔐 Auth Endpoints (Login, Register, Forgot & Reset Password, Profile)
+- `POST /api/auth/register` (atau `POST /api/collections/:collection/register`) : Registrasi user baru dan langsung mengembalikan JWT `token` beserta `record` user.
+- `POST /api/auth/login` (atau `POST /api/collections/:collection/auth-with-password`) : Login menggunakan `identity` / `email` / `username` dan `password`.
+- `POST /api/auth/forgot-password` (atau `POST /api/collections/:collection/forgot-password`) : Buat token reset password (`reset_token`) berdasarkan email/username.
+- `POST /api/auth/reset-password` (atau `POST /api/collections/:collection/reset-password`) : Reset password menggunakan `token` sekali pakai dan `password` baru.
+- `POST /api/auth/change-password` (atau `POST /api/collections/:collection/change-password`) : Ganti password untuk user yang sedang login (`oldPassword`, `newPassword`).
+- `GET /api/auth/me` & `POST /api/auth/refresh` (atau `GET /api/collections/:collection/me`) : Ambil profil user yang sedang login sekaligus perbarui JWT token.
+
+### 🔄 Atomic Database Transactions, Batch & Custom SQL
+- `POST /api/transactions` (atau `POST /api/batch`) : Jalankan banyak operasi (`create`, `update`, `delete`, atau `sql`) dalam **satu transaksi database atomik (`BEGIN` ... `COMMIT` / `ROLLBACK`)**. Jika ada satu langkah gagal, seluruh operasi sebelumnya otomatis di-*rollback*.
+- `POST /api/sql` (atau `POST /api/sql/query`) : Eksekusi query SQL kustom berparameter (`SELECT ... JOIN ... GROUP BY`, dll.) khusus untuk Superadmin/Admin.
+- `POST /api/custom/transfer` : Contoh endpoint bisnis kustom (`src/api/custom.rs`) menggunakan `state.db.begin()` (`DbTx`) untuk transfer nilai/stok/saldo antar record secara atomik.
+
 ---
 
 ## 🔒 Security & API Access Rules (Default Logged-in Requirement)
@@ -188,51 +201,172 @@ Secara default, **PadiBase menerapkan proteksi keamanan berbasis autentikasi**:
 
 ---
 
-## 🔗 Relations & Eager Loading (Padi Rust Style)
+## 🔗 Relasi Tabel & Eager Loading (Relations & Eager Loading)
 
-PadiBase automatically performs database introspection to discover foreign keys and naming conventions (e.g. `author_id` -> table `authors` or `author`).
+PadiBase mendukung deteksi relasi antar-tabel secara otomatis tanpa perlu konfigurasi rumit, menggunakan mekanisme introspeksi database cerdas dan konvensi penamaan standar (kompatibel dengan gaya **Padi Rust**).
 
-### 1. Auto Load Relations & Eager Loading
-- **No N+1 Problem & Memory-Efficient**: Eager loading uses **1 batch query** with `WHERE id IN (...)` per relation rather than per-row queries, preventing memory spikes and connection exhaustion.
-- **Display Column Heuristic**: Automatically resolves representative display columns (e.g. `name`, `username`, `title`, etc.) matching Padi Rust conventions:
+### 1. Cara Menentukan & Mendeteksi Relasi Antar-Tabel
+
+PadiBase menentukan tabel relasi melalui 2 cara utama:
+
+#### A. Konvensi Penamaan Kolom (*Naming Convention Fallback*)
+Jika sebuah kolom berakhiran `_id` atau `Id` (misalnya `user_id`, `creator_id`, `kategori_id`, `author_id`):
+1. **Pemotongan Kata Dasar**: PadiBase memotong akhiran `_id` atau `Id` untuk mendapatkan nama entitas dasarnya.
+   - `user_id` $\rightarrow$ `user`
+   - `author_id` $\rightarrow$ `author`
+   - `category_id` $\rightarrow$ `category`
+2. **Pencocokan Nama Tabel Otomatis**: PadiBase kemudian mencocokkan kata dasar tersebut dengan tabel-tabel yang tersedia di database:
+   - Bentuk tunggal (*singular*): `user`, `author`, `category`
+   - Bentuk jamak (*plural* `+s`): `users`, `authors`
+   - Bentuk jamak (*plural* `+es`): `categories`, `classes`
+3. Jika ditemukan tabel yang cocok, kolom tersebut **otomatis ditetapkan berelasi ke tabel target tersebut** dengan primary key `id`.
+
+> [!TIP]
+> **Relasi Profesional di Admin Dashboard (`/dashboard/`)**:
+> Ketika Anda memilih tipe **`relation`** (atau mengklik tombol **`Relation ID`**):
+> 1. Dashboard menampilkan dropdown **`References: [Target Table] . [Target Field]`** secara interaktif.
+> 2. PadiBase otomatis mengintrospeksi tabel target dan **menyamakan tipe data fisik kolom** (misal jika `teachers.id` bertipe `INT` / `BIGINT`, kolom relasi otomatis dibuat `INT` / `BIGINT`, bukan teks acak).
+> 3. PadiBase otomatis membuat constraint fisik **`FOREIGN KEY (...) REFERENCES ...`** di database SQL (SQLite, MySQL, PostgreSQL) saat tabel dibuat atau diperbarui!
+
+#### B. Foreign Key Fisik Database (*Physical Foreign Key Constraint*)
+Jika tabel Anda di SQLite, MySQL/MariaDB, atau PostgreSQL sudah memiliki constraint `FOREIGN KEY` formal:
+```sql
+CONSTRAINT fk_user FOREIGN KEY (user_id) REFERENCES users(id)
+```
+PadiBase langsung mendeteksinya secara native:
+- **SQLite**: Menjalankan introspeksi `PRAGMA foreign_key_list('table_name')`.
+- **MySQL / MariaDB**: Membaca metadata `INFORMATION_SCHEMA.KEY_COLUMN_USAGE`.
+- **PostgreSQL**: Membaca `information_schema.table_constraints` & `constraint_column_usage`.
+
+Tabel referensi target (`target_table`) dan target primary key (`target_pk`) langsung dihubungkan secara akurat sesuai skema database fisik Anda.
+
+---
+
+### 2. Auto Load Relations & Eager Loading (No N+1 Problem)
+
+- **Bebas Masalah N+1 & Hemat Memori**: Eager loading menggunakan **1 batch query** (`WHERE id IN (...)`) per relasi, bukan query per-baris, sehingga sangat cepat dan hemat koneksi database.
+- **Resolusi Kolom Display Heuristik**: PadiBase secara cerdas memilih kolom representatif untuk ditampilkan (seperti `name`, `username`, `title`, `nama`, `label`) di samping primary key target:
   ```json
   {
     "id": 1,
-    "author_id": 5,
+    "user_id": 5,
     "score": 95,
-    "author": {
+    "user": {
       "id": 5,
-      "name": "John Doe"
+      "name": "Budi Santoso",
+      "email": "budi@example.com"
     }
   }
   ```
 
-### 2. Configuration & Usage
-- **Global Option in `.env`**:
+---
+
+### 3. Konfigurasi & Penggunaan di API
+
+- **Pengaturan Global di `.env`**:
   ```env
-  AUTO_LOAD_RELATIONS=false   # true: Eager load relations for ALL tables globally
-                              # false: Follow per-table setting in dashboard
+  AUTO_LOAD_RELATIONS=false   # true: Eager load relasi untuk SEMUA tabel secara default
+                              # false: Ikuti pengaturan per-tabel di Dashboard
   ```
-- **Per-Table Setting in Dashboard (`/dashboard/`)**:
-  - Open **Schema & Rules** for any table.
-  - Toggle **"Auto Load Relations (Eager Loading)"** (default per-table: `false`).
-  - When global `.env` is `false`, any table with this toggle enabled will eager load its relations automatically.
-- **Explicit Query Parameters**:
-  - `?with=author,category` : Explicitly load specific relations.
-  - `?auto_load=true` : Force load all relations for this request.
-  - `?with=none` or `?auto_load=false` : Force disable relation loading for maximum speed and minimal payload.
+- **Pengaturan Per-Tabel di Admin Dashboard (`/dashboard/`)**:
+  - Buka tabel yang diinginkan di Dashboard &rarr; pilih tab/bagian **Table Settings**.
+  - Aktifkan toggle **"Auto Load Relations (Eager Loading)"** (`ON` / `OFF`).
+  - Ketika aktif, setiap query record tabel ini akan otomatis menyertakan data relasinya.
+- **Query Parameter Eksplisit di API**:
+  - `?with=user,category` : Muat relasi tertentu secara spesifik.
+  - `?with=*` atau `?auto_load=true` : Muat seluruh relasi yang terdeteksi untuk request ini.
+  - `?with=none` atau `?auto_load=false` : Matikan loading relasi untuk performa maksimal dan payload minimal.
 
 ---
 
 ### Realtime SSE Stream
 - `GET /api/realtime` : Koneksi Server-Sent Events untuk live updates
 
-### 📁 File Storage & Upload System
-- `POST /api/files/:collection/:record_id` : Upload satu atau beberapa file attachment menggunakan `multipart/form-data` untuk record yang sudah ada.
-- `GET /api/files/:collection/:record_id/:filename` : Download / streaming file statis dengan deteksi MIME type otomatis dan proteksi path traversal.
-- `DELETE /api/files/:collection/:record_id/:filename` : Hapus file dari storage fisik dan kosongkan kolom file terkait di database.
-- **Direct Multipart Record Creation/Update**: Endpoint `POST /api/collections/:collection/records` dan `PATCH /api/collections/:collection/records/:id` mendukung `multipart/form-data` secara langsung (upload file sekaligus mengisi data field dalam satu HTTP request).
-- **Admin Dashboard UI**: Dukungan visual upload file (`<input type="file">`) pada Record Drawer, thumbnail preview gambar langsung pada tabel data, serta link unduh dan hapus file.
+### 📁 File Storage & Image Management (PocketBase / Supabase Style)
+
+- **Struktur Storage Folder & File Unik**:
+  Setiap file disimpan di direktori storage terisolasi dengan struktur rapi per-koleksi dan per-record unik, dilengkapi prefix hash acak untuk mencegah penimpaan nama file:
+  ```text
+  padi_data/storage/{collection_name}/{record_id}/{unique_prefix}_{original_filename}
+  ```
+- **Pembersihan Otomatis & File Override**:
+  - Saat memperbarui record dengan file gambar baru (baik lewat `PATCH /records/:id` maupun `POST /files/...`), file lama yang tersimpan sebelumnya **otomatis dihapus (*override*) dari storage fisik**, sehingga ruang disk server tidak akan pernah dipenuhi oleh file yatim (*orphaned files*).
+  - Jika sebuah record dihapus (`DELETE /records/:id`), seluruh folder storage dan file-file di dalamnya otomatis dibersihkan secara total.
+- **Tampilan Thumbnail & Image Lightbox Modal**:
+  - Pada **Tabel Data Dashboard**: Kolom bertipe file gambar menampilkan thumbnail visual interaktif.
+  - **Full-Screen Lightbox**: Mengklik thumbnail gambar akan membuka modal viewer resolusi tinggi dengan informasi dimensi gambar (`width × height px`), tombol unduh langsung, dan tombol salin link URL file.
+  - **Instant Live Preview Form**: Saat memilih file baru di drawer form record (`<input type="file">`), preview visual gambar langsung muncul secara instan sebelum menekan tombol simpan.
+
+#### 🚀 Panduan Cara Upload File dari Client
+
+Terdapat 2 cara bagi aplikasi client (Frontend Web, Mobile App, Postman) untuk mengunggah file:
+
+##### 1. Cara Sekaligus (All-in-One: Create / Update Record)
+Kirim `multipart/form-data` langsung ke endpoint record. PadiBase akan otomatis menyimpan file fisik dan mengisi kolom database terkait (misal `avatar`):
+
+* **Endpoint**:
+  * Buat Record Baru + File: `POST /api/collections/:collection/records`
+  * Update Record + Ganti File: `PATCH /api/collections/:collection/records/:id`
+
+* **Contoh JavaScript (Web / React / Vue)**:
+  ```javascript
+  const formData = new FormData();
+  formData.append('name', 'Budi Santoso');
+  formData.append('subject', 'Matematika');
+  formData.append('avatar', fileInput.files[0]); // Kolom file
+
+  const res = await fetch('http://127.0.0.1:8090/api/collections/teachers/records', {
+    method: 'POST',
+    headers: {
+      'Authorization': 'Bearer ' + token // jika tabel wajib login
+    },
+    body: formData
+  });
+  const data = await res.json();
+  console.log('Record & File tersimpan:', data);
+  ```
+
+##### 2. Cara API Khusus Upload File (`/api/files/...`)
+Jika record sudah ada dan ingin mengunggah atau mengganti file secara spesifik:
+
+* **Endpoint**: `POST /api/files/:collection/:record_id`
+* **Contoh cURL**:
+  ```bash
+  curl -X POST "http://127.0.0.1:8090/api/files/teachers/rec_001" \
+    -H "Authorization: Bearer YOUR_TOKEN" \
+    -F "avatar=@/path/to/my_photo.png"
+  ```
+* **Response Output**:
+  ```json
+  {
+    "message": "File(s) uploaded successfully.",
+    "uploaded": [
+      {
+        "field": "avatar",
+        "filename": "f1a2b3c4_my_photo.png",
+        "original_name": "my_photo.png",
+        "size": 182400,
+        "mime": "image/png",
+        "url": "/api/files/teachers/rec_001/f1a2b3c4_my_photo.png"
+      }
+    ],
+    "record": {
+      "id": "rec_001",
+      "name": "Budi Santoso",
+      "avatar": "f1a2b3c4_my_photo.png"
+    }
+  }
+  ```
+
+##### 3. Cara Menampilkan Gambar / File di Frontend:
+Gunakan URL format `/api/files/{collection}/{record_id}/{filename}`:
+```html
+<!-- HTML / React / Vue -->
+<img src="http://127.0.0.1:8090/api/files/teachers/rec_001/f1a2b3c4_my_photo.png" alt="Avatar">
+
+<!-- Link Download Langsung (tambahkan ?download=1) -->
+<a href="http://127.0.0.1:8090/api/files/teachers/rec_001/f1a2b3c4_my_photo.png?download=1">Unduh File</a>
+```
 
 ### System Backups
 - `GET /api/backups` : Daftar semua snapshot backup database

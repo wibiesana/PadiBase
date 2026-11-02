@@ -185,25 +185,55 @@ pub async fn padi_response_middleware(
     next: Next,
 ) -> Response {
     let path = req.uri().path();
-    let is_api_route = path.starts_with("/api") || path.ends_with("/all");
-    if !is_api_route || path.contains("api-collection") {
+    if path == "/"
+        || path.starts_with("/dashboard")
+        || path.contains("api-collection")
+        || path.ends_with(".js")
+        || path.ends_with(".css")
+        || path.ends_with(".png")
+        || path.ends_with(".svg")
+        || path.ends_with(".ico")
+    {
         return next.run(req).await;
     }
 
     let debug_enabled = Env::is_debug() || Env::is_development();
     let start = std::time::Instant::now();
+    let override_match = super::db::match_override_endpoint(
+        &state.db,
+        req.method().as_str(),
+        req.uri().path(),
+    );
+
+    let is_api_route = path.starts_with("/api") || path.ends_with("/all");
+    if override_match.is_none() && !is_api_route {
+        return next.run(req).await;
+    }
+    let state_for_exec = state.clone();
+
+    let exec_req = async move {
+        if let Some((ep, path_params)) = override_match {
+            crate::api::custom::run_override_endpoint_request(
+                state_for_exec,
+                ep,
+                path_params,
+                req,
+            )
+            .await
+        } else {
+            next.run(req).await
+        }
+    };
 
     let res = if debug_enabled {
         let queries = std::sync::Arc::new(std::sync::Mutex::new(Vec::with_capacity(4)));
         REQUEST_QUERIES
             .scope(queries, async move {
-                REQUEST_START
-                    .scope(start, async move { next.run(req).await })
-                    .await
+                REQUEST_START.scope(start, exec_req).await
             })
             .await
     } else {
-        next.run(req).await
+        exec_req.await
     };
 
     if Env::response_format() == ResponseFormat::Raw && !debug_enabled {

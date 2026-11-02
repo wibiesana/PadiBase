@@ -1,0 +1,68 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+body {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  color: #0f172a;
+}
+
+code, pre, .font-mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Modal and Backdrop effects */
+.modal-backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(4px);
+}
+
+.padi-gradient {
+  background: linear-gradient(135deg, #064e3b 0%, #0f172a 60%, #115e59 100%);
+}
+
+.padi-btn-primary {
+  background-color: #059669;
+}
+.padi-btn-primary:hover {
+  background-color: #047857;
+}
+
+.toggle-checkbox:checked {
+  right: 0;
+  border-color: #059669;
+}
+.toggle-checkbox:checked + .toggle-label {
+  background-color: #059669;
+}
+
+/* Slide-over Drawer Animation */
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.drawer-backdrop {
+  transition: opacity 0.2s ease-in-out;
+}
+.drawer-panel {
+  animation: slideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}

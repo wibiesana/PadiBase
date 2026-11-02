@@ -145,14 +145,41 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
 
     let mut items = Vec::new();
 
-    // 1. Auth Endpoint (if collection type is Auth)
+    // 1. Auth Endpoints (if collection type is Auth)
     if col.collection_type == CollectionType::Auth {
         let auth_test_script = format!(
-            "try {{\n    if (pm.response.code === 200) {{\n        const res = pm.response.json();\n        const token = res.data?.token || res.token;\n        const item = res.data?.record || res.record || res.data?.item || res.item;\n        if (token) pm.collectionVariables.set('auth_token', token);\n        const id = item?.id;\n        if (id) {{\n            pm.collectionVariables.set('{id_var_key}', id);\n            pm.collectionVariables.set('user_id', id);\n        }}\n    }}\n}} catch (e) {{\n    console.warn('Auth script bypassed:', e);\n}}"
+            "try {{\n    if (pm.response.code === 200 || pm.response.code === 201) {{\n        const res = pm.response.json();\n        const token = res.data?.token || res.token;\n        const item = res.data?.record || res.record || res.data?.item || res.item;\n        if (token) pm.collectionVariables.set('auth_token', token);\n        const id = item?.id;\n        if (id) {{\n            pm.collectionVariables.set('{id_var_key}', id);\n            pm.collectionVariables.set('user_id', id);\n        }}\n    }}\n}} catch (e) {{\n    console.warn('Auth script bypassed:', e);\n}}"
         );
 
         items.push(json!({
-            "name": format!("🔐 Auth With Password ({})", title_name),
+            "name": format!("📝 Register ({})", title_name),
+            "event": [
+                {
+                    "listen": "test",
+                    "script": {
+                        "exec": auth_test_script.lines().map(String::from).collect::<Vec<_>>(),
+                        "type": "text/javascript"
+                    }
+                }
+            ],
+            "request": {
+                "method": "POST",
+                "header": [
+                    { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"email\": \"user@example.com\",\n  \"username\": \"user123\",\n  \"name\": \"Sample User\",\n  \"password\": \"Password123!@#\",\n  \"passwordConfirm\": \"Password123!@#\"\n}"
+                },
+                "url": {
+                    "raw": format!("{{{{base_url}}}}/api/collections/{}/register", c_name)
+                },
+                "description": format!("Register a new account in auth collection '{}' and immediately receive a JWT auth_token.", c_name)
+            }
+        }));
+
+        items.push(json!({
+            "name": format!("🔐 Auth With Password / Login ({})", title_name),
             "event": [
                 {
                     "listen": "test",
@@ -175,6 +202,72 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
                     "raw": format!("{{{{base_url}}}}/api/collections/{}/auth-with-password", c_name)
                 },
                 "description": format!("Authenticate an auth record in collection '{}' with identity (email or username) and password. Automatically stores auth_token and ID variables.", c_name)
+            }
+        }));
+
+        items.push(json!({
+            "name": format!("🔑 Forgot Password ({})", title_name),
+            "request": {
+                "method": "POST",
+                "header": [
+                    { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"email\": \"user@example.com\"\n}"
+                },
+                "url": {
+                    "raw": format!("{{{{base_url}}}}/api/collections/{}/forgot-password", c_name)
+                },
+                "description": format!("Request a password reset token for an account in '{}'.", c_name)
+            }
+        }));
+
+        items.push(json!({
+            "name": format!("🔄 Reset Password ({})", title_name),
+            "request": {
+                "method": "POST",
+                "header": [
+                    { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"token\": \"PASTE_RESET_TOKEN_HERE\",\n  \"password\": \"NewPassword123!@#\",\n  \"passwordConfirm\": \"NewPassword123!@#\"\n}"
+                },
+                "url": {
+                    "raw": format!("{{{{base_url}}}}/api/collections/{}/reset-password", c_name)
+                },
+                "description": format!("Confirm password reset using the reset token for '{}'.", c_name)
+            }
+        }));
+
+        items.push(json!({
+            "name": format!("🔒 Change Password ({})", title_name),
+            "request": {
+                "method": "POST",
+                "header": [
+                    { "key": "Content-Type", "value": "application/json" }
+                ],
+                "body": {
+                    "mode": "raw",
+                    "raw": "{\n  \"oldPassword\": \"Password123!@#\",\n  \"newPassword\": \"UpdatedPass123!@#\",\n  \"passwordConfirm\": \"UpdatedPass123!@#\"\n}"
+                },
+                "url": {
+                    "raw": format!("{{{{base_url}}}}/api/collections/{}/change-password", c_name)
+                },
+                "description": format!("Change password for the currently logged-in user in '{}'.", c_name)
+            }
+        }));
+
+        items.push(json!({
+            "name": format!("👤 Get Current User & Refresh Token ({})", title_name),
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": format!("{{{{base_url}}}}/api/collections/{}/me", c_name)
+                },
+                "description": format!("Get the currently authenticated user profile and refreshed JWT token in '{}'.", c_name)
             }
         }));
     }
@@ -589,6 +682,57 @@ fn build_system_and_admin_folders() -> Vec<Value> {
                         "header": [],
                         "url": { "raw": "{{base_url}}/api/backups" },
                         "description": "Create an atomic online backup snapshot of database and files."
+                    }
+                }
+            ]
+        }),
+        // Folder: Transactions & Custom SQL
+        json!({
+            "name": "🔄 Database Transactions & Custom SQL",
+            "item": [
+                {
+                    "name": "Execute Atomic Batch Transaction",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"operations\": [\n    {\n      \"action\": \"create\",\n      \"collection\": \"posts\",\n      \"data\": { \"title\": \"Atomic Post 1\" }\n    },\n    {\n      \"action\": \"create\",\n      \"collection\": \"posts\",\n      \"data\": { \"title\": \"Atomic Post 2\" }\n    }\n  ]\n}"
+                        },
+                        "url": { "raw": "{{base_url}}/api/transactions" },
+                        "description": "Execute multiple create, update, delete, or admin SQL operations inside a single atomic database transaction (all-or-nothing rollback on error)."
+                    }
+                },
+                {
+                    "name": "Execute Custom Raw SQL Query (Admin)",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"sql\": \"SELECT id, email, role FROM `users` WHERE `role` = ? LIMIT 10\",\n  \"params\": [\"user\"],\n  \"transaction\": false\n}"
+                        },
+                        "url": { "raw": "{{base_url}}/api/sql" },
+                        "description": "Run custom parameterized SQL queries (JOIN, GROUP BY, aggregations) as Superuser/Admin."
+                    }
+                },
+                {
+                    "name": "Custom Atomic Transfer Example",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            { "key": "Content-Type", "value": "application/json" }
+                        ],
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n  \"collection\": \"wallets\",\n  \"from_id\": \"record_1\",\n  \"to_id\": \"record_2\",\n  \"field\": \"balance\",\n  \"amount\": 50\n}"
+                        },
+                        "url": { "raw": "{{base_url}}/api/custom/transfer" },
+                        "description": "Example custom transactional endpoint that atomically transfers balance/stock between two records."
                     }
                 }
             ]

@@ -17,7 +17,7 @@ use std::sync::{Arc, RwLock};
 use tracing::info;
 
 use super::env::Env;
-use super::schema::{generate_id, Collection, CollectionType, FieldType, SchemaField};
+use super::schema::{generate_id, Collection, CollectionType, CustomEndpoint, FieldType, SchemaField};
 
 /// Tenant/Database Schema Cache - populated once at startup, served entirely from RAM.
 #[derive(Default, Debug)]
@@ -25,6 +25,7 @@ pub struct SchemaCache {
     pub table_metadata: RwLock<HashMap<String, TableMetadata>>,
     pub relations: RwLock<HashMap<String, Vec<DetectedRelation>>>,
     pub collections: RwLock<HashMap<String, Collection>>,
+    pub endpoints: RwLock<HashMap<String, CustomEndpoint>>,
     pub settings: RwLock<Option<serde_json::Value>>,
 }
 
@@ -459,6 +460,120 @@ impl DbPool {
         record_query(&prepared, params, start);
         Ok(res)
     }
+
+    /// Start a new database transaction (`BEGIN`).
+    /// If the returned `DbTx` is dropped without calling `.commit().await`, it automatically rolls back.
+    pub async fn begin(&self) -> Result<DbTx<'_>> {
+        let start = std::time::Instant::now();
+        let tx = match &self.driver_pool {
+            DbDriverPool::Sqlite(p) => DbTx::Sqlite(p.begin().await?),
+            DbDriverPool::MySql(p, d) => DbTx::MySql(p.begin().await?, *d),
+            DbDriverPool::Postgres(p) => DbTx::Postgres(p.begin().await?),
+        };
+        record_query("BEGIN", &[], start);
+        Ok(tx)
+    }
+}
+
+/// Unified multi-database transaction handle supporting SQLite, MySQL/MariaDB, and PostgreSQL.
+pub enum DbTx<'a> {
+    Sqlite(sqlx::Transaction<'a, sqlx::Sqlite>),
+    MySql(sqlx::Transaction<'a, sqlx::MySql>, DbDriver),
+    Postgres(sqlx::Transaction<'a, sqlx::Postgres>),
+}
+
+impl<'a> DbTx<'a> {
+    pub fn is_postgres(&self) -> bool {
+        matches!(self, DbTx::Postgres(_))
+    }
+
+    pub fn is_mysql(&self) -> bool {
+        matches!(self, DbTx::MySql(_, _))
+    }
+
+    pub fn is_sqlite(&self) -> bool {
+        matches!(self, DbTx::Sqlite(_))
+    }
+
+    /// Execute a query inside the transaction and return all matching rows as JSON objects.
+    pub async fn fetch_all(&mut self, pool: &DbPool, sql: &str, params: &[Val]) -> Result<Vec<Value>> {
+        let prepared = pool.prepare_sql(sql);
+        let start = std::time::Instant::now();
+        let res = match self {
+            DbTx::Sqlite(tx) => {
+                let rows = bind_sqlite(&prepared, params).fetch_all(&mut **tx).await?;
+                rows.iter().map(sqlite_row_to_json).collect()
+            }
+            DbTx::MySql(tx, _) => {
+                let rows = bind_mysql(&prepared, params).fetch_all(&mut **tx).await?;
+                rows.iter().map(mysql_row_to_json).collect()
+            }
+            DbTx::Postgres(tx) => {
+                let rows = bind_postgres(&prepared, params).fetch_all(&mut **tx).await?;
+                rows.iter().map(pg_row_to_json).collect()
+            }
+        };
+        record_query(&prepared, params, start);
+        Ok(res)
+    }
+
+    /// Execute a query inside the transaction and return the first matching row if any.
+    pub async fn fetch_optional(&mut self, pool: &DbPool, sql: &str, params: &[Val]) -> Result<Option<Value>> {
+        Ok(self.fetch_all(pool, sql, params).await?.into_iter().next())
+    }
+
+    /// Execute a query inside the transaction and return the first matching row, or error if none.
+    pub async fn fetch_one(&mut self, pool: &DbPool, sql: &str, params: &[Val]) -> Result<Value> {
+        self.fetch_optional(pool, sql, params)
+            .await?
+            .ok_or_else(|| anyhow!("Expected at least one row from transaction query"))
+    }
+
+    /// Execute a statement inside the transaction and return `(rows_affected, last_insert_id)`.
+    pub async fn execute(&mut self, pool: &DbPool, sql: &str, params: &[Val]) -> Result<(u64, Option<i64>)> {
+        let prepared = pool.prepare_sql(sql);
+        let start = std::time::Instant::now();
+        let res = match self {
+            DbTx::Sqlite(tx) => {
+                let r = bind_sqlite(&prepared, params).execute(&mut **tx).await?;
+                (r.rows_affected(), Some(r.last_insert_rowid()))
+            }
+            DbTx::MySql(tx, _) => {
+                let r = bind_mysql(&prepared, params).execute(&mut **tx).await?;
+                (r.rows_affected(), Some(r.last_insert_id() as i64))
+            }
+            DbTx::Postgres(tx) => {
+                let r = bind_postgres(&prepared, params).execute(&mut **tx).await?;
+                (r.rows_affected(), None)
+            }
+        };
+        record_query(&prepared, params, start);
+        Ok(res)
+    }
+
+    /// Commit the transaction (`COMMIT`).
+    pub async fn commit(self) -> Result<()> {
+        let start = std::time::Instant::now();
+        match self {
+            DbTx::Sqlite(tx) => tx.commit().await?,
+            DbTx::MySql(tx, _) => tx.commit().await?,
+            DbTx::Postgres(tx) => tx.commit().await?,
+        }
+        record_query("COMMIT", &[], start);
+        Ok(())
+    }
+
+    /// Rollback the transaction (`ROLLBACK`).
+    pub async fn rollback(self) -> Result<()> {
+        let start = std::time::Instant::now();
+        match self {
+            DbTx::Sqlite(tx) => tx.rollback().await?,
+            DbTx::MySql(tx, _) => tx.rollback().await?,
+            DbTx::Postgres(tx) => tx.rollback().await?,
+        }
+        record_query("ROLLBACK", &[], start);
+        Ok(())
+    }
 }
 
 fn bind_sqlite<'q>(
@@ -757,6 +872,7 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
             `schema` TEXT NOT NULL,
             `realtime` INTEGER DEFAULT 1,
             `autoLoadRelations` INTEGER DEFAULT 0,
+            `blameable` INTEGER DEFAULT 1,
             `listRule` TEXT,
             `viewRule` TEXT,
             `createRule` TEXT,
@@ -770,7 +886,7 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
     )
     .await?;
 
-    // Ensure `realtime` and `autoLoadRelations` columns exist on existing `_collections` tables
+    // Ensure `realtime`, `autoLoadRelations`, and `blameable` columns exist on existing `_collections` tables
     if let Ok(cols) = get_existing_table_columns(pool, "_collections").await {
         if !cols.iter().any(|c| c.eq_ignore_ascii_case("realtime")) {
             let _ = pool
@@ -784,6 +900,14 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
             let _ = pool
                 .execute(
                     "ALTER TABLE `_collections` ADD COLUMN `autoLoadRelations` INTEGER DEFAULT 0;",
+                    &[],
+                )
+                .await;
+        }
+        if !cols.iter().any(|c| c.eq_ignore_ascii_case("blameable")) {
+            let _ = pool
+                .execute(
+                    "ALTER TABLE `_collections` ADD COLUMN `blameable` INTEGER DEFAULT 1;",
                     &[],
                 )
                 .await;
@@ -818,8 +942,30 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
     )
     .await?;
 
-    // Preload system settings into RAM cache once at startup
+    // 3b. _endpoints table (Dynamic Custom SQL Endpoints)
+    pool.execute(
+        r#"
+        CREATE TABLE IF NOT EXISTS `_endpoints` (
+            `id` VARCHAR(255) PRIMARY KEY,
+            `name` VARCHAR(255) NOT NULL,
+            `path` VARCHAR(255) UNIQUE NOT NULL,
+            `method` VARCHAR(32) NOT NULL,
+            `sql` TEXT NOT NULL,
+            `description` TEXT,
+            `authRule` TEXT,
+            `transaction` INTEGER DEFAULT 0,
+            `singleRow` INTEGER DEFAULT 0,
+            `created` VARCHAR(64) NOT NULL,
+            `updated` VARCHAR(64) NOT NULL
+        );
+        "#,
+        &[],
+    )
+    .await?;
+
+    // Preload system settings and custom endpoints into RAM cache once at startup
     let _ = get_system_settings(pool).await;
+    let _ = get_all_custom_endpoints(pool).await;
 
     // 4. Default 'users' collection if not exists
     let existing_users = pool
@@ -901,6 +1047,7 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
             ],
             realtime: true,
             auto_load_relations: false,
+            blameable: true,
             list_rule: Some("".to_string()),
             view_rule: Some("".to_string()),
             create_rule: Some("".to_string()),
@@ -934,8 +1081,42 @@ pub fn default_system_settings() -> Value {
             "appName": Env::get_or("APP_NAME", "PadiBase Studio"),
             "appUrl": format!("http://{}:{}", Env::get_or("APP_HOST", "127.0.0.1"), Env::get_or("APP_PORT", "8090")),
             "hideControls": false
-        }
+        },
+        "roles": [
+            "admin",
+            "manager",
+            "editor",
+            "moderator",
+            "staff",
+            "creator",
+            "user"
+        ]
     })
+}
+
+/// Retrieve the list of active user roles configured in system settings.
+pub async fn get_available_roles(pool: &DbPool) -> Vec<String> {
+    if let Ok(settings) = get_system_settings(pool).await {
+        if let Some(roles_val) = settings.get("roles").and_then(|v| v.as_array()) {
+            let roles: Vec<String> = roles_val
+                .iter()
+                .filter_map(|r| r.as_str().map(|s| s.trim().to_lowercase()))
+                .filter(|s| !s.is_empty())
+                .collect();
+            if !roles.is_empty() {
+                return roles;
+            }
+        }
+    }
+    vec![
+        "admin".to_string(),
+        "manager".to_string(),
+        "editor".to_string(),
+        "moderator".to_string(),
+        "staff".to_string(),
+        "creator".to_string(),
+        "user".to_string(),
+    ]
 }
 
 /// Get system settings from in-memory tenant cache, falling back to database once.
@@ -962,8 +1143,27 @@ pub async fn get_system_settings(pool: &DbPool) -> Result<Value> {
 }
 
 /// Save system settings into database and IMMEDIATELY reload into in-memory cache.
-pub async fn save_system_settings(pool: &DbPool, settings: Value) -> Result<()> {
-    let val_str = serde_json::to_string(&settings).unwrap_or_else(|_| "{}".to_string());
+pub async fn save_system_settings(pool: &DbPool, new_settings: Value) -> Result<Value> {
+    let mut current = get_system_settings(pool).await.unwrap_or_else(|_| default_system_settings());
+    if let (Some(curr_obj), Some(new_obj)) = (current.as_object_mut(), new_settings.as_object()) {
+        for (k, v) in new_obj {
+            if k == "meta" {
+                if let (Some(curr_meta), Some(new_meta)) = (curr_obj.get_mut("meta").and_then(|m| m.as_object_mut()), v.as_object()) {
+                    for (mk, mv) in new_meta {
+                        curr_meta.insert(mk.clone(), mv.clone());
+                    }
+                } else {
+                    curr_obj.insert(k.clone(), v.clone());
+                }
+            } else {
+                curr_obj.insert(k.clone(), v.clone());
+            }
+        }
+    } else {
+        current = new_settings;
+    }
+
+    let val_str = serde_json::to_string(&current).unwrap_or_else(|_| "{}".to_string());
     let sql = if pool.is_mysql() {
         "INSERT INTO `_params` (`key`, `value`) VALUES ('settings', ?) ON DUPLICATE KEY UPDATE `value` = VALUES(`value`)"
     } else {
@@ -973,16 +1173,16 @@ pub async fn save_system_settings(pool: &DbPool, settings: Value) -> Result<()> 
     pool.execute(sql, &[Val::from(&val_str)]).await?;
 
     // Reload into memory cache immediately
-    pool.set_cached_settings(settings.clone());
+    pool.set_cached_settings(current.clone());
 
     // Sync runtime APP_NAME if provided in settings
-    if let Some(app_name) = settings.get("meta").and_then(|m| m.get("appName")).and_then(|n| n.as_str()) {
+    if let Some(app_name) = current.get("meta").and_then(|m| m.get("appName")).and_then(|n| n.as_str()) {
         if !app_name.trim().is_empty() {
             Env::set("APP_NAME", app_name);
         }
     }
 
-    Ok(())
+    Ok(current)
 }
 
 pub async fn save_collection_metadata(pool: &DbPool, col: &Collection) -> Result<()> {
@@ -994,17 +1194,19 @@ pub async fn save_collection_metadata(pool: &DbPool, col: &Collection) -> Result
     };
     let realtime_int = if col.realtime { 1i64 } else { 0i64 };
     let auto_load_int = if col.auto_load_relations { 1i64 } else { 0i64 };
+    let blameable_int = if col.blameable { 1i64 } else { 0i64 };
 
     let sql = if pool.is_mysql() {
         r#"
-        INSERT INTO `_collections` (`id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO `_collections` (`id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `name` = VALUES(`name`),
             `type` = VALUES(`type`),
             `schema` = VALUES(`schema`),
             `realtime` = VALUES(`realtime`),
             `autoLoadRelations` = VALUES(`autoLoadRelations`),
+            `blameable` = VALUES(`blameable`),
             `listRule` = VALUES(`listRule`),
             `viewRule` = VALUES(`viewRule`),
             `createRule` = VALUES(`createRule`),
@@ -1014,14 +1216,15 @@ pub async fn save_collection_metadata(pool: &DbPool, col: &Collection) -> Result
         "#
     } else {
         r#"
-        INSERT INTO `_collections` (`id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO `_collections` (`id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(`id`) DO UPDATE SET
             `name` = excluded.`name`,
             `type` = excluded.`type`,
             `schema` = excluded.`schema`,
             `realtime` = excluded.`realtime`,
             `autoLoadRelations` = excluded.`autoLoadRelations`,
+            `blameable` = excluded.`blameable`,
             `listRule` = excluded.`listRule`,
             `viewRule` = excluded.`viewRule`,
             `createRule` = excluded.`createRule`,
@@ -1040,6 +1243,7 @@ pub async fn save_collection_metadata(pool: &DbPool, col: &Collection) -> Result
             Val::from(schema_json),
             Val::Int(realtime_int),
             Val::Int(auto_load_int),
+            Val::Int(blameable_int),
             Val::from(col.list_rule.clone()),
             Val::from(col.view_rule.clone()),
             Val::from(col.create_rule.clone()),
@@ -1088,6 +1292,13 @@ fn value_to_collection(r: &Value) -> Collection {
         _ => false,
     };
 
+    let blameable = match json_get(r, "blameable") {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::Number(n)) => n.as_i64().unwrap_or(0) != 0,
+        Some(Value::String(s)) => s == "1" || s.eq_ignore_ascii_case("true"),
+        _ => false,
+    };
+
     Collection {
         id: json_get_str(r, "id"),
         name: json_get_str(r, "name"),
@@ -1095,6 +1306,7 @@ fn value_to_collection(r: &Value) -> Collection {
         schema,
         realtime,
         auto_load_relations,
+        blameable,
         list_rule: json_get_opt_str(r, "listRule"),
         view_rule: json_get_opt_str(r, "viewRule"),
         create_rule: json_get_opt_str(r, "createRule"),
@@ -1117,7 +1329,7 @@ pub async fn get_collection_by_name_or_id(
     let row = pool
         .fetch_optional(
             r#"
-            SELECT `id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`
+            SELECT `id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`
             FROM `_collections`
             WHERE `id` = ? OR `name` = ?
             "#,
@@ -1137,7 +1349,7 @@ pub async fn list_collections(pool: &DbPool) -> Result<Vec<Collection>> {
     let rows = pool
         .fetch_all(
             r#"
-            SELECT `id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`
+            SELECT `id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`
             FROM `_collections`
             ORDER BY `name` ASC
             "#,
@@ -1196,6 +1408,8 @@ pub struct TableMetadata {
     pub has_updated: bool,
     pub has_created_at: bool,
     pub has_updated_at: bool,
+    pub has_created_by: bool,
+    pub has_updated_by: bool,
     pub has_collection_id: bool,
     pub has_collection_name: bool,
     pub columns: Vec<IntrospectedColumn>,
@@ -1247,6 +1461,8 @@ impl TableMetadata {
             has_updated: has_col("updated"),
             has_created_at: has_col("created_at"),
             has_updated_at: has_col("updated_at"),
+            has_created_by: has_col("created_by") || has_col("createdBy"),
+            has_updated_by: has_col("updated_by") || has_col("updatedBy"),
             has_collection_id: has_col("collectionId") || has_col("collection_id"),
             has_collection_name: has_col("collectionName") || has_col("collection_name"),
             columns: cols,
@@ -1385,7 +1601,53 @@ pub async fn get_table_relations(pool: &DbPool, table_name: &str) -> Result<Vec<
         }
     }
 
-    // 2. Convention Fallback (e.g. siswa_id -> siswa / siswas)
+    // 2. Check explicit schema relation definitions from collection schema metadata
+    if let Ok(Some(col_def)) = get_collection_by_name_or_id(pool, table_name).await {
+        for field in &col_def.schema {
+            if (field.field_type == FieldType::Relation || field.options.get("targetTable").is_some())
+                && !handled_cols.contains(&field.name)
+            {
+                let opt_target = field
+                    .options
+                    .get("targetTable")
+                    .or_else(|| field.options.get("collectionId"))
+                    .and_then(|v| v.as_str());
+
+                if let Some(target_tbl) = opt_target {
+                    if !target_tbl.is_empty() {
+                        let target_pk = field
+                            .options
+                            .get("targetField")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("id")
+                            .to_string();
+
+                        let rel_name = if let Some(stripped) = field.name.strip_suffix("_id") {
+                            stripped.to_string()
+                        } else if let Some(stripped) = field.name.strip_suffix("Id") {
+                            stripped.to_string()
+                        } else {
+                            field.name.clone()
+                        };
+
+                        let target_cols = get_existing_table_columns(pool, target_tbl).await.unwrap_or_default();
+                        let display_col = pick_display_column(target_tbl, &target_cols);
+
+                        relations.push(DetectedRelation {
+                            column: field.name.clone(),
+                            relation_name: rel_name,
+                            target_table: target_tbl.to_string(),
+                            target_pk,
+                            display_col,
+                        });
+                        handled_cols.insert(field.name.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Convention Fallback (e.g. siswa_id -> siswa / siswas)
     let all_tables = list_physical_tables(pool).await.unwrap_or_default();
     let current_cols = get_existing_table_columns(pool, table_name).await.unwrap_or_default();
 
@@ -1767,6 +2029,7 @@ pub async fn sync_existing_tables(pool: &DbPool) -> Result<Vec<String>> {
             schema: schema_fields,
             realtime: true,
             auto_load_relations: false,
+            blameable: true,
             list_rule: Some("".to_string()),
             view_rule: Some("".to_string()),
             create_rule: Some("@request.auth.id != \"\"".to_string()),
@@ -1804,13 +2067,157 @@ fn sql_type_for_field(field_type: &FieldType, unique: bool) -> &'static str {
     }
 }
 
+/// Dynamically determine the matching physical SQL data type for a field.
+/// If field is `Relation`, introspects the target referenced table to match its exact type (e.g. INT vs BIGINT vs VARCHAR).
+pub async fn resolve_field_sql_type(pool: &DbPool, field: &SchemaField) -> String {
+    if field.field_type == FieldType::Relation {
+        let opt_target = field
+            .options
+            .get("targetTable")
+            .or_else(|| field.options.get("collectionId"))
+            .and_then(|v| v.as_str());
+
+        let target_tbl = match opt_target {
+            Some(t) if !t.is_empty() => Some(t.to_string()),
+            _ => {
+                if let Some(stripped) = field
+                    .name
+                    .strip_suffix("_id")
+                    .or_else(|| field.name.strip_suffix("Id"))
+                {
+                    let all_tables = list_physical_tables(pool).await.unwrap_or_default();
+                    all_tables.into_iter().find(|t| {
+                        t.eq_ignore_ascii_case(stripped)
+                            || t.eq_ignore_ascii_case(&format!("{}s", stripped))
+                            || t.eq_ignore_ascii_case(&format!("{}es", stripped))
+                    })
+                } else {
+                    None
+                }
+            }
+        };
+
+        if let Some(tbl) = target_tbl {
+            let target_pk = field
+                .options
+                .get("targetField")
+                .and_then(|v| v.as_str())
+                .unwrap_or("id");
+
+            if let Ok(cols) = introspect_table_columns(pool, &tbl).await {
+                if let Some(col_info) = cols.iter().find(|c| c.name.eq_ignore_ascii_case(target_pk)) {
+                    let t_lower = col_info.data_type.to_lowercase();
+                    let ct_lower = col_info.column_type.to_lowercase();
+
+                    if ct_lower.contains("bigint") || t_lower == "int8" || t_lower == "bigint" {
+                        return if pool.is_sqlite() { "INTEGER".to_string() } else { "BIGINT".to_string() };
+                    } else if ct_lower.contains("smallint") || t_lower == "int2" || t_lower == "smallint" {
+                        return if pool.is_sqlite() { "INTEGER".to_string() } else { "SMALLINT".to_string() };
+                    } else if ct_lower.contains("int") || t_lower == "int4" || t_lower == "integer" {
+                        return if pool.is_sqlite() { "INTEGER".to_string() } else { "INT".to_string() };
+                    } else if t_lower.contains("uuid") {
+                        return "UUID".to_string();
+                    } else if !col_info.column_type.is_empty() {
+                        return col_info.column_type.clone();
+                    }
+                }
+            }
+        }
+
+        if field.unique {
+            "VARCHAR(255)".to_string()
+        } else {
+            "TEXT".to_string()
+        }
+    } else {
+        if let Some(explicit_type) = field
+            .options
+            .get("sqlType")
+            .or_else(|| field.options.get("nativeType"))
+            .and_then(|v| v.as_str())
+        {
+            if !explicit_type.is_empty() {
+                let mut resolved = explicit_type.to_string();
+                if resolved.eq_ignore_ascii_case("varchar") {
+                    let len = field
+                        .options
+                        .get("length")
+                        .or_else(|| field.options.get("maxLength"))
+                        .or_else(|| field.options.get("max"))
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(255);
+                    resolved = format!("VARCHAR({})", len);
+                }
+                return resolved;
+            }
+        }
+
+        let custom_varchar_len = field
+            .options
+            .get("length")
+            .or_else(|| field.options.get("maxLength"))
+            .or_else(|| field.options.get("max"))
+            .and_then(|v| v.as_i64())
+            .unwrap_or(255);
+
+        if pool.is_sqlite() {
+            match field.field_type {
+                FieldType::Number => "REAL".to_string(),
+                FieldType::Bool => "INTEGER".to_string(),
+                FieldType::Json => "TEXT".to_string(),
+                FieldType::Date => "TEXT".to_string(),
+                _ => "TEXT".to_string(),
+            }
+        } else if pool.is_postgres() {
+            match field.field_type {
+                FieldType::Number => "DOUBLE PRECISION".to_string(),
+                FieldType::Bool => "BOOLEAN".to_string(),
+                FieldType::Json => "JSONB".to_string(),
+                FieldType::Date => "TIMESTAMPTZ".to_string(),
+                _ => {
+                    if field.unique {
+                        format!("VARCHAR({})", custom_varchar_len)
+                    } else {
+                        "TEXT".to_string()
+                    }
+                }
+            }
+        } else if pool.is_mysql() {
+            match field.field_type {
+                FieldType::Number => "DOUBLE".to_string(),
+                FieldType::Bool => "TINYINT(1)".to_string(),
+                FieldType::Json => "JSON".to_string(),
+                FieldType::Date => "DATETIME".to_string(),
+                _ => {
+                    if field.unique {
+                        format!("VARCHAR({})", custom_varchar_len)
+                    } else {
+                        "TEXT".to_string()
+                    }
+                }
+            }
+        } else {
+            sql_type_for_field(&field.field_type, field.unique).to_string()
+        }
+    }
+}
+
 pub async fn create_or_update_collection_table(pool: &DbPool, col: &Collection) -> Result<()> {
+    let physical_tables = list_physical_tables(pool).await.unwrap_or_default();
+
     // 1. Create table if not exists with base columns
     let mut columns_sql = vec![
         "`id` VARCHAR(255) PRIMARY KEY NOT NULL".to_string(),
-        "`created` VARCHAR(64) NOT NULL".to_string(),
-        "`updated` VARCHAR(64) NOT NULL".to_string(),
     ];
+
+    if col.collection_type != CollectionType::Auth {
+        columns_sql.push("`created_at` BIGINT".to_string());
+        columns_sql.push("`updated_at` BIGINT".to_string());
+        if col.blameable {
+            columns_sql.push("`created_by` VARCHAR(255)".to_string());
+            columns_sql.push("`updated_by` VARCHAR(255)".to_string());
+        }
+    }
 
     if col.collection_type == CollectionType::Auth {
         // Standard Padi User fields (compatible with padi_rust, padi_go, padi_php)
@@ -1833,11 +2240,13 @@ pub async fn create_or_update_collection_table(pool: &DbPool, col: &Collection) 
         columns_sql.push("`tokenKey` VARCHAR(255) NOT NULL".to_string());
     }
 
+    let mut fk_constraints = Vec::new();
+
     for field in &col.schema {
         if columns_sql.iter().any(|c| c.starts_with(&format!("`{}` ", field.name))) {
             continue;
         }
-        let col_type = sql_type_for_field(&field.field_type, field.unique);
+        let col_type = resolve_field_sql_type(pool, field).await;
         let nullability = if field.required { "NOT NULL" } else { "" };
         let unique = if field.unique { "UNIQUE" } else { "" };
         columns_sql.push(
@@ -1846,12 +2255,57 @@ pub async fn create_or_update_collection_table(pool: &DbPool, col: &Collection) 
                 .collect::<Vec<_>>()
                 .join(" "),
         );
+
+        if field.field_type == FieldType::Relation {
+            let opt_target = field
+                .options
+                .get("targetTable")
+                .or_else(|| field.options.get("collectionId"))
+                .and_then(|v| v.as_str());
+
+            let target_tbl = match opt_target {
+                Some(t) if !t.is_empty() => Some(t.to_string()),
+                _ => {
+                    if let Some(stripped) = field
+                        .name
+                        .strip_suffix("_id")
+                        .or_else(|| field.name.strip_suffix("Id"))
+                    {
+                        physical_tables.iter().find(|t| {
+                            t.eq_ignore_ascii_case(stripped)
+                                || t.eq_ignore_ascii_case(&format!("{}s", stripped))
+                                || t.eq_ignore_ascii_case(&format!("{}es", stripped))
+                        }).cloned()
+                    } else {
+                        None
+                    }
+                }
+            };
+
+            if let Some(tbl) = target_tbl {
+                if physical_tables.iter().any(|t| t.eq_ignore_ascii_case(&tbl)) && !tbl.eq_ignore_ascii_case(&col.name) {
+                    let target_pk = field
+                        .options
+                        .get("targetField")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("id");
+                    let on_delete = if field.required { "CASCADE" } else { "SET NULL" };
+                    fk_constraints.push(format!(
+                        "FOREIGN KEY (`{}`) REFERENCES `{}`(`{}`) ON DELETE {}",
+                        field.name, tbl, target_pk, on_delete
+                    ));
+                }
+            }
+        }
     }
+
+    let mut full_create_parts = columns_sql.clone();
+    full_create_parts.extend(fk_constraints);
 
     let create_sql = format!(
         "CREATE TABLE IF NOT EXISTS `{}` ({});",
         col.name,
-        columns_sql.join(", ")
+        full_create_parts.join(", ")
     );
 
     pool.execute(&create_sql, &[]).await?;
@@ -1890,16 +2344,95 @@ pub async fn create_or_update_collection_table(pool: &DbPool, col: &Collection) 
                     .await;
             }
         }
+    } else {
+        if !has_col("created_at") {
+            let _ = pool
+                .execute(
+                    &format!("ALTER TABLE `{}` ADD COLUMN `created_at` BIGINT;", col.name),
+                    &[],
+                )
+                .await;
+        }
+        if !has_col("updated_at") {
+            let _ = pool
+                .execute(
+                    &format!("ALTER TABLE `{}` ADD COLUMN `updated_at` BIGINT;", col.name),
+                    &[],
+                )
+                .await;
+        }
+        if col.blameable {
+            if !has_col("created_by") {
+                let _ = pool
+                    .execute(
+                        &format!("ALTER TABLE `{}` ADD COLUMN `created_by` VARCHAR(255);", col.name),
+                        &[],
+                    )
+                    .await;
+            }
+            if !has_col("updated_by") {
+                let _ = pool
+                    .execute(
+                        &format!("ALTER TABLE `{}` ADD COLUMN `updated_by` VARCHAR(255);", col.name),
+                        &[],
+                    )
+                    .await;
+            }
+        }
     }
 
     for field in &col.schema {
         if !has_col(&field.name) {
-            let col_type = sql_type_for_field(&field.field_type, field.unique);
+            let col_type = resolve_field_sql_type(pool, field).await;
             let alter_sql = format!(
                 "ALTER TABLE `{}` ADD COLUMN `{}` {};",
                 col.name, field.name, col_type
             );
             let _ = pool.execute(&alter_sql, &[]).await;
+
+            // Attempt to add physical foreign key for MySQL / PostgreSQL if target table exists
+            if field.field_type == FieldType::Relation && (pool.is_mysql() || pool.is_postgres()) {
+                let opt_target = field
+                    .options
+                    .get("targetTable")
+                    .or_else(|| field.options.get("collectionId"))
+                    .and_then(|v| v.as_str());
+
+                let target_tbl = match opt_target {
+                    Some(t) if !t.is_empty() => Some(t.to_string()),
+                    _ => {
+                        if let Some(stripped) = field
+                            .name
+                            .strip_suffix("_id")
+                            .or_else(|| field.name.strip_suffix("Id"))
+                        {
+                            physical_tables.iter().find(|t| {
+                                t.eq_ignore_ascii_case(stripped)
+                                    || t.eq_ignore_ascii_case(&format!("{}s", stripped))
+                                    || t.eq_ignore_ascii_case(&format!("{}es", stripped))
+                            }).cloned()
+                        } else {
+                            None
+                        }
+                    }
+                };
+
+                if let Some(tbl) = target_tbl {
+                    if physical_tables.iter().any(|t| t.eq_ignore_ascii_case(&tbl)) && !tbl.eq_ignore_ascii_case(&col.name) {
+                        let target_pk = field
+                            .options
+                            .get("targetField")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("id");
+                        let on_delete = if field.required { "CASCADE" } else { "SET NULL" };
+                        let fk_sql = format!(
+                            "ALTER TABLE `{}` ADD CONSTRAINT `fk_{}_{}` FOREIGN KEY (`{}`) REFERENCES `{}`(`{}`) ON DELETE {};",
+                            col.name, col.name, field.name, field.name, tbl, target_pk, on_delete
+                        );
+                        let _ = pool.execute(&fk_sql, &[]).await;
+                    }
+                }
+            }
         }
     }
 
@@ -1907,6 +2440,323 @@ pub async fn create_or_update_collection_table(pool: &DbPool, col: &Collection) 
     pool.invalidate_schema_cache(&col.id);
 
     Ok(())
+}
+
+// ============================================================================
+// DYNAMIC CUSTOM SQL ENDPOINTS (`_endpoints`)
+// ============================================================================
+
+fn row_to_custom_endpoint(row: &Value) -> CustomEndpoint {
+    CustomEndpoint {
+        id: json_get_str(row, "id"),
+        name: json_get_str(row, "name"),
+        path: json_get_str(row, "path")
+            .trim_matches('/')
+            .to_string(),
+        method: {
+            let m = json_get_str(row, "method").to_uppercase();
+            if m.is_empty() {
+                "GET".to_string()
+            } else {
+                m
+            }
+        },
+        sql: json_get_str(row, "sql"),
+        description: json_get_str(row, "description"),
+        auth_rule: {
+            let r = json_get_str(row, "authRule");
+            if r.is_empty() {
+                "public".to_string()
+            } else {
+                r
+            }
+        },
+        transaction: json_get_i64(row, "transaction") != 0,
+        single_row: json_get_i64(row, "singleRow") != 0,
+        created: json_get_str(row, "created"),
+        updated: json_get_str(row, "updated"),
+    }
+}
+
+pub async fn get_all_custom_endpoints(pool: &DbPool) -> Result<Vec<CustomEndpoint>> {
+    let rows = pool
+        .fetch_all(
+            "SELECT * FROM `_endpoints` ORDER BY `created` ASC;",
+            &[],
+        )
+        .await?;
+
+    let mut list = Vec::with_capacity(rows.len());
+    if let Ok(mut cache) = pool.cache.endpoints.write() {
+        cache.clear();
+        for r in &rows {
+            let ep = row_to_custom_endpoint(r);
+            let clean = ep.path.trim().trim_matches('/').to_lowercase();
+            cache.insert(clean.clone(), ep.clone());
+            if let Some(without_api) = clean.strip_prefix("api/") {
+                cache.insert(without_api.to_string(), ep.clone());
+            } else {
+                cache.insert(format!("api/{}", clean), ep.clone());
+            }
+            if let Some(without_custom) = clean.strip_prefix("api/custom/") {
+                cache.insert(without_custom.to_string(), ep.clone());
+                cache.insert(format!("custom/{}", without_custom), ep.clone());
+            } else if let Some(without_custom) = clean.strip_prefix("custom/") {
+                cache.insert(without_custom.to_string(), ep.clone());
+                cache.insert(format!("api/custom/{}", without_custom), ep.clone());
+            }
+            cache.insert(ep.id.clone(), ep.clone());
+            list.push(ep);
+        }
+    } else {
+        for r in &rows {
+            list.push(row_to_custom_endpoint(r));
+        }
+    }
+    Ok(list)
+}
+
+pub async fn get_custom_endpoint_by_path_or_id(
+    pool: &DbPool,
+    path_or_id: &str,
+) -> Result<Option<CustomEndpoint>> {
+    let clean = path_or_id.trim().trim_matches('/');
+    if clean.is_empty() {
+        return Ok(None);
+    }
+
+    let clean_lower = clean.to_lowercase();
+    let without_api = clean_lower.strip_prefix("api/").unwrap_or(&clean_lower).to_string();
+    let with_api = format!("api/{}", without_api);
+
+    if let Ok(cache) = pool.cache.endpoints.read() {
+        for candidate in [&clean_lower, &without_api, &with_api, &clean.to_string()] {
+            if let Some(ep) = cache.get(candidate) {
+                return Ok(Some(ep.clone()));
+            }
+        }
+    }
+
+    let row = pool
+        .fetch_optional(
+            "SELECT * FROM `_endpoints` WHERE LOWER(`path`) = LOWER(?) OR LOWER(`path`) = LOWER(?) OR `id` = ? LIMIT 1;",
+            &[Val::from(clean), Val::from(without_api.as_str()), Val::from(clean)],
+        )
+        .await?;
+
+    if let Some(r) = row {
+        let ep = row_to_custom_endpoint(&r);
+        if let Ok(mut cache) = pool.cache.endpoints.write() {
+            cache.insert(ep.path.to_lowercase(), ep.clone());
+            cache.insert(ep.id.clone(), ep.clone());
+        }
+        Ok(Some(ep))
+    } else {
+        Ok(None)
+    }
+}
+
+pub async fn save_custom_endpoint(
+    pool: &DbPool,
+    ep: &CustomEndpoint,
+) -> Result<CustomEndpoint> {
+    let clean_path = ep
+        .path
+        .trim()
+        .trim_matches('/')
+        .to_string();
+
+    if clean_path.is_empty() {
+        return Err(anyhow!("Endpoint path cannot be empty."));
+    }
+    if ep.sql.trim().is_empty() {
+        return Err(anyhow!("Endpoint SQL query cannot be empty."));
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let method = ep.method.trim().to_uppercase();
+
+    // If `ep.id` is empty, check if an endpoint with the same `path` already exists so it overrides cleanly
+    let existing_by_path = if ep.id.trim().is_empty() {
+        get_custom_endpoint_by_path_or_id(pool, &clean_path).await.ok().flatten()
+    } else {
+        None
+    };
+
+    let id = if !ep.id.trim().is_empty() {
+        ep.id.trim().to_string()
+    } else if let Some(ref ex) = existing_by_path {
+        ex.id.clone()
+    } else {
+        generate_id()
+    };
+
+    let created = if !ep.created.trim().is_empty() {
+        ep.created.clone()
+    } else if let Some(ref ex) = existing_by_path {
+        ex.created.clone()
+    } else {
+        now.clone()
+    };
+    let tx_int = if ep.transaction { 1i64 } else { 0i64 };
+    let single_int = if ep.single_row { 1i64 } else { 0i64 };
+
+    let sql = if pool.is_mysql() {
+        r#"
+        INSERT INTO `_endpoints`
+            (`id`, `name`, `path`, `method`, `sql`, `description`, `authRule`, `transaction`, `singleRow`, `created`, `updated`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            `name` = VALUES(`name`),
+            `path` = VALUES(`path`),
+            `method` = VALUES(`method`),
+            `sql` = VALUES(`sql`),
+            `description` = VALUES(`description`),
+            `authRule` = VALUES(`authRule`),
+            `transaction` = VALUES(`transaction`),
+            `singleRow` = VALUES(`singleRow`),
+            `updated` = VALUES(`updated`);
+        "#
+    } else {
+        r#"
+        INSERT INTO `_endpoints`
+            (`id`, `name`, `path`, `method`, `sql`, `description`, `authRule`, `transaction`, `singleRow`, `created`, `updated`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(`id`) DO UPDATE SET
+            `name` = excluded.`name`,
+            `path` = excluded.`path`,
+            `method` = excluded.`method`,
+            `sql` = excluded.`sql`,
+            `description` = excluded.`description`,
+            `authRule` = excluded.`authRule`,
+            `transaction` = excluded.`transaction`,
+            `singleRow` = excluded.`singleRow`,
+            `updated` = excluded.`updated`;
+        "#
+    };
+
+    pool.execute(
+        sql,
+        &[
+            Val::from(&id),
+            Val::from(&ep.name),
+            Val::from(&clean_path),
+            Val::from(&method),
+            Val::from(&ep.sql),
+            Val::from(&ep.description),
+            Val::from(&ep.auth_rule),
+            Val::from(tx_int),
+            Val::from(single_int),
+            Val::from(&created),
+            Val::from(&now),
+        ],
+    )
+    .await?;
+
+    let _ = get_all_custom_endpoints(pool).await;
+
+    get_custom_endpoint_by_path_or_id(pool, &id)
+        .await?
+        .ok_or_else(|| anyhow!("Failed to load saved custom endpoint"))
+}
+
+pub async fn delete_custom_endpoint(pool: &DbPool, id_or_path: &str) -> Result<bool> {
+    let clean = id_or_path.trim().trim_matches('/');
+    let (affected, _) = pool
+        .execute(
+            "DELETE FROM `_endpoints` WHERE `id` = ? OR LOWER(`path`) = LOWER(?);",
+            &[Val::from(clean), Val::from(clean)],
+        )
+        .await?;
+    let _ = get_all_custom_endpoints(pool).await;
+    Ok(affected > 0)
+}
+
+/// Match an incoming HTTP request against any user-defined Override Endpoint in RAM cache.
+/// Supports exact path matches (e.g. `api/collections/siswa/records` or `collections/siswa/records`)
+/// as well as path parameter templates (e.g. `api/collections/siswa/records/{id}` or `:id`).
+pub fn match_override_endpoint(
+    pool: &DbPool,
+    http_method: &str,
+    request_path: &str,
+) -> Option<(CustomEndpoint, HashMap<String, String>)> {
+    let norm = request_path.trim().trim_matches('/');
+    let lower = norm.to_lowercase();
+
+    // Never override core admin/endpoint management routes so the Dashboard cannot be locked out
+    if lower.is_empty()
+        || lower.starts_with("dashboard")
+        || lower.starts_with("api/endpoints")
+        || lower.starts_with("api/admins")
+        || lower.starts_with("api/settings")
+        || lower.starts_with("api/backups")
+    {
+        return None;
+    }
+
+    let cache = pool.cache.endpoints.read().ok()?;
+    if cache.is_empty() {
+        return None;
+    }
+
+    let method_upper = http_method.trim().to_uppercase();
+    let without_api = lower.strip_prefix("api/").unwrap_or(&lower);
+
+    // 1. Fast O(1) exact path lookup
+    for candidate in [lower.as_str(), without_api] {
+        if let Some(ep) = cache.get(candidate) {
+            let ep_m = ep.method.trim().to_uppercase();
+            if ep_m == method_upper || ep_m == "ANY" || ep_m == "*" {
+                return Some((ep.clone(), HashMap::new()));
+            }
+        }
+    }
+
+    // 2. Pattern matching for routes with `{param}` or `:param` (e.g. `api/collections/siswa/records/{id}`)
+    let req_segments: Vec<&str> = norm.split('/').collect();
+    let req_no_api_segments: Vec<&str> = norm
+        .strip_prefix("api/")
+        .unwrap_or(norm)
+        .split('/')
+        .collect();
+
+    for (k, ep) in cache.iter() {
+        // Skip duplicate ID keys in cache (only check path keys that match `ep.path.to_lowercase()`)
+        if k != &ep.path.to_lowercase() {
+            continue;
+        }
+        if !ep.path.contains('{') && !ep.path.contains(':') {
+            continue;
+        }
+        let ep_m = ep.method.trim().to_uppercase();
+        if ep_m != method_upper && ep_m != "ANY" && ep_m != "*" {
+            continue;
+        }
+
+        let pat_segments: Vec<&str> = ep.path.trim_matches('/').split('/').collect();
+        for target_segs in [&req_segments, &req_no_api_segments] {
+            if pat_segments.len() != target_segs.len() {
+                continue;
+            }
+            let mut matched = true;
+            let mut extracted = HashMap::new();
+            for (p_seg, r_seg) in pat_segments.iter().zip(target_segs.iter()) {
+                if let Some(name) = p_seg.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+                    extracted.insert(name.to_string(), (*r_seg).to_string());
+                } else if let Some(name) = p_seg.strip_prefix(':') {
+                    extracted.insert(name.to_string(), (*r_seg).to_string());
+                } else if !p_seg.eq_ignore_ascii_case(r_seg) {
+                    matched = false;
+                    break;
+                }
+            }
+            if matched {
+                return Some((ep.clone(), extracted));
+            }
+        }
+    }
+
+    None
 }
 
 #[cfg(test)]

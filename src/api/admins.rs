@@ -207,12 +207,12 @@ pub async fn update_settings(
     State(state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    save_system_settings(&state.db, payload.clone()).await.map_err(|e| {
+    let updated = save_system_settings(&state.db, payload).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "code": 500, "message": e.to_string() })),
         )
     })?;
 
-    Ok(Json(payload))
+    Ok(Json(updated))
 }

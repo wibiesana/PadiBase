@@ -19,15 +19,23 @@ impl Default for CollectionType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum FieldType {
+    #[serde(alias = "string", alias = "varchar", alias = "char", alias = "uuid", alias = "text")]
     Text,
+    #[serde(alias = "int", alias = "integer", alias = "bigint", alias = "smallint", alias = "tinyint", alias = "real", alias = "float", alias = "double", alias = "decimal", alias = "numeric")]
     Number,
+    #[serde(alias = "boolean")]
     Bool,
     Email,
     Url,
+    #[serde(alias = "datetime", alias = "timestamp", alias = "timestamptz", alias = "time")]
     Date,
+    #[serde(alias = "enum")]
     Select,
+    #[serde(alias = "jsonb")]
     Json,
+    #[serde(alias = "blob", alias = "bytea", alias = "binary")]
     File,
+    #[serde(alias = "fk", alias = "foreign_key")]
     Relation,
 }
 
@@ -66,6 +74,10 @@ pub struct Collection {
     #[serde(rename = "autoLoadRelations", alias = "auto_load_relations", default)]
     pub auto_load_relations: bool,
 
+    /// Whether blameable behavior (tracking created_by and updated_by) is enabled
+    #[serde(default)]
+    pub blameable: bool,
+
     // API Rules (PocketBase rules)
     #[serde(rename = "listRule", default)]
     pub list_rule: Option<String>,
@@ -95,6 +107,7 @@ impl Collection {
             schema: Vec::new(),
             realtime: true,
             auto_load_relations: false,
+            blameable: true,
             list_rule: None,
             view_rule: None,
             create_rule: Some("@request.auth.id != \"\"".to_string()),
@@ -115,6 +128,37 @@ pub struct Admin {
     #[serde(rename = "tokenKey")]
     pub token_key: String,
     pub created: String,
+    pub updated: String,
+}
+
+fn default_http_method() -> String {
+    "GET".to_string()
+}
+
+fn default_endpoint_auth_rule() -> String {
+    "public".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomEndpoint {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    pub path: String,
+    #[serde(default = "default_http_method")]
+    pub method: String,
+    pub sql: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(rename = "authRule", alias = "auth_rule", default = "default_endpoint_auth_rule")]
+    pub auth_rule: String,
+    #[serde(default)]
+    pub transaction: bool,
+    #[serde(rename = "singleRow", alias = "single_row", default)]
+    pub single_row: bool,
+    #[serde(default)]
+    pub created: String,
+    #[serde(default)]
     pub updated: String,
 }
 
