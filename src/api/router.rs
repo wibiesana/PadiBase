@@ -39,18 +39,35 @@ pub fn create_router(state: AppState) -> Router {
             "/api/collections/{collection}/export-api-collection",
             get(api_collection::export_single),
         )
+        .route(
+            "/api/tables/{collection}/api-collection",
+            get(api_collection::export_single),
+        )
+        .route(
+            "/api/tables/{collection}/export-api-collection",
+            get(api_collection::export_single),
+        )
         // Admins & Settings
         .route("/api/admins/has-admins", get(admins::has_admins))
         .route("/api/admins/auth-with-password", post(admins::auth_with_password))
         .route("/api/admins", get(admins::list_admins).post(admins::create_admin))
         .route("/api/admins/{id}", delete(admins::delete_admin))
         .route("/api/settings", get(admins::get_settings).patch(admins::update_settings))
-        // Collections
+        // Tables & Collections (dual routing: /api/tables and /api/collections)
         .route("/api/collections", get(collections::list).post(collections::create))
         .route("/api/collections/sync", post(collections::sync).get(collections::sync))
         .route("/api/collections/import", put(collections::import_collections))
         .route(
             "/api/collections/{name_or_id}",
+            get(collections::get_one)
+                .patch(collections::update)
+                .delete(collections::delete),
+        )
+        .route("/api/tables", get(collections::list).post(collections::create))
+        .route("/api/tables/sync", post(collections::sync).get(collections::sync))
+        .route("/api/tables/import", put(collections::import_collections))
+        .route(
+            "/api/tables/{name_or_id}",
             get(collections::get_one)
                 .patch(collections::update)
                 .delete(collections::delete),
@@ -66,6 +83,18 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/api/collections/{collection}/all",
+            get(records::all),
+        )
+        .route(
+            "/api/tables/{collection}/records",
+            get(records::list).post(records::create),
+        )
+        .route(
+            "/api/tables/{collection}/records/all",
+            get(records::all),
+        )
+        .route(
+            "/api/tables/{collection}/all",
             get(records::all),
         )
         .route(
@@ -90,7 +119,21 @@ pub fn create_router(state: AppState) -> Router {
             "/api/collections/{collection}/import",
             post(records::import_records),
         )
-        // Auth Collections (Login, Register, Forgot Password, Reset Password, Change Password, Me/Refresh)
+        .route(
+            "/api/tables/{collection}/records/{id}",
+            get(records::get_one)
+                .patch(records::update)
+                .delete(records::delete),
+        )
+        .route(
+            "/api/tables/{collection}/export",
+            get(records::export_records),
+        )
+        .route(
+            "/api/tables/{collection}/import",
+            post(records::import_records),
+        )
+        // Auth Tables & Collections (Login, Register, Forgot Password, Reset Password, Change Password, Me/Refresh)
         .route(
             "/api/collections/{collection}/auth-with-password",
             post(auth_records::auth_with_password),
@@ -129,6 +172,47 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/api/collections/{collection}/me",
+            get(auth_records::auth_refresh),
+        )
+        // Aliases for /api/tables/{table}/...
+        .route(
+            "/api/tables/{collection}/auth-with-password",
+            post(auth_records::auth_with_password),
+        )
+        .route(
+            "/api/tables/{collection}/login",
+            post(auth_records::auth_with_password),
+        )
+        .route(
+            "/api/tables/{collection}/register",
+            post(auth_records::register),
+        )
+        .route(
+            "/api/tables/{collection}/forgot-password",
+            post(auth_records::forgot_password),
+        )
+        .route(
+            "/api/tables/{collection}/request-password-reset",
+            post(auth_records::forgot_password),
+        )
+        .route(
+            "/api/tables/{collection}/reset-password",
+            post(auth_records::reset_password),
+        )
+        .route(
+            "/api/tables/{collection}/confirm-password-reset",
+            post(auth_records::reset_password),
+        )
+        .route(
+            "/api/tables/{collection}/change-password",
+            post(auth_records::change_password),
+        )
+        .route(
+            "/api/tables/{collection}/auth-refresh",
+            post(auth_records::auth_refresh).get(auth_records::auth_refresh),
+        )
+        .route(
+            "/api/tables/{collection}/me",
             get(auth_records::auth_refresh),
         )
         // Direct Auth Shortcuts (defaults to `users` collection)

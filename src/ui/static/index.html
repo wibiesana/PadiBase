@@ -494,6 +494,7 @@
                   <option value="">(Default: /api/)</option>
                   <option value="v1/">v1/ (/api/v1/)</option>
                   <option value="custom/">custom/ (/api/custom/)</option>
+                  <option value="tables/">tables/ (/api/tables/)</option>
                   <option value="collections/">collections/ (/api/collections/)</option>
                   <option value="/">/ (Root Direct: without /api/)</option>
                   <option value="__custom__">Custom prefix...</option>
@@ -510,7 +511,7 @@
             <div class="px-4 py-2.5 rounded-xl bg-slate-900 text-white font-mono text-xs flex items-center justify-between gap-3 shadow-inner">
               <div class="flex items-center space-x-2 truncate min-w-0">
                 <span class="text-slate-400 font-sans text-[11px] font-bold shrink-0">Live URL:</span>
-                <span id="epLiveUrlPreview" class="text-emerald-400 font-bold truncate">http://127.0.0.1:8090/api/endpoint</span>
+                <span id="epLiveUrlPreview" class="text-emerald-400 font-bold truncate">http://127.0.0.1:8085/api/endpoint</span>
               </div>
               <div class="flex items-center space-x-2 shrink-0">
                 <span id="epOverrideModeBadge" class="hidden text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-400/30">OVERRIDE</span>
@@ -740,15 +741,8 @@
                   <label class="block font-bold text-slate-700 mb-1">Description (Optional)</label>
                   <input type="text" id="epDescInput" placeholder="Brief explanation of endpoint" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-600 shadow-2xs">
                 </div>
-                <div class="bg-white p-3 rounded-xl border border-slate-200 space-y-2">
+                <div class="bg-white p-3 rounded-xl border border-slate-200">
                   <label class="inline-flex items-start space-x-2.5 cursor-pointer">
-                    <input type="checkbox" id="epSingleRowInput" class="rounded border-slate-300 text-emerald-600 mt-0.5">
-                    <div>
-                      <span class="font-bold text-slate-800 block">Single Row Result (Object)</span>
-                      <span class="text-[10px] text-slate-400 block leading-tight">Returns <code>{ ... }</code> directly instead of an array <code>[ { ... } ]</code>.</span>
-                    </div>
-                  </label>
-                  <label class="inline-flex items-start space-x-2.5 cursor-pointer pt-1 border-t border-slate-100">
                     <input type="checkbox" id="epTransactionInput" class="rounded border-slate-300 text-emerald-600 mt-0.5">
                     <div>
                       <span class="font-bold text-slate-800 block">Wrap in Transaction</span>
@@ -821,8 +815,8 @@
       <div id="settingsView" class="hidden flex-1 flex flex-col overflow-hidden p-3 sm:p-5 bg-slate-100">
         <div class="max-w-6xl w-full mx-auto flex-1 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           
-          <!-- Settings Header & Tab Navigation -->
-          <div class="px-4 sm:px-6 pt-4 pb-3 border-b border-slate-200 bg-slate-50 flex flex-col gap-3 shrink-0">
+          <!-- Settings Header -->
+          <div class="px-5 py-3.5 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
             <div>
               <h2 class="text-base font-extrabold text-slate-900 flex items-center">
                 <i class="fa-solid fa-sliders text-indigo-600 mr-2"></i>
@@ -830,41 +824,44 @@
               </h2>
               <p class="text-xs text-slate-500 mt-0.5">Manage global table matrix, database backups, admin accounts, and schema import/export.</p>
             </div>
-
-            <nav class="flex items-center space-x-1.5 bg-slate-200/70 p-1 rounded-xl overflow-x-auto max-w-full">
-              <button id="setTab_quickmatrix" onclick="switchSettingsTab('quickmatrix')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-1.5 transition shrink-0">
-                <i class="fa-solid fa-table-cells"></i> <span>All Tables Matrix</span>
-              </button>
-              <button id="setTab_app" onclick="switchSettingsTab('app')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition shrink-0">
-                <i class="fa-solid fa-server mr-1"></i> <span>Application &amp; DB</span>
-              </button>
-              <button id="setTab_roles" onclick="switchSettingsTab('roles')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition shrink-0">
-                <i class="fa-solid fa-shield-halved mr-1"></i> <span>Roles (RBAC)</span>
-              </button>
-              <button id="setTab_admins" onclick="switchSettingsTab('admins')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition shrink-0">
-                <i class="fa-solid fa-user-shield mr-1"></i> <span>Admin Accounts</span>
-              </button>
-              <button id="setTab_backups" onclick="switchSettingsTab('backups')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition shrink-0">
-                <i class="fa-solid fa-box-archive mr-1"></i> <span>Backups</span>
-              </button>
-              <button id="setTab_export" onclick="switchSettingsTab('export')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition shrink-0">
-                <i class="fa-solid fa-file-export mr-1"></i> <span>Export Schema</span>
-              </button>
-              <button id="setTab_import" onclick="switchSettingsTab('import')" class="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition shrink-0">
-                <i class="fa-solid fa-file-import mr-1"></i> <span>Import Schema</span>
-              </button>
-            </nav>
           </div>
 
-          <!-- Settings Tab Content Area -->
-          <main class="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50/50">
+          <!-- Settings Body: Left Sidebar Tabs + Right Content -->
+          <div class="flex-1 flex min-h-0 overflow-hidden">
+            <!-- Left Sidebar Navigation -->
+            <aside class="w-52 sm:w-60 bg-slate-50 border-r border-slate-200 flex flex-col p-2.5 space-y-1 overflow-y-auto shrink-0 select-none">
+              <button id="setTab_quickmatrix" onclick="switchSettingsTab('quickmatrix')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-2.5 transition shrink-0">
+                <i class="fa-solid fa-table-cells w-4 text-center"></i> <span>All Tables Matrix</span>
+              </button>
+              <button id="setTab_app" onclick="switchSettingsTab('app')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
+                <i class="fa-solid fa-server w-4 text-center"></i> <span>Application &amp; DB</span>
+              </button>
+              <button id="setTab_roles" onclick="switchSettingsTab('roles')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
+                <i class="fa-solid fa-shield-halved w-4 text-center"></i> <span>Roles (RBAC)</span>
+              </button>
+              <button id="setTab_admins" onclick="switchSettingsTab('admins')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
+                <i class="fa-solid fa-user-shield w-4 text-center"></i> <span>Admin Accounts</span>
+              </button>
+              <button id="setTab_backups" onclick="switchSettingsTab('backups')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
+                <i class="fa-solid fa-box-archive w-4 text-center"></i> <span>Backups</span>
+              </button>
+              <button id="setTab_export" onclick="switchSettingsTab('export')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
+                <i class="fa-solid fa-file-export w-4 text-center"></i> <span>Export Schema</span>
+              </button>
+              <button id="setTab_import" onclick="switchSettingsTab('import')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
+                <i class="fa-solid fa-file-import w-4 text-center"></i> <span>Import Schema</span>
+              </button>
+            </aside>
+
+            <!-- Settings Tab Content Area -->
+            <main class="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50/50">
             
             <!-- 1. All Tables Quick Matrix -->
             <div id="settingsPane_quickmatrix" class="space-y-4">
               <div class="flex items-center justify-between">
                 <div>
                   <h3 class="text-sm font-extrabold text-slate-900">All Tables Security &amp; Features Matrix</h3>
-                  <p class="text-xs text-slate-500">Overview of all collections, realtime settings, and access rules.</p>
+                  <p class="text-xs text-slate-500">Overview of all tables, realtime settings, and access rules.</p>
                 </div>
                 <button onclick="syncDatabaseTables()" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition">
                   <i class="fa-solid fa-arrows-rotate mr-1"></i> Sync DB
@@ -1055,7 +1052,7 @@
             <div id="settingsPane_import" class="hidden max-w-3xl space-y-4">
               <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-2xs">
                 <h3 class="text-sm font-extrabold text-slate-900">Import Schema Definition</h3>
-                <p class="text-xs text-slate-500">Paste schema JSON array to import collections and column configurations.</p>
+                <p class="text-xs text-slate-500">Paste schema JSON array to import tables and column configurations.</p>
                 <textarea id="importSchemaTextarea" rows="10" class="w-full bg-slate-950 text-emerald-400 p-3 rounded-xl font-mono text-xs" placeholder='[ { "name": "posts", "type": "base", "schema": [...] } ]'></textarea>
                 <div class="flex justify-end">
                   <button onclick="submitImportSchema()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition">
@@ -1068,6 +1065,7 @@
           </main>
         </div>
       </div>
+    </div>
 
     </div>
   </div>
@@ -1141,7 +1139,7 @@
     <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity" onclick="closeSchemaEditorPage()"></div>
 
     <div class="fixed inset-y-0 right-0 max-w-full flex pl-6 sm:pl-10">
-      <div id="workspaceSettingsPane" class="w-screen max-w-2xl lg:max-w-3xl xl:max-w-4xl bg-white shadow-2xl flex flex-col border-l border-slate-200 h-full drawer-panel">
+      <div id="workspaceSettingsPane" class="w-screen max-w-3xl lg:max-w-4xl xl:max-w-5xl bg-white shadow-2xl flex flex-col border-l border-slate-200 h-full drawer-panel">
         <!-- Drawer Header -->
         <div class="h-14 px-5 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50">
           <div class="flex items-center space-x-2.5 min-w-0">
@@ -1160,21 +1158,27 @@
           </button>
         </div>
 
-        <!-- Drawer Tabs: Fields | API Rules | Options -->
-        <div class="px-5 pt-1.5 border-b border-slate-200 bg-white flex items-center space-x-2 shrink-0">
-          <button onclick="switchColSettingsTab('fields')" id="colTab_fields" class="px-3 py-2 text-xs font-bold border-b-2 border-emerald-600 text-emerald-700 transition">
-            <i class="fa-solid fa-table-columns mr-1.5"></i> Structure &amp; Columns (<span id="inlineColCountText">0</span>)
-          </button>
-          <button onclick="switchColSettingsTab('rules')" id="colTab_rules" class="px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 transition">
-            <i class="fa-solid fa-shield-halved mr-1.5 text-indigo-600"></i> API Access Rules
-          </button>
-          <button onclick="switchColSettingsTab('options')" id="colTab_options" class="px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 transition">
-            <i class="fa-solid fa-gear mr-1.5 text-teal-600"></i> Table Options
-          </button>
-        </div>
+        <!-- Drawer Body: Left Sidebar Tabs + Right Content -->
+        <div class="flex-1 flex min-h-0 overflow-hidden">
+          <!-- Left Sidebar Tabs -->
+          <aside class="w-48 sm:w-56 bg-slate-50 border-r border-slate-200 flex flex-col p-2.5 space-y-1 overflow-y-auto shrink-0 select-none">
+            <div class="px-2 pt-1 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Configuration</div>
+            <button onclick="switchColSettingsTab('fields')" id="colTab_fields" class="w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-2.5 transition shrink-0">
+              <i class="fa-solid fa-table-columns w-4 text-center"></i>
+              <span class="flex-1 truncate">Structure (<span id="inlineColCountText">0</span>)</span>
+            </button>
+            <button onclick="switchColSettingsTab('rules')" id="colTab_rules" class="w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
+              <i class="fa-solid fa-shield-halved w-4 text-center text-indigo-600"></i>
+              <span class="flex-1 truncate">API Access Rules</span>
+            </button>
+            <button onclick="switchColSettingsTab('options')" id="colTab_options" class="w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
+              <i class="fa-solid fa-gear w-4 text-center text-teal-600"></i>
+              <span class="flex-1 truncate">Table Options</span>
+            </button>
+          </aside>
 
-      <!-- Modal Body -->
-      <div class="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 space-y-5">
+          <!-- Modal Body Content -->
+          <div class="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 space-y-5 bg-white">
         
         <!-- TAB 1: COLUMNS / SCHEMA BUILDER -->
         <div id="colSettingsPane_fields" class="space-y-4">
@@ -1315,6 +1319,7 @@
         </div>
 
       </div>
+    </div>
 
       <!-- Drawer Footer -->
       <div class="px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-end space-x-2 shrink-0">
@@ -1458,7 +1463,7 @@
         <button type="button" onclick="cancelCreateTablePage()" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200 rounded-lg transition">
           Cancel
         </button>
-        <button type="button" onclick="handleSaveNewCollection()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center space-x-1.5">
+        <button type="button" onclick="saveNewTablePage()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center space-x-1.5">
           <i class="fa-solid fa-plus text-xs"></i>
           <span>Create Table</span>
         </button>
@@ -1473,7 +1478,7 @@
     <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity" onclick="closeApiPreviewModal()"></div>
 
     <div class="fixed inset-y-0 right-0 max-w-full flex pl-6 sm:pl-10">
-      <div id="workspaceApiPane" class="w-screen max-w-2xl lg:max-w-3xl xl:max-w-4xl bg-white shadow-2xl flex flex-col border-l border-slate-200 h-full drawer-panel">
+      <div id="workspaceApiPane" class="w-screen max-w-3xl lg:max-w-4xl xl:max-w-5xl bg-white shadow-2xl flex flex-col border-l border-slate-200 h-full drawer-panel">
         <!-- Drawer Header -->
         <div class="h-14 px-5 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50">
           <div class="flex items-center space-x-2.5 min-w-0">
@@ -1498,28 +1503,86 @@
           </div>
         </div>
 
-        <!-- API Tabs -->
-        <div class="px-4 py-2 bg-slate-100 border-b border-slate-200 flex items-center space-x-1.5 overflow-x-auto text-xs font-bold shrink-0" id="apiPreviewTabs">
-          <button data-api-tab="list" onclick="renderApiPreview('list')" class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white shadow-2xs transition shrink-0">GET List</button>
-          <button data-api-tab="all" onclick="renderApiPreview('all')" class="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white transition shrink-0">GET All</button>
-          <button data-api-tab="view" onclick="renderApiPreview('view')" class="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white transition shrink-0">GET Single</button>
-          <button data-api-tab="create" onclick="renderApiPreview('create')" class="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white transition shrink-0">POST Create</button>
-          <button data-api-tab="update" onclick="renderApiPreview('update')" class="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white transition shrink-0">PATCH Update</button>
-          <button data-api-tab="delete" onclick="renderApiPreview('delete')" class="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white transition shrink-0">DELETE Remove</button>
-          <button data-api-tab="file" onclick="renderApiPreview('file')" class="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white transition shrink-0">Upload File</button>
-          <button data-api-tab="realtime" onclick="renderApiPreview('realtime')" class="px-3 py-1.5 rounded-lg text-slate-600 hover:bg-white transition shrink-0">SSE Realtime</button>
-          <button data-api-tab="transactions" onclick="renderApiPreview('transactions')" class="px-3 py-1.5 rounded-lg text-amber-700 hover:bg-amber-50 transition shrink-0">Transactions</button>
-          <button data-api-tab="sql" onclick="renderApiPreview('sql')" class="px-3 py-1.5 rounded-lg text-amber-700 hover:bg-amber-50 transition shrink-0">Custom SQL</button>
-          <button id="apiTabRegister" data-api-tab="register" onclick="renderApiPreview('register')" class="hidden px-3 py-1.5 rounded-lg text-teal-700 hover:bg-teal-50 transition shrink-0">Register</button>
-          <button id="apiTabAuth" data-api-tab="auth" onclick="renderApiPreview('auth')" class="hidden px-3 py-1.5 rounded-lg text-teal-700 hover:bg-teal-50 transition shrink-0">Auth</button>
-          <button id="apiTabForgot" data-api-tab="forgot" onclick="renderApiPreview('forgot')" class="hidden px-3 py-1.5 rounded-lg text-teal-700 hover:bg-teal-50 transition shrink-0">Forgot Pw</button>
-          <button id="apiTabReset" data-api-tab="reset" onclick="renderApiPreview('reset')" class="hidden px-3 py-1.5 rounded-lg text-teal-700 hover:bg-teal-50 transition shrink-0">Reset Pw</button>
-          <button id="apiTabChangePw" data-api-tab="change_pw" onclick="renderApiPreview('change_pw')" class="hidden px-3 py-1.5 rounded-lg text-teal-700 hover:bg-teal-50 transition shrink-0">Change Pw</button>
-          <button id="apiTabMe" data-api-tab="me" onclick="renderApiPreview('me')" class="hidden px-3 py-1.5 rounded-lg text-teal-700 hover:bg-teal-50 transition shrink-0">Profile (/me)</button>
-        </div>
+        <!-- Drawer Body: Left Sidebar Tabs + Right Content -->
+        <div class="flex-1 flex min-h-0 overflow-hidden">
+          <!-- Left Sidebar Tabs -->
+          <div class="w-48 sm:w-56 bg-slate-50 border-r border-slate-200 flex flex-col p-2.5 space-y-1 overflow-y-auto shrink-0 select-none" id="apiPreviewTabs">
+            <div class="px-2 pt-1 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Endpoints</div>
+            <button data-api-tab="list" onclick="renderApiPreview('list')" class="w-full text-left px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-list text-[11px] w-4 opacity-80"></i>
+              <span>GET List</span>
+            </button>
+            <button data-api-tab="all" onclick="renderApiPreview('all')" class="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-database text-[11px] w-4 opacity-80"></i>
+              <span>GET All</span>
+            </button>
+            <button data-api-tab="view" onclick="renderApiPreview('view')" class="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-eye text-[11px] w-4 opacity-80"></i>
+              <span>GET Single</span>
+            </button>
+            <button data-api-tab="create" onclick="renderApiPreview('create')" class="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-plus text-[11px] w-4 opacity-80"></i>
+              <span>POST Create</span>
+            </button>
+            <button data-api-tab="update" onclick="renderApiPreview('update')" class="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-pen text-[11px] w-4 opacity-80"></i>
+              <span>PATCH Update</span>
+            </button>
+            <button data-api-tab="delete" onclick="renderApiPreview('delete')" class="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-trash text-[11px] w-4 opacity-80"></i>
+              <span>DELETE Remove</span>
+            </button>
+            <button data-api-tab="file" onclick="renderApiPreview('file')" class="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-file-arrow-up text-[11px] w-4 opacity-80"></i>
+              <span>Upload File</span>
+            </button>
+            <button data-api-tab="realtime" onclick="renderApiPreview('realtime')" class="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-bolt text-[11px] w-4 opacity-80"></i>
+              <span>SSE Realtime</span>
+            </button>
 
-        <!-- API Details & Code Snippets -->
-        <div class="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4 text-xs" id="apiPreviewContent"></div>
+            <!-- Auth Group -->
+            <div id="apiAuthGroupLabel" class="hidden px-2 pt-2.5 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-teal-600 border-t border-slate-200/60 mt-1">Auth &amp; Security</div>
+            <button id="apiTabAuth" data-api-tab="auth" onclick="renderApiPreview('auth')" class="hidden w-full text-left px-3 py-2 rounded-xl text-teal-800 hover:bg-teal-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-right-to-bracket text-[11px] w-4 opacity-80"></i>
+              <span>Auth (Login)</span>
+            </button>
+            <button id="apiTabRegister" data-api-tab="register" onclick="renderApiPreview('register')" class="hidden w-full text-left px-3 py-2 rounded-xl text-teal-800 hover:bg-teal-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-user-plus text-[11px] w-4 opacity-80"></i>
+              <span>Register</span>
+            </button>
+            <button id="apiTabForgot" data-api-tab="forgot" onclick="renderApiPreview('forgot')" class="hidden w-full text-left px-3 py-2 rounded-xl text-teal-800 hover:bg-teal-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-key text-[11px] w-4 opacity-80"></i>
+              <span>Forgot Pw</span>
+            </button>
+            <button id="apiTabReset" data-api-tab="reset" onclick="renderApiPreview('reset')" class="hidden w-full text-left px-3 py-2 rounded-xl text-teal-800 hover:bg-teal-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-unlock text-[11px] w-4 opacity-80"></i>
+              <span>Reset Pw</span>
+            </button>
+            <button id="apiTabChangePw" data-api-tab="change_pw" onclick="renderApiPreview('change_pw')" class="hidden w-full text-left px-3 py-2 rounded-xl text-teal-800 hover:bg-teal-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-lock text-[11px] w-4 opacity-80"></i>
+              <span>Change Pw</span>
+            </button>
+            <button id="apiTabMe" data-api-tab="me" onclick="renderApiPreview('me')" class="hidden w-full text-left px-3 py-2 rounded-xl text-teal-800 hover:bg-teal-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-user-circle text-[11px] w-4 opacity-80"></i>
+              <span>Profile (/me)</span>
+            </button>
+
+            <!-- Advanced / System Group -->
+            <div class="px-2 pt-2.5 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-amber-600 border-t border-slate-200/60 mt-1">Transactions &amp; SQL</div>
+            <button data-api-tab="transactions" onclick="renderApiPreview('transactions')" class="w-full text-left px-3 py-2 rounded-xl text-amber-800 hover:bg-amber-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-layer-group text-[11px] w-4 opacity-80"></i>
+              <span>Transactions</span>
+            </button>
+            <button data-api-tab="sql" onclick="renderApiPreview('sql')" class="w-full text-left px-3 py-2 rounded-xl text-amber-800 hover:bg-amber-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-terminal text-[11px] w-4 opacity-80"></i>
+              <span>Custom SQL</span>
+            </button>
+          </div>
+
+          <!-- API Details & Code Snippets -->
+          <div class="flex-1 overflow-y-auto p-5 sm:p-6 space-y-4 text-xs bg-white" id="apiPreviewContent"></div>
+        </div>
 
         <!-- Drawer Footer -->
         <div class="px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-end shrink-0">

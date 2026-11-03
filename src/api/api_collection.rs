@@ -31,7 +31,7 @@ fn resolve_base_url(headers: &HeaderMap, query_url: Option<&str>) -> String {
     }
 
     let host = Env::get_or("APP_HOST", "127.0.0.1");
-    let port = Env::get_or("APP_PORT", "8090");
+    let port = Env::get_or("APP_PORT", "8085");
     format!("http://{}:{}", host, port)
 }
 

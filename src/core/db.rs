@@ -1079,7 +1079,7 @@ pub fn default_system_settings() -> Value {
     json!({
         "meta": {
             "appName": Env::get_or("APP_NAME", "PadiBase Studio"),
-            "appUrl": format!("http://{}:{}", Env::get_or("APP_HOST", "127.0.0.1"), Env::get_or("APP_PORT", "8090")),
+            "appUrl": format!("http://{}:{}", Env::get_or("APP_HOST", "127.0.0.1"), Env::get_or("APP_PORT", "8085")),
             "hideControls": false
         },
         "roles": [

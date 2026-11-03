@@ -66,7 +66,7 @@ PadiBase/
 
 ```bash
 # Default (Embedded SQLite di ./padi_data/data.db)
-cargo run -- serve --http 127.0.0.1:8090 --dir ./padi_data
+cargo run -- serve --http 127.0.0.1:8085 --dir ./padi_data
 
 # Menggunakan MySQL / MariaDB
 cargo run -- serve --db-url "mysql://root:password@127.0.0.1:3306/PadiBase"
@@ -86,8 +86,8 @@ DB_USERNAME=root
 DB_PASSWORD=secret
 ```
 Akses di browser:
-- **Admin Dashboard**: [http://127.0.0.1:8090/dashboard/](http://127.0.0.1:8090/dashboard/)
-- **REST API**: [http://127.0.0.1:8090/api/](http://127.0.0.1:8090/api/)
+- **Admin Dashboard**: [http://127.0.0.1:8085/dashboard/](http://127.0.0.1:8085/dashboard/)
+- **REST API**: [http://127.0.0.1:8085/api/](http://127.0.0.1:8085/api/)
 
 ### 2. Membuat Akun Admin via CLI
 
@@ -107,7 +107,7 @@ cargo run -- api-collection --force
 cargo run -- api-collection --collection users --force
 
 # Kustomisasi output direktori & base URL
-cargo run -- api-collection --output ./my_collections --base-url "http://127.0.0.1:8090"
+cargo run -- api-collection --output ./my_collections --base-url "http://127.0.0.1:8085"
 ```
 
 File yang dihasilkan di folder `./api_collection/`:
@@ -315,7 +315,7 @@ Kirim `multipart/form-data` langsung ke endpoint record. PadiBase akan otomatis 
   formData.append('subject', 'Matematika');
   formData.append('avatar', fileInput.files[0]); // Kolom file
 
-  const res = await fetch('http://127.0.0.1:8090/api/collections/teachers/records', {
+  const res = await fetch('http://127.0.0.1:8085/api/collections/teachers/records', {
     method: 'POST',
     headers: {
       'Authorization': 'Bearer ' + token // jika tabel wajib login
@@ -332,7 +332,7 @@ Jika record sudah ada dan ingin mengunggah atau mengganti file secara spesifik:
 * **Endpoint**: `POST /api/files/:collection/:record_id`
 * **Contoh cURL**:
   ```bash
-  curl -X POST "http://127.0.0.1:8090/api/files/teachers/rec_001" \
+  curl -X POST "http://127.0.0.1:8085/api/files/teachers/rec_001" \
     -H "Authorization: Bearer YOUR_TOKEN" \
     -F "avatar=@/path/to/my_photo.png"
   ```
@@ -362,10 +362,10 @@ Jika record sudah ada dan ingin mengunggah atau mengganti file secara spesifik:
 Gunakan URL format `/api/files/{collection}/{record_id}/{filename}`:
 ```html
 <!-- HTML / React / Vue -->
-<img src="http://127.0.0.1:8090/api/files/teachers/rec_001/f1a2b3c4_my_photo.png" alt="Avatar">
+<img src="http://127.0.0.1:8085/api/files/teachers/rec_001/f1a2b3c4_my_photo.png" alt="Avatar">
 
 <!-- Link Download Langsung (tambahkan ?download=1) -->
-<a href="http://127.0.0.1:8090/api/files/teachers/rec_001/f1a2b3c4_my_photo.png?download=1">Unduh File</a>
+<a href="http://127.0.0.1:8085/api/files/teachers/rec_001/f1a2b3c4_my_photo.png?download=1">Unduh File</a>
 ```
 
 ### System Backups

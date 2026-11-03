@@ -1375,5 +1375,47 @@ async fn test_auth_flow_and_transactions() {
     let items = ep_val.get("item").or(ep_val.get("items")).and_then(|v| v.as_array()).unwrap();
     assert_eq!(items.len(), 2);
 
+    // 10. Test Dynamic Custom SQL Endpoint with LIMIT 1 automatically returning single row object
+    let create_ep_limit1_body = serde_json::to_vec(&json!({
+        "name": "Top Wallet",
+        "path": "top-wallet",
+        "method": "GET",
+        "sql": "SELECT `owner`, `balance` FROM `wallets` ORDER BY `balance` DESC LIMIT 1;",
+        "description": "Get top wallet"
+    }))
+    .unwrap();
+    let res_create_limit1 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/endpoints")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .body(Body::from(create_ep_limit1_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_create_limit1.status(), StatusCode::CREATED);
+
+    let res_exec_limit1 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/custom/top-wallet")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_exec_limit1.status(), StatusCode::OK);
+    let limit1_bytes = axum::body::to_bytes(res_exec_limit1.into_body(), 1024 * 1024).await.unwrap();
+    let limit1_val: serde_json::Value = serde_json::from_slice(&limit1_bytes).unwrap();
+    // Since it's single row via LIMIT 1 in SQL, it returns the object directly { "owner": ..., "balance": ... }
+    assert!(limit1_val.is_object());
+    assert_eq!(limit1_val["owner"], "Charlie");
+
     let _ = std::fs::remove_dir_all(&test_dir);
 }

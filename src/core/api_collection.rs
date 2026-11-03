@@ -606,7 +606,7 @@ fn build_system_and_admin_folders() -> Vec<Value> {
                         ],
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n  \"meta\": {\n    \"appName\": \"PadiBase Custom App\",\n    \"appUrl\": \"http://127.0.0.1:8090\"\n  }\n}"
+                            "raw": "{\n  \"meta\": {\n    \"appName\": \"PadiBase Custom App\",\n    \"appUrl\": \"http://127.0.0.1:8085\"\n  }\n}"
                         },
                         "url": { "raw": "{{base_url}}/api/settings" },
                         "description": "Update system settings (Requires Bearer Token)."

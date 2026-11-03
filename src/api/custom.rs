@@ -500,6 +500,56 @@ fn is_select_statement(sql: &str) -> bool {
         || sql.to_uppercase().contains(" RETURNING ")
 }
 
+fn strip_sql_comments(sql: &str) -> String {
+    let mut result = String::with_capacity(sql.len());
+    let mut chars = sql.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '-' && chars.peek() == Some(&'-') {
+            chars.next();
+            while let Some(&nc) = chars.peek() {
+                chars.next();
+                if nc == '\n' {
+                    result.push('\n');
+                    break;
+                }
+            }
+        } else if c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            while let Some(nc) = chars.next() {
+                if nc == '*' && chars.peek() == Some(&'/') {
+                    chars.next();
+                    break;
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+pub fn is_single_row_sql(sql: &str) -> bool {
+    let uncommented = strip_sql_comments(sql);
+    let cleaned = uncommented.replace([';', ',', '\r', '\n', '\t', '(', ')'], " ");
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    for i in 0..words.len() {
+        if words[i].eq_ignore_ascii_case("LIMIT") {
+            // Case 1: LIMIT 1 ...
+            if i + 1 < words.len() && words[i + 1] == "1" {
+                return true;
+            }
+            // Case 2: LIMIT <offset> 1 ... (from MySQL syntax `LIMIT offset, 1`)
+            if i + 2 < words.len()
+                && words[i + 1].chars().all(|c| c.is_ascii_digit())
+                && words[i + 2] == "1"
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Dynamic Custom Endpoint Dispatcher (`ANY /api/custom/{*path}` and `ANY /api/e/{*path}`)
 pub async fn execute_dynamic_endpoint(
     State(state): State<AppState>,
@@ -741,7 +791,8 @@ async fn execute_custom_endpoint_inner(
         })?;
 
         if let Some(rows) = last_rows {
-            if ep.single_row {
+            let last_stmt = statements.last().map(|s| s.as_str()).unwrap_or("");
+            if ep.single_row || is_single_row_sql(last_stmt) {
                 let first = rows.into_iter().next().unwrap_or(Value::Null);
                 return Ok(Json(first));
             }
@@ -774,7 +825,8 @@ async fn execute_custom_endpoint_inner(
                 )
             })?;
 
-        if ep.single_row {
+        let is_single = ep.single_row || is_single_row_sql(&compiled_sql) || is_single_row_sql(&statements[0]);
+        if is_single {
             let first = rows.into_iter().next().unwrap_or(Value::Null);
             return Ok(Json(first));
         }
@@ -940,4 +992,28 @@ async fn handle_atomic_transfer(
         "field": payload.field,
         "amount": payload.amount
     })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_single_row_sql() {
+        assert!(is_single_row_sql("SELECT * FROM users LIMIT 1;"));
+        assert!(is_single_row_sql("SELECT * FROM users LIMIT 1"));
+        assert!(is_single_row_sql("SELECT * FROM users limit 1;"));
+        assert!(is_single_row_sql("SELECT * FROM users LIMIT 0, 1;"));
+        assert!(is_single_row_sql("SELECT * FROM users LIMIT 0,1;"));
+        assert!(is_single_row_sql("SELECT * FROM users LIMIT 1 OFFSET 0;"));
+        assert!(is_single_row_sql("SELECT * FROM users WHERE id = :id LIMIT 1"));
+        assert!(is_single_row_sql("-- some comment\nSELECT * FROM users LIMIT 1;"));
+
+        // Should NOT be single row
+        assert!(!is_single_row_sql("SELECT * FROM users;"));
+        assert!(!is_single_row_sql("SELECT * FROM users LIMIT 10;"));
+        assert!(!is_single_row_sql("SELECT * FROM users LIMIT 100;"));
+        assert!(!is_single_row_sql("SELECT * FROM users LIMIT 2;"));
+        assert!(!is_single_row_sql("-- LIMIT 1 in comment\nSELECT * FROM users;"));
+    }
 }

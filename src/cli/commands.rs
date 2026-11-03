@@ -36,7 +36,7 @@ pub struct Cli {
 pub enum Commands {
     /// Start the padiBase web server
     Serve {
-        /// The network interface and port to bind to (defaults to APP_HOST:APP_PORT from .env or 127.0.0.1:8090)
+        /// The network interface and port to bind to (defaults to APP_HOST:APP_PORT from .env or 127.0.0.1:8085)
         #[arg(long)]
         http: Option<String>,
     },
@@ -57,7 +57,7 @@ pub enum Commands {
         output: PathBuf,
 
         /// Base URL variable value in the collection
-        #[arg(long, default_value = "http://127.0.0.1:8090")]
+        #[arg(long, default_value = "http://127.0.0.1:8085")]
         base_url: String,
 
         /// Overwrite existing files without asking
@@ -176,7 +176,7 @@ pub async fn run_cli() -> Result<()> {
 
             let bind_str = http.unwrap_or_else(|| {
                 let host = Env::get_or("APP_HOST", "127.0.0.1");
-                let port = Env::get_or("APP_PORT", "8090");
+                let port = Env::get_or("APP_PORT", "8085");
                 format!("{}:{}", host, port)
             });
 

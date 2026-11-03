@@ -471,18 +471,21 @@ let currentCollection = "users";
       const clean = rawPath.trim().replace(/^\/+/, '').toLowerCase();
 
       // Core built-in system routes
-      if (clean === 'api/health' || clean === 'api/collections' || clean === 'api/realtime') {
+      if (clean === 'api/health' || clean === 'api/tables' || clean === 'api/collections' || clean === 'api/realtime') {
         return true;
       }
 
-      // Built-in collection default routes (e.g. api/collections/banks/delete-all, api/collections/banks/records)
+      // Built-in table default routes (e.g. api/tables/banks/records or api/collections/banks/records)
       for (const c of (collections || [])) {
         const colName = (c.name || '').toLowerCase();
         if (!colName) continue;
 
-        const prefix = `api/collections/${colName}/`;
-        if (clean.startsWith(prefix)) {
-          const action = clean.substring(prefix.length);
+        const prefixTables = `api/tables/${colName}/`;
+        const prefixCollections = `api/collections/${colName}/`;
+        if (clean.startsWith(prefixTables) || clean.startsWith(prefixCollections)) {
+          const action = clean.startsWith(prefixTables) 
+            ? clean.substring(prefixTables.length) 
+            : clean.substring(prefixCollections.length);
           if (
             action === 'records' ||
             action === 'records/all' ||
@@ -492,8 +495,15 @@ let currentCollection = "users";
             action === 'import' ||
             action === 'export' ||
             action === 'auth-with-password' ||
+            action === 'login' ||
+            action === 'register' ||
+            action === 'forgot-password' ||
             action === 'request-password-reset' ||
+            action === 'reset-password' ||
             action === 'confirm-password-reset' ||
+            action === 'change-password' ||
+            action === 'auth-refresh' ||
+            action === 'me' ||
             action === 'request-verification' ||
             action === 'confirm-verification'
           ) {
@@ -612,7 +622,6 @@ let currentCollection = "users";
       const customPrefixEl = document.getElementById('epCustomPrefixInput');
       const pathEl = document.getElementById('epPathInput');
       const sqlEl = document.getElementById('epSqlInput');
-      const singleEl = document.getElementById('epSingleRowInput');
       const txEl = document.getElementById('epTransactionInput');
       const paramsEl = document.getElementById('epTestParamsInput');
 
@@ -623,7 +632,6 @@ let currentCollection = "users";
         nameEl.value = `Override List ${col}`;
         methodEl.value = 'GET';
         pathEl.value = `api/collections/${col}/records`;
-        singleEl.checked = false;
         txEl.checked = false;
         sqlEl.value = `SELECT * FROM \`${col}\` ORDER BY \`id\` DESC LIMIT 50;`;
         if (paramsEl) paramsEl.value = '{}';
@@ -631,7 +639,6 @@ let currentCollection = "users";
         nameEl.value = `Override All ${col}`;
         methodEl.value = 'GET';
         pathEl.value = `api/${col}/all`;
-        singleEl.checked = false;
         txEl.checked = false;
         sqlEl.value = `SELECT * FROM \`${col}\` ORDER BY \`id\` DESC;`;
         if (paramsEl) paramsEl.value = '{}';
@@ -639,7 +646,6 @@ let currentCollection = "users";
         nameEl.value = `Override Detail ${col}`;
         methodEl.value = 'GET';
         pathEl.value = `api/collections/${col}/records/{id}`;
-        singleEl.checked = true;
         txEl.checked = false;
         sqlEl.value = `SELECT * FROM \`${col}\` WHERE \`id\` = :id LIMIT 1;`;
         if (paramsEl) paramsEl.value = '{\n  "id": "1"\n}';
@@ -647,21 +653,18 @@ let currentCollection = "users";
         nameEl.value = `Override Create ${col}`;
         methodEl.value = 'POST';
         pathEl.value = `api/collections/${col}/records`;
-        singleEl.checked = true;
         txEl.checked = true;
         sqlEl.value = `SELECT * FROM \`${col}\` ORDER BY \`id\` DESC LIMIT 1;`;
       } else if (preset === 'update_record') {
         nameEl.value = `Override Update ${col}`;
         methodEl.value = 'PATCH';
         pathEl.value = `api/collections/${col}/records/{id}`;
-        singleEl.checked = true;
         txEl.checked = true;
-        sqlEl.value = `UPDATE \`${col}\` SET \`updated\` = CURRENT_TIMESTAMP WHERE \`id\` = :id;\nSELECT * FROM \`${col}\` WHERE \`id\` = :id;`;
+        sqlEl.value = `UPDATE \`${col}\` SET \`updated\` = CURRENT_TIMESTAMP WHERE \`id\` = :id;\nSELECT * FROM \`${col}\` WHERE \`id\` = :id LIMIT 1;`;
       } else if (preset === 'delete_record') {
         nameEl.value = `Override Delete ${col}`;
         methodEl.value = 'DELETE';
         pathEl.value = `api/collections/${col}/records/{id}`;
-        singleEl.checked = false;
         txEl.checked = true;
         sqlEl.value = `DELETE FROM \`${col}\` WHERE \`id\` = :id;`;
       }
@@ -761,7 +764,6 @@ let currentCollection = "users";
       document.getElementById('epAuthRuleInput').value = 'public';
       updateRoleDropdownUI('epAuthRuleInput');
       document.getElementById('epTransactionInput').checked = false;
-      document.getElementById('epSingleRowInput').checked = false;
       document.getElementById('epSqlInput').value = `SELECT * FROM \`${currentCollection || 'users'}\` LIMIT :limit;`;
       document.getElementById('epDescInput').value = '';
       document.getElementById('epTestParamsInput').value = '{\n  "limit": 10\n}';
@@ -789,7 +791,11 @@ let currentCollection = "users";
       const customPrefixEl = document.getElementById('epCustomPrefixInput');
       const pathEl = document.getElementById('epPathInput');
 
-      if (p.startsWith('api/collections/')) {
+      if (p.startsWith('api/tables/')) {
+        if (prefixEl) prefixEl.value = 'tables/';
+        if (customPrefixEl) customPrefixEl.classList.add('hidden');
+        if (pathEl) pathEl.value = p.substring('api/tables/'.length);
+      } else if (p.startsWith('api/collections/')) {
         if (prefixEl) prefixEl.value = 'collections/';
         if (customPrefixEl) customPrefixEl.classList.add('hidden');
         if (pathEl) pathEl.value = p.substring('api/collections/'.length);
@@ -814,7 +820,6 @@ let currentCollection = "users";
       document.getElementById('epAuthRuleInput').value = ep.authRule || ep.auth_rule || 'public';
       updateRoleDropdownUI('epAuthRuleInput');
       document.getElementById('epTransactionInput').checked = Boolean(ep.transaction);
-      document.getElementById('epSingleRowInput').checked = Boolean(ep.singleRow || ep.single_row);
       document.getElementById('epSqlInput').value = ep.sql || '';
       document.getElementById('epDescInput').value = ep.description || '';
       updateCustomEpUrlPreview();
@@ -1121,14 +1126,12 @@ let currentCollection = "users";
       const nameEl = document.getElementById('epNameInput');
       const pathEl = document.getElementById('epPathInput');
       const methodEl = document.getElementById('epMethodInput');
-      const singleEl = document.getElementById('epSingleRowInput');
       const sqlEl = document.getElementById('epSqlInput');
       const paramsEl = document.getElementById('epTestParamsInput');
 
       if (nameEl && !nameEl.value) nameEl.value = 'Hello Message API';
       if (pathEl && !pathEl.value) pathEl.value = 'hello';
       if (methodEl) methodEl.value = 'GET';
-      if (singleEl) singleEl.checked = true;
 
       // Direct string response without SQL
       if (sqlEl) sqlEl.value = `'${message}'`;
@@ -1236,9 +1239,7 @@ let currentCollection = "users";
         sql = `DELETE FROM \`${table}\`${effectiveWhere};`;
 
       } else if (qbCurrentAction === 'COUNT') {
-        sql = `SELECT COUNT(*) AS total_count\nFROM \`${table}\`${whereClause};`;
-        const singleEl = document.getElementById('epSingleRowInput');
-        if (singleEl) singleEl.checked = true;
+        sql = `SELECT COUNT(*) AS total_count\nFROM \`${table}\`${whereClause} LIMIT 1;`;
       }
 
       const sqlEl = document.getElementById('epSqlInput');
@@ -1257,7 +1258,6 @@ let currentCollection = "users";
       const sqlEl = document.getElementById('epSqlInput');
       const methodEl = document.getElementById('epMethodInput');
       const txEl = document.getElementById('epTransactionInput');
-      const singleEl = document.getElementById('epSingleRowInput');
       const paramsEl = document.getElementById('epTestParamsInput');
       const pathEl = document.getElementById('epPathInput');
 
@@ -1269,7 +1269,6 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'hello';
           if (methodEl) methodEl.value = 'GET';
           if (txEl) txEl.checked = false;
-          if (singleEl) singleEl.checked = true;
           // Direct string response without SQL
           sqlEl.value = `'hello'`;
           if (paramsEl) {
@@ -1282,7 +1281,6 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'pos/checkout';
           if (methodEl) methodEl.value = 'POST';
           if (txEl) txEl.checked = true;
-          if (singleEl) singleEl.checked = false;
           sqlEl.value = `-- ================================================================\n-- 🛒 POS / Cashier Checkout (Multi-Table Atomic Transaction)\n-- All queries below run inside a single database transaction.\n-- If any error occurs or stock is insufficient, all changes are ROLLED BACK.\n-- ================================================================\n\n-- 1. Insert into Header Table (orders / sales)\nINSERT INTO \`orders\` (\`id\`, \`customer_name\`, \`total_amount\`, \`payment_method\`, \`cashier_id\`, \`status\`)\nVALUES (:order_id, :customer_name, :total_amount, :payment_method, :cashier_id, 'completed');\n\n-- 2. Insert into Detail Table (order_items / sale_details)\nINSERT INTO \`order_items\` (\`order_id\`, \`product_id\`, \`product_name\`, \`quantity\`, \`price\`, \`subtotal\`)\nVALUES (:order_id, :product_id, :product_name, :quantity, :price, :subtotal);\n\n-- 3. Deduct product inventory stock in Products Table\nUPDATE \`products\`\nSET \`stock\` = \`stock\` - :quantity\nWHERE \`id\` = :product_id AND \`stock\` >= :quantity;`;
           if (paramsEl) {
             paramsEl.value = JSON.stringify({
@@ -1305,7 +1303,6 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'transactions/create';
           if (methodEl) methodEl.value = 'POST';
           if (txEl) txEl.checked = true;
-          if (singleEl) singleEl.checked = false;
           sqlEl.value = `-- ================================================================\n-- 📦 Multi-Table Transaction: Insert Table 1 & Table 2 Atomically\n-- ================================================================\n\n-- 1. Insert into Primary Table (Header / Parent Record)\nINSERT INTO \`transactions\` (\`id\`, \`reference_no\`, \`amount\`, \`notes\`)\nVALUES (:trx_id, :ref_no, :amount, :notes);\n\n-- 2. Insert into Secondary Table (Log / Detail / Audit Trail)\nINSERT INTO \`transaction_logs\` (\`transaction_id\`, \`action\`, \`user_id\`, \`details\`)\nVALUES (:trx_id, 'CREATED', :user_id, :details);`;
           if (paramsEl) {
             paramsEl.value = JSON.stringify({
@@ -1324,8 +1321,7 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'dashboard/summary';
           if (methodEl) methodEl.value = 'GET';
           if (txEl) txEl.checked = false;
-          if (singleEl) singleEl.checked = true;
-          sqlEl.value = `-- ================================================================\n-- 📊 Dashboard Metrics: Total Records, Status Counts & Revenue\n-- Enable "Single Row Result" to return a clean single JSON object.\n-- ================================================================\nSELECT\n  COUNT(*) AS \`total_records\`,\n  COUNT(CASE WHEN \`status\` = 'active' OR \`status\` = 'completed' THEN 1 END) AS \`active_count\`,\n  COUNT(CASE WHEN \`status\` = 'pending' THEN 1 END) AS \`pending_count\`,\n  COALESCE(SUM(\`total_amount\`), 0) AS \`total_revenue\`,\n  COALESCE(AVG(\`total_amount\`), 0) AS \`average_amount\`,\n  MAX(\`created_at\`) AS \`latest_activity\`\nFROM \`${table}\`;`;
+          sqlEl.value = `-- ================================================================\n-- 📊 Dashboard Metrics: Total Records, Status Counts & Revenue\n-- Gunakan LIMIT 1 jika ingin menghasilkan single JSON object { ... } langsung.\n-- ================================================================\nSELECT\n  COUNT(*) AS \`total_records\`,\n  COUNT(CASE WHEN \`status\` = 'active' OR \`status\` = 'completed' THEN 1 END) AS \`active_count\`,\n  COUNT(CASE WHEN \`status\` = 'pending' THEN 1 END) AS \`pending_count\`,\n  COALESCE(SUM(\`total_amount\`), 0) AS \`total_revenue\`,\n  COALESCE(AVG(\`total_amount\`), 0) AS \`average_amount\`,\n  MAX(\`created_at\`) AS \`latest_activity\`\nFROM \`${table}\` LIMIT 1;`;
           if (paramsEl) paramsEl.value = '{}';
           break;
 
@@ -1334,7 +1330,6 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'dashboard/trends';
           if (methodEl) methodEl.value = 'GET';
           if (txEl) txEl.checked = false;
-          if (singleEl) singleEl.checked = false;
           sqlEl.value = `-- ================================================================\n-- 📈 Dashboard Trends / Breakdown by Status or Category\n-- ================================================================\nSELECT\n  \`status\`,\n  COUNT(*) AS \`count\`,\n  COALESCE(SUM(\`total_amount\`), 0) AS \`total_value\`\nFROM \`${table}\`\nGROUP BY \`status\`\nORDER BY \`count\` DESC;`;
           if (paramsEl) paramsEl.value = '{}';
           break;
@@ -1344,7 +1339,6 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'search/items';
           if (methodEl) methodEl.value = 'GET';
           if (txEl) txEl.checked = false;
-          if (singleEl) singleEl.checked = false;
           sqlEl.value = `-- ================================================================\n-- 🔍 Search & Filter Records with Limit & Offset Pagination\n-- ================================================================\nSELECT *\nFROM \`${table}\`\nWHERE (:search IS NULL OR :search = '' OR \`name\` LIKE '%' || :search || '%')\nORDER BY \`id\` DESC\nLIMIT :limit OFFSET :offset;`;
           if (paramsEl) {
             paramsEl.value = JSON.stringify({
@@ -1360,7 +1354,6 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'reports/orders-joined';
           if (methodEl) methodEl.value = 'GET';
           if (txEl) txEl.checked = false;
-          if (singleEl) singleEl.checked = false;
           sqlEl.value = `-- ================================================================\n-- 🔗 JOIN Query: Combine Header Table with Related Customer Data\n-- ================================================================\nSELECT \n  o.\`id\` AS order_id,\n  o.\`total_amount\`,\n  o.\`status\`,\n  u.\`name\` AS customer_name,\n  u.\`email\` AS customer_email\nFROM \`orders\` o\nLEFT JOIN \`users\` u ON o.\`customer_id\` = u.\`id\`\nORDER BY o.\`id\` DESC\nLIMIT :limit;`;
           if (paramsEl) {
             paramsEl.value = JSON.stringify({
@@ -1374,7 +1367,6 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'records/upsert';
           if (methodEl) methodEl.value = 'POST';
           if (txEl) txEl.checked = true;
-          if (singleEl) singleEl.checked = false;
           sqlEl.value = `-- ================================================================\n-- 🔄 Upsert: Insert if new, or Update if Primary Key exists\n-- ================================================================\nINSERT INTO \`${table}\` (\`id\`, \`name\`, \`status\`)\nVALUES (:id, :name, :status)\nON CONFLICT (\`id\`) DO UPDATE SET\n  \`name\` = excluded.\`name\`,\n  \`status\` = excluded.\`status\`;`;
           if (paramsEl) {
             paramsEl.value = JSON.stringify({
@@ -1390,7 +1382,6 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'records/update-status';
           if (methodEl) methodEl.value = 'POST';
           if (txEl) txEl.checked = true;
-          if (singleEl) singleEl.checked = false;
           sqlEl.value = `-- ================================================================\n-- ✏️ Update Record Status with Parameters\n-- ================================================================\nUPDATE \`${table}\`\nSET \`status\` = :status, \`updated_at\` = :updated_at\nWHERE \`id\` = :id;`;
           if (paramsEl) {
             paramsEl.value = JSON.stringify({
@@ -1429,7 +1420,6 @@ let currentCollection = "users";
       const path = getCombinedEndpointPath();
       const authRule = document.getElementById('epAuthRuleInput').value.trim() || 'public';
       const transaction = document.getElementById('epTransactionInput').checked;
-      const singleRow = document.getElementById('epSingleRowInput').checked;
       const sql = document.getElementById('epSqlInput').value.trim();
       const description = document.getElementById('epDescInput').value.trim();
 
@@ -1449,8 +1439,7 @@ let currentCollection = "users";
         sql,
         description,
         authRule,
-        transaction,
-        singleRow
+        transaction
       };
 
       const url = currentCustomEpId ? `/api/endpoints/${currentCustomEpId}` : '/api/endpoints';
@@ -1591,9 +1580,9 @@ let currentCollection = "users";
         const btn = document.getElementById(`setTab_${t}`);
         if (btn) {
           if (t === tab) {
-            btn.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-1.5 transition shrink-0";
+            btn.className = "w-full text-left px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-2.5 transition shrink-0";
           } else {
-            btn.className = "px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition shrink-0";
+            btn.className = "w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0";
           }
         }
       });
@@ -1689,7 +1678,7 @@ let currentCollection = "users";
                 </span>
                 <div class="text-left truncate">
                   <div class="truncate font-mono">${c.name}</div>
-                  <div class="text-[10px] ${isActive ? 'text-emerald-100' : 'text-slate-400'}">${c.type} · ${fieldCount} columns</div>
+                  <div class="text-[10px] ${isActive ? 'text-emerald-100' : 'text-slate-400'}">${c.type} &bull; ${fieldCount} columns</div>
                 </div>
               </div>
               <div class="flex items-center space-x-1 shrink-0 ml-1">
@@ -2245,9 +2234,9 @@ let currentCollection = "users";
         if (pane) pane.classList.toggle('hidden', t !== tab);
         if (btn) {
           if (t === tab) {
-            btn.className = "px-3 py-2 text-xs font-bold border-b-2 border-emerald-600 text-emerald-700 transition";
+            btn.className = "w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-2.5 transition shrink-0";
           } else {
-            btn.className = "px-3 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 transition";
+            btn.className = "w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0";
           }
         }
       });
@@ -3923,6 +3912,9 @@ let currentCollection = "users";
         const el = document.getElementById(id);
         if (el) el.classList.toggle('hidden', !isAuthCol);
       });
+      const authGroupLabel = document.getElementById('apiAuthGroupLabel');
+      if (authGroupLabel) authGroupLabel.classList.toggle('hidden', !isAuthCol);
+
       if (!isAuthCol && ['register', 'auth', 'forgot', 'reset', 'change_pw', 'me'].includes(currentSelectedApiTab)) {
         currentSelectedApiTab = 'list';
       }
@@ -3932,6 +3924,29 @@ let currentCollection = "users";
     let currentApiPreviewUrl = "";
     let currentApiPreviewPath = "";
     let currentApiPreviewJs = "";
+    let currentApiPreviewCurl = "";
+    let currentApiPreviewResponseJson = "";
+    let currentApiSnippetMode = "js"; // "js" | "curl"
+
+    function toggleApiSnippetMode(mode) {
+      currentApiSnippetMode = mode;
+      const jsEl = document.getElementById('apiSnippetPre_js');
+      const curlEl = document.getElementById('apiSnippetPre_curl');
+      const btnJs = document.getElementById('apiSnippetBtn_js');
+      const btnCurl = document.getElementById('apiSnippetBtn_curl');
+      if (jsEl && curlEl) {
+        jsEl.classList.toggle('hidden', mode !== 'js');
+        curlEl.classList.toggle('hidden', mode !== 'curl');
+      }
+      if (btnJs && btnCurl) {
+        btnJs.className = mode === 'js'
+          ? "px-2 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[10px] shadow-2xs transition"
+          : "px-2 py-0.5 rounded-md text-slate-600 hover:text-slate-900 font-semibold text-[10px] transition";
+        btnCurl.className = mode === 'curl'
+          ? "px-2 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[10px] shadow-2xs transition"
+          : "px-2 py-0.5 rounded-md text-slate-600 hover:text-slate-900 font-semibold text-[10px] transition";
+      }
+    }
 
     function renderApiPreview(action) {
       currentSelectedApiTab = action;
@@ -3944,13 +3959,13 @@ let currentCollection = "users";
         const tabName = btn.getAttribute('data-api-tab');
         const isHidden = btn.classList.contains('hidden');
         if (tabName === action) {
-          btn.className = `${isHidden ? 'hidden ' : ''}px-3 py-1.5 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs transition shrink-0`;
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
         } else if (['register', 'auth', 'forgot', 'reset', 'change_pw', 'me'].includes(tabName)) {
-          btn.className = `${isHidden ? 'hidden ' : ''}px-3 py-1.5 rounded-xl text-teal-700 hover:bg-teal-50 font-bold transition shrink-0`;
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-teal-800 hover:bg-teal-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         } else if (['transactions', 'sql'].includes(tabName)) {
-          btn.className = `${isHidden ? 'hidden ' : ''}px-3 py-1.5 rounded-xl text-amber-700 hover:bg-amber-50 font-bold transition shrink-0`;
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-amber-800 hover:bg-amber-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         } else {
-          btn.className = `${isHidden ? 'hidden ' : ''}px-3 py-1.5 rounded-xl text-slate-600 hover:bg-white font-bold transition shrink-0`;
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         }
       });
 
@@ -3964,6 +3979,21 @@ let currentCollection = "users";
         sampleObj[f.name] = f.type === 'number' ? 100 : (f.type === 'bool' ? true : `sample_${f.name}`);
       });
 
+      const sampleUserRecord = {
+        id: "rec_u0192a8b",
+        email: "john@example.com",
+        username: "john123",
+        name: "John Doe",
+        role: "user",
+        avatar: "",
+        created: "2026-11-03 10:00:00",
+        updated: "2026-11-03 10:00:00"
+      };
+
+      const sampleJwtToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJyZWNfdTAxOTJhOGIiLCJlbWFpbCI6ImpvaG5AZXhhbXBsZS5jb20iLCJyb2xlIjoidXNlciIsImV4cCI6MTgwMDAwMDAwMH0.signature";
+      const sampleRecordItem = Object.assign({ id: "rec_001" }, sampleObj);
+      delete sampleRecordItem.password;
+
       const docs = {
         list: {
           title: `Fetch Paginated Records (${cName})`,
@@ -3971,7 +4001,9 @@ let currentCollection = "users";
           method: 'GET',
           badge: 'bg-emerald-100 text-emerald-800',
           path: `/api/collections/${cName}/records?page=1&perPage=30`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records?page=1&perPage=30');\nconst { item, meta, debug } = await res.json();\nconsole.log(item, meta);`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records?page=1&perPage=30');\nconst { item, meta, debug } = await res.json();\nconsole.log(item, meta);`,
+          curl: `curl -X GET "${baseUrl}/api/collections/${cName}/records?page=1&perPage=30"`
         },
         all: {
           title: `Fetch All Records Without Pagination (${cName})`,
@@ -3979,7 +4011,9 @@ let currentCollection = "users";
           method: 'GET',
           badge: 'bg-emerald-100 text-emerald-800',
           path: `/api/collections/${cName}/records/all?limit=5000&sort_by=id&order=desc`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/all?limit=5000&sort_by=id&order=desc');\nconst { item, debug } = await res.json();\nconsole.log(item);`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/all?limit=5000&sort_by=id&order=desc');\nconst { item, debug } = await res.json();\nconsole.log(item);`,
+          curl: `curl -X GET "${baseUrl}/api/collections/${cName}/records/all?limit=5000&sort_by=id&order=desc"`
         },
         view: {
           title: `Fetch Single Record by ID (${cName})`,
@@ -3987,7 +4021,9 @@ let currentCollection = "users";
           method: 'GET',
           badge: 'bg-emerald-100 text-emerald-800',
           path: `/api/collections/${cName}/records/RECORD_ID`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID');\nconst { item } = await res.json();`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID');\nconst { item } = await res.json();\nconsole.log(item);`,
+          curl: `curl -X GET "${baseUrl}/api/collections/${cName}/records/RECORD_ID"`
         },
         create: {
           title: `Create New Record (${cName})`,
@@ -3995,7 +4031,9 @@ let currentCollection = "users";
           method: 'POST',
           badge: 'bg-sky-100 text-sky-800',
           path: `/api/collections/${cName}/records`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`
+          statusCode: '201 Created',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`,
+          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/records" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(sampleObj, null, 2)}'`
         },
         update: {
           title: `Update Record (${cName})`,
@@ -4003,7 +4041,9 @@ let currentCollection = "users";
           method: 'PATCH',
           badge: 'bg-amber-100 text-amber-800',
           path: `/api/collections/${cName}/records/RECORD_ID`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID', {\n  method: 'PATCH',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID', {\n  method: 'PATCH',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`,
+          curl: `curl -X PATCH "${baseUrl}/api/collections/${cName}/records/RECORD_ID" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(sampleObj, null, 2)}'`
         },
         delete: {
           title: `Delete Record (${cName})`,
@@ -4011,7 +4051,9 @@ let currentCollection = "users";
           method: 'DELETE',
           badge: 'bg-rose-100 text-rose-800',
           path: `/api/collections/${cName}/records/RECORD_ID`,
-          js: `await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID', {\n  method: 'DELETE'\n});`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID', {\n  method: 'DELETE'\n});\nconst { item } = await res.json();`,
+          curl: `curl -X DELETE "${baseUrl}/api/collections/${cName}/records/RECORD_ID"`
         },
         realtime: {
           title: `Subscribe to Realtime SSE Stream (${cName})`,
@@ -4019,7 +4061,9 @@ let currentCollection = "users";
           method: 'GET',
           badge: 'bg-purple-100 text-purple-800',
           path: `/api/realtime`,
-          js: `const evtSource = new EventSource('${baseUrl}/api/realtime');\nevtSource.onmessage = (event) => {\n  const data = JSON.parse(event.data);\n  if (data.collection === '${cName}') {\n    console.log('Change event:', data.action, data.record);\n  }\n};`
+          statusCode: '200 OK (text/event-stream)',
+          js: `const evtSource = new EventSource('${baseUrl}/api/realtime');\nevtSource.onmessage = (event) => {\n  const data = JSON.parse(event.data);\n  if (data.collection === '${cName}') {\n    console.log('Change event:', data.action, data.record);\n  }\n};`,
+          curl: `curl -N "${baseUrl}/api/realtime"`
         },
         file: {
           title: `Upload File / Image (${cName})`,
@@ -4027,15 +4071,19 @@ let currentCollection = "users";
           method: 'POST',
           badge: 'bg-indigo-100 text-indigo-800',
           path: `/api/files/${cName}/RECORD_ID`,
-          js: `const formData = new FormData();\nformData.append('file', fileInputElement.files[0]);\n\nconst res = await fetch('${baseUrl}/api/files/${cName}/RECORD_ID', {\n  method: 'POST',\n  body: formData\n});\nconst result = await res.json();`
+          statusCode: '200 OK',
+          js: `const formData = new FormData();\nformData.append('file', fileInputElement.files[0]);\n\nconst res = await fetch('${baseUrl}/api/files/${cName}/RECORD_ID', {\n  method: 'POST',\n  body: formData\n});\nconst result = await res.json();`,
+          curl: `curl -X POST "${baseUrl}/api/files/${cName}/RECORD_ID" \\\n  -F "file=@/path/to/my_image.png"`
         },
         auth: {
           title: `User Login & Obtain JWT Token (${cName})`,
-          desc: `Verify username/email & password and return a JWT authentication token.`,
+          desc: `Verify identity (username/email) & password and return a signed JWT authentication token along with user record.`,
           method: 'POST',
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/collections/${cName}/auth-with-password`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/auth-with-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    identity: 'john@example.com',\n    password: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/auth-with-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    identity: 'john@example.com',\n    password: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`,
+          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/auth-with-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "identity": "john@example.com",\n  "password": "secret123456"\n}'`
         },
         register: {
           title: `Register New Account (${cName})`,
@@ -4043,23 +4091,29 @@ let currentCollection = "users";
           method: 'POST',
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/collections/${cName}/register`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/register', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    email: 'john@example.com',\n    username: 'john123',\n    name: 'John Doe',\n    password: 'secret123456',\n    passwordConfirm: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`
+          statusCode: '201 Created',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/register', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    email: 'john@example.com',\n    username: 'john123',\n    name: 'John Doe',\n    password: 'secret123456',\n    passwordConfirm: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`,
+          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/register" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "email": "john@example.com",\n  "username": "john123",\n  "name": "John Doe",\n  "password": "secret123456",\n  "passwordConfirm": "secret123456"\n}'`
         },
         forgot: {
           title: `Forgot Password - Generate Reset Token (${cName})`,
-          desc: `Generate a one-time password reset token for a user by email or username.`,
+          desc: `Generate a one-time password reset token for a user account by email or username.`,
           method: 'POST',
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/collections/${cName}/forgot-password`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/forgot-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    email: 'john@example.com'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.reset_token);`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/forgot-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    email: 'john@example.com'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.email, item.reset_token);`,
+          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/forgot-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "email": "john@example.com"\n}'`
         },
         reset: {
           title: `Reset Password with Token (${cName})`,
-          desc: `Verify the one-time reset token and set a new Argon2id-hashed password.`,
+          desc: `Verify the one-time reset token and set a new Argon2id-hashed password for the account.`,
           method: 'POST',
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/collections/${cName}/reset-password`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/reset-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    token: 'RESET_TOKEN_FROM_FORGOT_PASSWORD',\n    password: 'newSecretPassword123',\n    passwordConfirm: 'newSecretPassword123'\n  })\n});\nconst { item } = await res.json();`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/reset-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    token: 'd7f4a1c2e8b940bf7c53e01a8',\n    password: 'newSecretPassword123',\n    passwordConfirm: 'newSecretPassword123'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.message);`,
+          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/reset-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "token": "d7f4a1c2e8b940bf7c53e01a8",\n  "password": "newSecretPassword123",\n  "passwordConfirm": "newSecretPassword123"\n}'`
         },
         change_pw: {
           title: `Change Password for Logged-in User (${cName})`,
@@ -4067,7 +4121,9 @@ let currentCollection = "users";
           method: 'POST',
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/collections/${cName}/change-password`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/change-password', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    oldPassword: 'secret123456',\n    newPassword: 'updatedPassword789',\n    passwordConfirm: 'updatedPassword789'\n  })\n});\nconst { item } = await res.json();`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/change-password', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    oldPassword: 'secret123456',\n    newPassword: 'updatedPassword789',\n    passwordConfirm: 'updatedPassword789'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token);`,
+          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/change-password" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\\n  -d '{\n  "oldPassword": "secret123456",\n  "newPassword": "updatedPassword789",\n  "passwordConfirm": "updatedPassword789"\n}'`
         },
         me: {
           title: `Get Current User Profile & Refresh JWT (${cName})`,
@@ -4075,7 +4131,9 @@ let currentCollection = "users";
           method: 'GET',
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/collections/${cName}/me`,
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/me', {\n  headers: {\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  }\n});\nconst { item } = await res.json();\nconsole.log(item.record, item.token);`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/me', {\n  headers: {\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  }\n});\nconst { item } = await res.json();\nconsole.log(item.record, item.token);`,
+          curl: `curl -X GET "${baseUrl}/api/collections/${cName}/me" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN"`
         },
         transactions: {
           title: `Atomic Database Transaction / Batch (${cName})`,
@@ -4083,7 +4141,9 @@ let currentCollection = "users";
           method: 'POST',
           badge: 'bg-amber-100 text-amber-800',
           path: `/api/transactions`,
-          js: `const res = await fetch('${baseUrl}/api/transactions', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    operations: [\n      {\n        action: 'create',\n        collection: '${cName}',\n        data: ${JSON.stringify(sampleObj)}\n      },\n      {\n        action: 'update',\n        collection: '${cName}',\n        id: 'RECORD_ID',\n        data: ${JSON.stringify(sampleObj)}\n      }\n    ]\n  })\n});\nconst { item } = await res.json();`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/transactions', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    operations: [\n      {\n        action: 'create',\n        collection: '${cName}',\n        data: ${JSON.stringify(sampleObj)}\n      },\n      {\n        action: 'update',\n        collection: '${cName}',\n        id: 'rec_001',\n        data: ${JSON.stringify(sampleObj)}\n      }\n    ]\n  })\n});\nconst { item } = await res.json();`,
+          curl: `curl -X POST "${baseUrl}/api/transactions" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\\n  -d '{\n  "operations": [\n    {\n      "action": "create",\n      "collection": "${cName}",\n      "data": ${JSON.stringify(sampleObj)}\n    }\n  ]\n}'`
         },
         sql: {
           title: `Execute Custom Parameterized SQL (${cName})`,
@@ -4091,7 +4151,9 @@ let currentCollection = "users";
           method: 'POST',
           badge: 'bg-amber-100 text-amber-800',
           path: `/api/sql`,
-          js: `const res = await fetch('${baseUrl}/api/sql', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer ADMIN_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    sql: 'SELECT * FROM \`${cName}\` LIMIT ?',\n    params: [10],\n    transaction: false\n  })\n});\nconst { items } = await res.json();`
+          statusCode: '200 OK',
+          js: `const res = await fetch('${baseUrl}/api/sql', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer ADMIN_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    sql: 'SELECT * FROM \`${cName}\` LIMIT ?',\n    params: [10],\n    transaction: false\n  })\n});\nconst { items } = await res.json();`,
+          curl: `curl -X POST "${baseUrl}/api/sql" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ADMIN_JWT_TOKEN" \\\n  -d '{\n  "sql": "SELECT * FROM \\\`${cName}\\\` LIMIT ?",\n  "params": [10]\n}'`
         }
       };
 
@@ -4099,60 +4161,364 @@ let currentCollection = "users";
       currentApiPreviewPath = d.path;
       currentApiPreviewUrl = `${baseUrl}${d.path}`;
       currentApiPreviewJs = d.js;
+      currentApiPreviewCurl = d.curl;
 
-      const sampleRecordItem = Object.assign({ id: "1" }, sampleObj);
-      delete sampleRecordItem.password;
+      // Build specific, realistic Padi Rust Api Framework standard response for each action!
+      let samplePadiResponse = null;
 
-      const samplePadiResponse = {
-        message: "Success",
-        message_code: "SUCCESS",
-        success: true,
-        item: action === 'list' || action === 'all' ? [sampleRecordItem] : sampleRecordItem,
-        debug: {
-          env: "development",
-          database: activeDbDriver,
-          execution_time: "0.45ms"
-        }
-      };
+      switch (action) {
+        case 'auth':
+          samplePadiResponse = {
+            message: "Success",
+            message_code: "SUCCESS",
+            success: true,
+            item: {
+              token: sampleJwtToken,
+              record: sampleUserRecord
+            },
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.55ms",
+              queries_count: 1
+            }
+          };
+          break;
+
+        case 'register':
+          samplePadiResponse = {
+            message: "Success",
+            message_code: "CREATED",
+            success: true,
+            item: {
+              token: sampleJwtToken,
+              record: sampleUserRecord
+            },
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.85ms",
+              queries_count: 2
+            }
+          };
+          break;
+
+        case 'forgot':
+          samplePadiResponse = {
+            message: "Password reset token generated successfully.",
+            message_code: "SUCCESS",
+            success: true,
+            item: {
+              email: "john@example.com",
+              reset_token: "d7f4a1c2e8b940bf7c53e01a8"
+            },
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.40ms",
+              queries_count: 2
+            }
+          };
+          break;
+
+        case 'reset':
+          samplePadiResponse = {
+            message: "Password has been reset successfully.",
+            message_code: "SUCCESS",
+            success: true,
+            item: {
+              message: "Password has been reset successfully."
+            },
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "14.20ms",
+              queries_count: 2
+            }
+          };
+          break;
+
+        case 'change_pw':
+          samplePadiResponse = {
+            message: "Password updated successfully.",
+            message_code: "SUCCESS",
+            success: true,
+            item: {
+              token: sampleJwtToken
+            },
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "15.10ms",
+              queries_count: 2
+            }
+          };
+          break;
+
+        case 'me':
+          samplePadiResponse = {
+            message: "Success",
+            message_code: "SUCCESS",
+            success: true,
+            item: {
+              token: sampleJwtToken,
+              record: sampleUserRecord
+            },
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.38ms",
+              queries_count: 1
+            }
+          };
+          break;
+
+        case 'list':
+          samplePadiResponse = {
+            message: "Success",
+            message_code: "SUCCESS",
+            success: true,
+            item: [sampleRecordItem],
+            meta: {
+              current_page: 1,
+              per_page: 30,
+              total: 1,
+              last_page: 1,
+              from: 1,
+              to: 1
+            },
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.42ms",
+              queries_count: 1
+            }
+          };
+          break;
+
+        case 'all':
+          samplePadiResponse = {
+            message: "Success",
+            message_code: "SUCCESS",
+            success: true,
+            item: [sampleRecordItem],
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.38ms",
+              queries_count: 1
+            }
+          };
+          break;
+
+        case 'view':
+          samplePadiResponse = {
+            message: "Success",
+            message_code: "SUCCESS",
+            success: true,
+            item: sampleRecordItem,
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.28ms",
+              queries_count: 1
+            }
+          };
+          break;
+
+        case 'create':
+          samplePadiResponse = {
+            message: "Success",
+            message_code: "CREATED",
+            success: true,
+            item: sampleRecordItem,
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.75ms",
+              queries_count: 1
+            }
+          };
+          break;
+
+        case 'update':
+          samplePadiResponse = {
+            message: "Success",
+            message_code: "SUCCESS",
+            success: true,
+            item: sampleRecordItem,
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.62ms",
+              queries_count: 2
+            }
+          };
+          break;
+
+        case 'delete':
+          samplePadiResponse = {
+            message: "Record deleted successfully.",
+            message_code: "SUCCESS",
+            success: true,
+            item: {
+              id: "rec_001",
+              deleted: true
+            },
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.45ms",
+              queries_count: 1
+            }
+          };
+          break;
+
+        case 'file':
+          samplePadiResponse = {
+            message: "File(s) uploaded successfully.",
+            message_code: "SUCCESS",
+            success: true,
+            item: {
+              uploaded: [
+                {
+                  field: "avatar",
+                  filename: "f1a2b3c4_photo.png",
+                  original_name: "photo.png",
+                  size: 184320,
+                  mime: "image/png",
+                  url: `/api/files/${cName}/rec_001/f1a2b3c4_photo.png`
+                }
+              ],
+              record: Object.assign({}, sampleRecordItem, { avatar: "f1a2b3c4_photo.png" })
+            },
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "1.20ms",
+              queries_count: 2
+            }
+          };
+          break;
+
+        case 'realtime':
+          samplePadiResponse = {
+            action: "create",
+            collection: cName,
+            record: sampleRecordItem
+          };
+          break;
+
+        case 'transactions':
+          samplePadiResponse = {
+            message: "Transaction committed successfully.",
+            message_code: "SUCCESS",
+            success: true,
+            item: {
+              committed: true,
+              operations_count: 2,
+              results: [
+                { action: "create", collection: cName, id: "rec_001", success: true },
+                { action: "update", collection: cName, id: "rec_002", success: true }
+              ]
+            },
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "1.85ms",
+              queries_count: 3
+            }
+          };
+          break;
+
+        case 'sql':
+          samplePadiResponse = {
+            message: "SQL executed successfully.",
+            message_code: "SUCCESS",
+            success: true,
+            item: [
+              { id: 1, name: "Sample Item", total_records: 10 }
+            ],
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.52ms",
+              queries_count: 1
+            }
+          };
+          break;
+
+        default:
+          samplePadiResponse = {
+            message: "Success",
+            message_code: "SUCCESS",
+            success: true,
+            item: sampleRecordItem,
+            debug: {
+              env: "development",
+              database: activeDbDriver || "sqlite",
+              execution_time: "0.45ms"
+            }
+          };
+      }
+
+      currentApiPreviewResponseJson = JSON.stringify(samplePadiResponse, null, 2);
 
       content.innerHTML = `
         <div>
           <h4 class="text-sm font-extrabold text-slate-900">${d.title}</h4>
           <p class="text-slate-500 mt-0.5">${d.desc}</p>
         </div>
-        <div class="flex flex-wrap items-center justify-between bg-emerald-50/60 p-3.5 rounded-2xl font-mono gap-2 border border-emerald-200/80">
+        <div class="flex flex-wrap items-center justify-between bg-emerald-50/60 p-3 rounded-2xl font-mono gap-2 border border-emerald-200/80">
           <div class="flex items-center space-x-2.5 min-w-0">
             <span class="px-2.5 py-1 rounded-lg font-extrabold text-[10px] shrink-0 ${d.badge}">${d.method}</span>
-            <span class="text-slate-900 font-bold break-all">${d.path}</span>
+            <span class="text-slate-900 font-bold break-all text-xs">${d.path}</span>
           </div>
           <div class="flex items-center space-x-2 shrink-0">
-            <button type="button" onclick="copyToClipboard(currentApiPreviewPath)" class="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-sans font-bold flex items-center space-x-1.5 transition">
+            <button type="button" onclick="copyToClipboard(currentApiPreviewPath)" class="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-sans font-bold flex items-center space-x-1 transition cursor-pointer">
               <i class="fa-regular fa-copy text-[10px]"></i>
               <span>Copy Path</span>
             </button>
-            <button type="button" onclick="copyToClipboard(currentApiPreviewUrl)" class="px-3 py-1.5 rounded-xl padi-btn-primary text-white text-[11px] font-sans font-bold flex items-center space-x-1.5 transition">
+            <button type="button" onclick="copyToClipboard(currentApiPreviewUrl)" class="px-2.5 py-1 rounded-lg padi-btn-primary text-white text-[11px] font-sans font-bold flex items-center space-x-1 transition cursor-pointer">
               <i class="fa-solid fa-link text-[10px]"></i>
-              <span>Copy Full URL</span>
+              <span>Copy URL</span>
             </button>
           </div>
         </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
             <div class="flex items-center justify-between mb-1.5">
-              <div class="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">JavaScript Fetch Example</div>
-              <button type="button" onclick="copyToClipboard(currentApiPreviewJs)" class="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold flex items-center space-x-1 transition">
-                <i class="fa-regular fa-copy text-[10px]"></i>
+              <div class="flex items-center space-x-1.5 bg-slate-200/60 p-0.5 rounded-lg border border-slate-200">
+                <button type="button" id="apiSnippetBtn_js" onclick="toggleApiSnippetMode('js')" class="px-2 py-0.5 rounded-md ${currentApiSnippetMode === 'js' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900 font-semibold'} text-[10px] transition cursor-pointer">
+                  JS Fetch
+                </button>
+                <button type="button" id="apiSnippetBtn_curl" onclick="toggleApiSnippetMode('curl')" class="px-2 py-0.5 rounded-md ${currentApiSnippetMode === 'curl' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900 font-semibold'} text-[10px] transition cursor-pointer">
+                  cURL
+                </button>
+              </div>
+              <button type="button" onclick="copyToClipboard(currentApiSnippetMode === 'js' ? currentApiPreviewJs : currentApiPreviewCurl)" class="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[10px] font-bold flex items-center space-x-1 transition cursor-pointer">
+                <i class="fa-regular fa-copy text-[9px]"></i>
                 <span>Copy Snippet</span>
               </button>
             </div>
-            <pre class="bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto min-h-[200px]">${d.js}</pre>
+            <pre id="apiSnippetPre_js" class="${currentApiSnippetMode === 'js' ? '' : 'hidden '}bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto min-h-[220px] max-h-[380px]">${d.js}</pre>
+            <pre id="apiSnippetPre_curl" class="${currentApiSnippetMode === 'curl' ? '' : 'hidden '}bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto min-h-[220px] max-h-[380px]">${d.curl}</pre>
           </div>
           <div>
             <div class="flex items-center justify-between mb-1.5">
-              <div class="text-[11px] font-extrabold uppercase tracking-wider text-teal-700">JSON Response Example</div>
-              <span class="text-[10px] font-mono text-slate-400">200 OK</span>
+              <div class="text-[11px] font-extrabold uppercase tracking-wider text-teal-700 flex items-center space-x-1.5">
+                <i class="fa-solid fa-code text-[10px]"></i>
+                <span>JSON Response (Padi Framework)</span>
+              </div>
+              <div class="flex items-center space-x-1.5">
+                <span class="text-[10px] font-mono text-slate-500 font-bold mr-1">${d.statusCode || '200 OK'}</span>
+                <button type="button" onclick="copyToClipboard(currentApiPreviewResponseJson)" class="px-2 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[10px] font-bold flex items-center space-x-1 transition cursor-pointer">
+                  <i class="fa-regular fa-copy text-[9px]"></i>
+                  <span>Copy</span>
+                </button>
+              </div>
             </div>
-            <pre class="bg-slate-950 text-teal-300 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto max-h-[230px]">${JSON.stringify(samplePadiResponse, null, 2)}</pre>
+            <pre class="bg-slate-950 text-teal-300 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto min-h-[220px] max-h-[380px]">${currentApiPreviewResponseJson}</pre>
           </div>
         </div>
       `;

@@ -60,7 +60,7 @@ impl Default for AppConfig {
             app_name: "PadiBase Studio".to_string(),
             app_env: "development".to_string(),
             app_host: "127.0.0.1".to_string(),
-            app_port: "8090".to_string(),
+            app_port: "8085".to_string(),
             jwt_secret: "PadiBase_default_secure_secret_key_change_me_in_prod".to_string(),
             cors_allowed_origins: "*".to_string(),
             db_max_connections: 20,
@@ -135,7 +135,7 @@ fn refresh_derived_config(cache: &HashMap<String, String>) {
         .unwrap_or("127.0.0.1")
         .to_string();
     let app_port = map_get_non_empty(cache, "APP_PORT")
-        .unwrap_or("8090")
+        .unwrap_or("8085")
         .to_string();
     let jwt_secret = map_get_non_empty(cache, "JWT_SECRET")
         .unwrap_or("PadiBase_default_secure_secret_key_change_me_in_prod")

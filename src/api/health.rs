@@ -16,6 +16,7 @@ pub async fn api_root(State(state): State<AppState>) -> impl IntoResponse {
             "admins": "/api/admins",
             "has_admins": "/api/admins/has-admins",
             "collections": "/api/collections",
+            "tables": "/api/tables",
             "realtime_sse": "/api/realtime",
             "backups": "/api/backups",
             "dashboard_ui": "/dashboard/"
