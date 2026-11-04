@@ -923,38 +923,20 @@
 
           <!-- Settings Tabs List -->
           <nav id="settingsTabsNav" class="flex-1 overflow-y-auto p-2 space-y-1.5">
-            <!-- 1. All Tables Matrix -->
-            <div id="setTabContainer_quickmatrix" class="group relative flex items-center rounded-2xl transition border bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold">
-              <button type="button" onclick="switchSettingsTab('quickmatrix')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
-                <div class="flex items-center space-x-2.5 truncate">
-                  <span id="setTabIcon_quickmatrix" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-white/20 text-white">
-                    <i class="fa-solid fa-table-cells text-[11px]"></i>
-                  </span>
-                  <div class="text-left truncate">
-                    <div id="setTabTitle_quickmatrix" class="truncate font-mono">Tables Matrix</div>
-                    <div id="setTabSub_quickmatrix" class="text-[10px] text-emerald-100">schema &bull; rules</div>
-                  </div>
-                </div>
-                <div class="flex items-center space-x-1 shrink-0 ml-1">
-                  <span id="setTabBadge_quickmatrix" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-white/20 text-white">matrix</span>
-                </div>
-              </button>
-            </div>
-
-            <!-- 2. Application & DB -->
-            <div id="setTabContainer_app" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
+            <!-- 1. Application & DB -->
+            <div id="setTabContainer_app" class="group relative flex items-center rounded-2xl transition border bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold">
               <button type="button" onclick="switchSettingsTab('app')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
                 <div class="flex items-center space-x-2.5 truncate">
-                  <span id="setTabIcon_app" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                  <span id="setTabIcon_app" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-white/20 text-white">
                     <i class="fa-solid fa-server text-[11px]"></i>
                   </span>
                   <div class="text-left truncate">
                     <div id="setTabTitle_app" class="truncate font-mono">Application &amp; DB</div>
-                    <div id="setTabSub_app" class="text-[10px] text-slate-400">engine &bull; tokens</div>
+                    <div id="setTabSub_app" class="text-[10px] text-emerald-100">engine &bull; tokens</div>
                   </div>
                 </div>
                 <div class="flex items-center space-x-1 shrink-0 ml-1">
-                  <span id="setTabBadge_app" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">system</span>
+                  <span id="setTabBadge_app" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-white/20 text-white">system</span>
                 </div>
               </button>
             </div>
@@ -1012,6 +994,42 @@
                 </div>
               </button>
             </div>
+
+            <!-- 6. Mail & SMTP Settings -->
+            <div id="setTabContainer_email" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('email')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+                <div class="flex items-center space-x-2.5 truncate">
+                  <span id="setTabIcon_email" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                    <i class="fa-solid fa-envelope text-[11px]"></i>
+                  </span>
+                  <div class="text-left truncate">
+                    <div id="setTabTitle_email" class="truncate font-mono">Mail &amp; SMTP</div>
+                    <div id="setTabSub_email" class="text-[10px] text-slate-400">notifications &bull; alerts</div>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-1 shrink-0 ml-1">
+                  <span id="setTabBadge_email" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">smtp</span>
+                </div>
+              </button>
+            </div>
+
+            <!-- 7. Cron & Background Tasks -->
+            <div id="setTabContainer_cron" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('cron')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+                <div class="flex items-center space-x-2.5 truncate">
+                  <span id="setTabIcon_cron" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                    <i class="fa-solid fa-clock text-[11px]"></i>
+                  </span>
+                  <div class="text-left truncate">
+                    <div id="setTabTitle_cron" class="truncate font-mono">Cron &amp; Tasks</div>
+                    <div id="setTabSub_cron" class="text-[10px] text-slate-400">scheduler &bull; api &bull; sql</div>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-1 shrink-0 ml-1">
+                  <span id="setTabBadge_cron" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">cron</span>
+                </div>
+              </button>
+            </div>
           </nav>
         </aside>
 
@@ -1019,39 +1037,8 @@
         <main class="flex-1 flex flex-col min-w-0 overflow-y-auto bg-white p-4 sm:p-6">
           <div class="max-w-5xl w-full mx-auto space-y-6">
             
-            <!-- 1. All Tables Quick Matrix -->
-            <div id="settingsPane_quickmatrix" class="space-y-4">
-              <div class="flex items-center justify-between">
-                <div>
-                  <h3 class="text-sm font-extrabold text-slate-900">All Tables Security &amp; Features Matrix</h3>
-                  <p class="text-xs text-slate-500">Overview of all tables, realtime settings, and access rules.</p>
-                </div>
-                <button onclick="syncDatabaseTables()" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition">
-                  <i class="fa-solid fa-arrows-rotate mr-1"></i> Sync DB
-                </button>
-              </div>
-
-              <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
-                <table class="w-full text-left text-xs">
-                  <thead class="bg-slate-50 border-b border-slate-200 font-mono text-[11px] text-slate-500">
-                    <tr>
-                      <th class="p-3">Table Name</th>
-                      <th class="p-3">Type</th>
-                      <th class="p-3">Realtime</th>
-                      <th class="p-3">Auto Relations</th>
-                      <th class="p-3">Access Summary</th>
-                      <th class="p-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody id="quickMatrixTableBody" class="divide-y divide-slate-100 font-mono">
-                    <!-- Dynamic Matrix Rows -->
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <!-- 2. Application & Database Settings -->
-            <div id="settingsPane_app" class="hidden max-w-3xl space-y-5">
+            <!-- 1. Application & Database Settings -->
+            <div id="settingsPane_app" class="max-w-3xl space-y-5">
               <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-2xs">
                 <h3 class="text-sm font-extrabold text-slate-900 border-b pb-3">Application Identity</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1235,6 +1222,380 @@
                   </thead>
                   <tbody id="backupsTableBody" class="divide-y divide-slate-100 font-mono"></tbody>
                 </table>
+              </div>
+            </div>
+
+            <!-- 5. Mail & SMTP Settings Pane -->
+            <div id="settingsPane_email" class="hidden max-w-4xl space-y-5">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                <div>
+                  <div class="flex items-center space-x-2">
+                    <span class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xs border border-emerald-100">
+                      <i class="fa-solid fa-envelope"></i>
+                    </span>
+                    <h3 class="text-base font-extrabold text-slate-900">Mail settings</h3>
+                  </div>
+                  <p class="text-xs text-slate-500 mt-1">Configure common settings for sending emails.</p>
+                </div>
+                <div class="flex items-center space-x-2 shrink-0">
+                  <button type="button" onclick="saveMailSettings()" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-2xs cursor-pointer">
+                    <i class="fa-solid fa-floppy-disk text-xs"></i>
+                    <span>Save changes</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Main Mail Configuration Card (Matches PocketBase Standard) -->
+              <div class="bg-white border border-slate-200 rounded-xl p-5 sm:p-6 space-y-5 shadow-2xs">
+                <!-- Top Row: Sender Name & Sender Address -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div class="space-y-1.5">
+                    <label class="block text-xs font-bold text-slate-700">Sender name <span class="text-rose-500">*</span></label>
+                    <input type="text" id="settingSmtpFromName" placeholder="Customer Service" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition font-medium">
+                  </div>
+                  <div class="space-y-1.5">
+                    <label class="block text-xs font-bold text-slate-700">Sender address <span class="text-rose-500">*</span></label>
+                    <input type="email" id="settingSmtpFromAddress" placeholder="no_reply@padisoftware.com" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
+                  </div>
+                </div>
+
+                <!-- Toggle Switch: Use SMTP mail server (recommended) -->
+                <div class="pt-2 pb-1 border-t border-slate-100 flex items-center space-x-3 select-none">
+                  <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input type="checkbox" id="settingSmtpEnabled" class="sr-only peer">
+                    <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                  <span class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <span>Use SMTP mail server <span class="text-slate-400 font-normal">(recommended)</span></span>
+                    <i class="fa-regular fa-circle-question text-slate-400 text-xs" title="When enabled, outgoing emails will be delivered via your configured external SMTP server."></i>
+                  </span>
+                </div>
+
+                <!-- SMTP Server Credentials Row (4 Columns Grid) -->
+                <div id="smtpCredentialsSection" class="space-y-4 pt-1">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3.5">
+                    <div class="lg:col-span-4 space-y-1.5">
+                      <label class="block text-xs font-bold text-slate-700">SMTP server host <span class="text-rose-500">*</span></label>
+                      <input type="text" id="settingSmtpHost" placeholder="mail.padisoftware.com" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
+                    </div>
+                    <div class="lg:col-span-2 space-y-1.5">
+                      <label class="block text-xs font-bold text-slate-700">Port <span class="text-rose-500">*</span></label>
+                      <input type="number" id="settingSmtpPort" placeholder="465" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
+                    </div>
+                    <div class="lg:col-span-3 space-y-1.5">
+                      <label class="block text-xs font-bold text-slate-700">Username</label>
+                      <input type="text" id="settingSmtpUsername" placeholder="no_reply@padisoftware.com" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
+                    </div>
+                    <div class="lg:col-span-3 space-y-1.5">
+                      <label class="block text-xs font-bold text-slate-700">Password</label>
+                      <input type="password" id="settingSmtpPassword" placeholder="••••••••••••" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
+                    </div>
+                  </div>
+
+                  <!-- Show / Hide More Options Accordion -->
+                  <div class="pt-1">
+                    <button type="button" id="toggleMoreOptionsBtn" onclick="toggleSmtpMoreOptions()" class="inline-flex items-center space-x-1.5 text-xs font-bold text-slate-700 hover:text-emerald-700 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition cursor-pointer">
+                      <span id="toggleMoreOptionsText">Show more options</span>
+                      <i id="toggleMoreOptionsIcon" class="fa-solid fa-chevron-down text-[10px]"></i>
+                    </button>
+
+                    <div id="smtpMoreOptionsPane" class="hidden mt-3 p-4 bg-slate-50 border border-slate-200 rounded-xl grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <!-- TLS Encryption -->
+                      <div class="space-y-1.5">
+                        <label class="block text-xs font-bold text-slate-700">TLS encryption <span class="text-rose-500">*</span></label>
+                        <select id="settingSmtpEncryption" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 transition cursor-pointer">
+                          <option value="always">Always (SSL / TLS on connect, e.g. Port 465)</option>
+                          <option value="opportunistic">Opportunistic (STARTTLS, e.g. Port 587 / 25)</option>
+                          <option value="disabled">Disabled (Plain unencrypted SMTP)</option>
+                        </select>
+                      </div>
+
+                      <!-- AUTH method -->
+                      <div class="space-y-1.5">
+                        <label class="block text-xs font-bold text-slate-700">AUTH method <span class="text-rose-500">*</span></label>
+                        <select id="settingSmtpAuthMethod" class="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 transition cursor-pointer">
+                          <option value="LOGIN">LOGIN</option>
+                          <option value="PLAIN">PLAIN</option>
+                          <option value="NONE">None</option>
+                        </select>
+                      </div>
+
+                      <!-- EHLO / HELO domain -->
+                      <div class="space-y-1.5">
+                        <label class="block text-xs font-bold text-slate-700 flex items-center gap-1">
+                          <span>EHLO/HELO domain</span>
+                          <i class="fa-regular fa-circle-question text-slate-400 text-xs" title="The hostname sent in the EHLO/HELO greeting. Default to localhost if empty."></i>
+                        </label>
+                        <input type="text" id="settingSmtpEhloDomain" placeholder="Default to localhost" class="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 transition">
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Test Email Card -->
+              <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-2xs">
+                <div class="flex items-center space-x-2 border-b border-slate-100 pb-2">
+                  <span class="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs">
+                    <i class="fa-solid fa-paper-plane"></i>
+                  </span>
+                  <h4 class="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Test SMTP Connection</h4>
+                </div>
+                <p class="text-xs text-slate-500">Send a test email to verify your SMTP credentials and delivery.</p>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div class="sm:col-span-1">
+                    <label class="block text-[11px] font-semibold text-slate-600 mb-1">Select Template</label>
+                    <select id="testEmailTemplateSelect" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition cursor-pointer">
+                      <option value="test">Default Test (Diagnostic)</option>
+                      <option value="welcome">Welcome (Register)</option>
+                      <option value="forgot_password">Forgot Password Token</option>
+                      <option value="password_changed">Password Changed Alert</option>
+                      <option value="admin_created">Admin Access Granted</option>
+                    </select>
+                  </div>
+                  <div class="sm:col-span-2">
+                    <label class="block text-[11px] font-semibold text-slate-600 mb-1">Recipient Email Address</label>
+                    <div class="flex items-center gap-2">
+                      <input type="email" id="testEmailRecipient" placeholder="Enter recipient email address..." class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
+                      <button type="button" id="sendTestEmailBtn" onclick="handleSendTestEmail()" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold transition flex items-center justify-center space-x-1.5 shrink-0 cursor-pointer">
+                        <i class="fa-solid fa-paper-plane text-xs" id="sendTestEmailIcon"></i>
+                        <span id="sendTestEmailText">Send Test Email</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div id="testEmailResult" class="hidden p-3 rounded-lg text-xs font-semibold"></div>
+              </div>
+
+              <!-- Automatic Email Triggers Card (Selectable / Configurable) -->
+              <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-2xs">
+                <div class="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <div class="flex items-center space-x-2">
+                    <span class="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xs">
+                      <i class="fa-solid fa-list-check"></i>
+                    </span>
+                    <h4 class="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Select Automatic Email Triggers</h4>
+                  </div>
+                  <span class="text-[11px] text-slate-400">Choose which events trigger an email</span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-600">
+                  <!-- 1. Welcome Email -->
+                  <label class="p-3 bg-slate-50 hover:bg-slate-100/80 rounded-xl border border-slate-200 cursor-pointer flex items-start space-x-3 transition">
+                    <input type="checkbox" id="settingEventWelcome" class="mt-1 w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer">
+                    <div class="space-y-0.5">
+                      <div class="font-bold text-slate-900 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span> New User Registration
+                      </div>
+                      <div class="text-[11px] text-slate-500 leading-normal">
+                        Dispatches welcome email with account details upon <code class="font-mono text-[10px] text-slate-700">/register</code>.
+                      </div>
+                    </div>
+                  </label>
+
+                  <!-- 2. Forgot Password Email -->
+                  <label class="p-3 bg-slate-50 hover:bg-slate-100/80 rounded-xl border border-slate-200 cursor-pointer flex items-start space-x-3 transition">
+                    <input type="checkbox" id="settingEventForgotPassword" class="mt-1 w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer">
+                    <div class="space-y-0.5">
+                      <div class="font-bold text-slate-900 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-indigo-500"></span> Forgot Password Request
+                      </div>
+                      <div class="text-[11px] text-slate-500 leading-normal">
+                        Sends secure password reset token and recovery link upon <code class="font-mono text-[10px] text-slate-700">/forgot-password</code>.
+                      </div>
+                    </div>
+                  </label>
+
+                  <!-- 3. Password Changed Alert -->
+                  <label class="p-3 bg-slate-50 hover:bg-slate-100/80 rounded-xl border border-slate-200 cursor-pointer flex items-start space-x-3 transition">
+                    <input type="checkbox" id="settingEventPasswordChanged" class="mt-1 w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer">
+                    <div class="space-y-0.5">
+                      <div class="font-bold text-slate-900 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-amber-500"></span> Password Changed Security Alert
+                      </div>
+                      <div class="text-[11px] text-slate-500 leading-normal">
+                        Alerts user immediately when password is reset or updated.
+                      </div>
+                    </div>
+                  </label>
+
+                  <!-- 4. Superuser Granted -->
+                  <label class="p-3 bg-slate-50 hover:bg-slate-100/80 rounded-xl border border-slate-200 cursor-pointer flex items-start space-x-3 transition">
+                    <input type="checkbox" id="settingEventAdminCreated" class="mt-1 w-4 h-4 text-emerald-600 rounded border-slate-300 focus:ring-emerald-500 cursor-pointer">
+                    <div class="space-y-0.5">
+                      <div class="font-bold text-slate-900 flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-purple-500"></span> Superuser Access Granted
+                      </div>
+                      <div class="text-[11px] text-slate-500 leading-normal">
+                        Notifies newly invited administrator accounts upon creation via <code class="font-mono text-[10px] text-slate-700">/api/admins</code>.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Email Templates Editor Card -->
+              <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-2xs">
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <div class="flex items-center space-x-2">
+                      <span class="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs">
+                        <i class="fa-solid fa-file-lines"></i>
+                      </span>
+                      <h4 class="text-xs font-extrabold text-slate-800 uppercase tracking-wider">Customize Email Templates</h4>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-1">Edit the subject line and HTML body for outgoing transactional notifications.</p>
+                  </div>
+                  <div class="flex items-center space-x-2">
+                    <button type="button" onclick="resetCurrentEmailTemplateToDefault()" class="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold transition cursor-pointer flex items-center space-x-1" title="Reset this template to system default">
+                      <i class="fa-solid fa-rotate-left text-[10px]"></i>
+                      <span>Reset to Default</span>
+                    </button>
+                    <button type="button" onclick="previewCurrentEmailTemplate()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition cursor-pointer flex items-center space-x-1" title="Preview rendered template">
+                      <i class="fa-solid fa-eye text-[10px]"></i>
+                      <span>Preview</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Template Selector Tabs -->
+                <div class="flex items-center space-x-2 overflow-x-auto pb-1 select-none">
+                  <button type="button" onclick="selectEmailTemplateTab('welcome')" id="tmplTab_welcome" class="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white shadow-2xs transition shrink-0 cursor-pointer">
+                    <i class="fa-solid fa-user-plus mr-1"></i> Welcome (Register)
+                  </button>
+                  <button type="button" onclick="selectEmailTemplateTab('forgot_password')" id="tmplTab_forgot_password" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition shrink-0 cursor-pointer">
+                    <i class="fa-solid fa-key mr-1"></i> Forgot Password
+                  </button>
+                  <button type="button" onclick="selectEmailTemplateTab('password_changed')" id="tmplTab_password_changed" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition shrink-0 cursor-pointer">
+                    <i class="fa-solid fa-shield-halved mr-1"></i> Password Changed
+                  </button>
+                  <button type="button" onclick="selectEmailTemplateTab('admin_created')" id="tmplTab_admin_created" class="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition shrink-0 cursor-pointer">
+                    <i class="fa-solid fa-crown mr-1"></i> Admin Created
+                  </button>
+                </div>
+
+                <!-- Available Placeholders Pill Bar -->
+                <div class="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs flex flex-wrap items-center gap-1.5">
+                  <span class="text-slate-400 font-semibold text-[11px] mr-1">Insert Placeholder:</span>
+                  <button type="button" onclick="insertPlaceholderToTemplate('{name}')" class="px-2 py-0.5 rounded bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 text-[11px] font-mono transition cursor-pointer" title="Recipient Name">{name}</button>
+                  <button type="button" onclick="insertPlaceholderToTemplate('{email}')" class="px-2 py-0.5 rounded bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 text-[11px] font-mono transition cursor-pointer" title="Recipient Email">{email}</button>
+                  <button type="button" onclick="insertPlaceholderToTemplate('{appName}')" class="px-2 py-0.5 rounded bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 text-[11px] font-mono transition cursor-pointer" title="Application Name">{appName}</button>
+                  <button type="button" onclick="insertPlaceholderToTemplate('{appUrl}')" class="px-2 py-0.5 rounded bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 text-[11px] font-mono transition cursor-pointer" title="Application Base URL">{appUrl}</button>
+                  <button type="button" onclick="insertPlaceholderToTemplate('{token}')" class="px-2 py-0.5 rounded bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 text-[11px] font-mono transition cursor-pointer" title="Password Reset Token">{token}</button>
+                  <button type="button" onclick="insertPlaceholderToTemplate('{collection}')" class="px-2 py-0.5 rounded bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 text-[11px] font-mono transition cursor-pointer" title="Table / Collection">{collection}</button>
+                  <button type="button" onclick="insertPlaceholderToTemplate('{date}')" class="px-2 py-0.5 rounded bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 border border-slate-200 text-[11px] font-mono transition cursor-pointer" title="Timestamp">{date}</button>
+                </div>
+
+                <!-- Template Form -->
+                <div class="space-y-3">
+                  <div class="space-y-1">
+                    <label class="block text-xs font-semibold text-slate-700">Subject Line</label>
+                    <input type="text" id="settingTmplSubject" oninput="handleTemplateSubjectChange(event)" placeholder="e.g. Welcome to {appName}!" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
+                  </div>
+                  <div class="space-y-1">
+                    <div class="flex items-center justify-between">
+                      <label class="block text-xs font-semibold text-slate-700">Email Body (HTML)</label>
+                      <span class="text-[10px] text-slate-400">Content is wrapped in responsive branded layout, or supply full &lt;html&gt;</span>
+                    </div>
+                    <textarea id="settingTmplBody" oninput="handleTemplateBodyChange(event)" rows="10" placeholder="<p>Hello {name}, welcome to {appName}!</p>" class="w-full bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition leading-relaxed"></textarea>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 7. Cron & Background Tasks Pane -->
+            <div id="settingsPane_cron" class="hidden space-y-5">
+              <!-- Top Header & Actions -->
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                <div>
+                  <div class="flex items-center space-x-2">
+                    <span class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xs border border-emerald-100">
+                      <i class="fa-solid fa-clock"></i>
+                    </span>
+                    <h3 class="text-base font-extrabold text-slate-900">Cron &amp; Scheduled Tasks</h3>
+                  </div>
+                  <p class="text-xs text-slate-500 mt-1">Automate periodic SQL statements, data housekeeping, and HTTP API/webhook triggers.</p>
+                </div>
+                <div class="flex items-center space-x-2 shrink-0">
+                  <button type="button" onclick="loadCronJobs()" class="px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center space-x-1.5 shadow-2xs cursor-pointer" title="Refresh task list">
+                    <i class="fa-solid fa-arrows-rotate text-xs text-slate-500"></i>
+                    <span>Refresh</span>
+                  </button>
+                  <button type="button" onclick="openCronJobModal()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-2xs cursor-pointer">
+                    <i class="fa-solid fa-plus text-xs"></i>
+                    <span>Add Scheduled Task</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Quick Stats Bar -->
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div class="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs">
+                  <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Total Tasks</div>
+                  <div id="cronStatTotal" class="text-xl font-extrabold text-slate-900 mt-1 font-mono">0</div>
+                </div>
+                <div class="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs">
+                  <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Active Tasks</div>
+                  <div id="cronStatActive" class="text-xl font-extrabold text-emerald-600 mt-1 font-mono">0</div>
+                </div>
+                <div class="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs">
+                  <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Scheduler Engine</div>
+                  <div class="text-xs font-extrabold text-slate-800 mt-1.5 flex items-center space-x-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span>15s Loop (Tokio)</span>
+                  </div>
+                </div>
+                <div class="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs">
+                  <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Execution Support</div>
+                  <div class="text-xs font-extrabold text-slate-800 mt-1.5 flex items-center space-x-1">
+                    <span class="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 font-mono text-[10px] font-bold">SQL</span>
+                    <span class="text-slate-300">&bull;</span>
+                    <span class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-mono text-[10px] font-bold">HTTP</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Tasks List Card -->
+              <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                <div id="cronLoadingState" class="p-8 text-center text-slate-400 text-xs flex items-center justify-center space-x-2">
+                  <i class="fa-solid fa-circle-notch fa-spin text-emerald-600"></i>
+                  <span>Loading scheduled tasks...</span>
+                </div>
+
+                <div id="cronEmptyState" class="hidden p-8 text-center space-y-4">
+                  <div class="w-12 h-12 rounded-2xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto text-xl">
+                    <i class="fa-solid fa-clock-rotate-left"></i>
+                  </div>
+                  <div class="space-y-1">
+                    <h4 class="text-sm font-extrabold text-slate-800">No scheduled tasks configured yet</h4>
+                    <p class="text-xs text-slate-400 max-w-md mx-auto">Create background cron jobs to periodically run SQL maintenance queries, clean up old records, or trigger external HTTP API webhooks.</p>
+                  </div>
+                  <div class="pt-2 flex flex-wrap items-center justify-center gap-2">
+                    <button type="button" onclick="createPresetCronJob('vacuum')" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition cursor-pointer flex items-center space-x-1.5">
+                      <i class="fa-solid fa-broom text-purple-600 text-[11px]"></i>
+                      <span>Preset: Daily VACUUM</span>
+                    </button>
+                    <button type="button" onclick="createPresetCronJob('health')" class="px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-xs font-semibold text-slate-700 transition cursor-pointer flex items-center space-x-1.5">
+                      <i class="fa-solid fa-heart-pulse text-blue-600 text-[11px]"></i>
+                      <span>Preset: Hourly Health Ping</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div id="cronTableWrapper" class="hidden overflow-x-auto">
+                  <table class="w-full text-left text-xs">
+                    <thead class="bg-slate-50 border-b border-slate-200 font-mono text-[11px] text-slate-500">
+                      <tr>
+                        <th class="p-3 w-12 text-center">Active</th>
+                        <th class="p-3">Task Details</th>
+                        <th class="p-3">Schedule</th>
+                        <th class="p-3">Next Run</th>
+                        <th class="p-3">Last Execution</th>
+                        <th class="p-3 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="cronTableBody" class="divide-y divide-slate-100"></tbody>
+                  </table>
+                </div>
               </div>
             </div>
 
@@ -1856,6 +2217,203 @@
           <span>Open Full Original File</span>
           <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
         </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 8: EMAIL TEMPLATE LIVE PREVIEW ================= -->
+  <div id="emailPreviewModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+    <div onclick="closeEmailPreviewModal()" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"></div>
+    <div class="min-h-full flex items-center justify-center p-3 sm:p-5">
+      <div class="relative bg-white rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden border border-slate-200 z-10 flex flex-col max-h-[88vh]">
+        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
+          <div class="min-w-0 pr-2">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-emerald-400">Live Email Preview</h3>
+            <div id="emailPreviewSubjectTitle" class="text-xs font-bold text-slate-100 font-mono mt-0.5 truncate">Subject: ...</div>
+          </div>
+          <button type="button" onclick="closeEmailPreviewModal()" class="w-7 h-7 rounded-lg hover:bg-white/10 text-white/80 hover:text-white flex items-center justify-center transition cursor-pointer text-lg shrink-0">&times;</button>
+        </div>
+        <div class="flex-1 overflow-y-auto p-4 bg-slate-100">
+          <iframe id="emailPreviewFrame" class="w-full bg-white rounded-xl shadow-xs border border-slate-200 min-h-[460px]"></iframe>
+        </div>
+        <div class="p-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-xs">
+          <span class="text-slate-400 text-[11px]">Rendered with sample parameters ({name}, {email}, {token}, etc.)</span>
+          <button type="button" onclick="closeEmailPreviewModal()" class="px-3.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white font-bold transition">Close Preview</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 9: ADD / EDIT CRON JOB MODAL ================= -->
+  <div id="cronJobModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+    <div onclick="closeCronJobModal()" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"></div>
+    <div class="min-h-full flex items-center justify-center p-3 sm:p-5">
+      <div class="relative bg-white rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden border border-slate-200 z-10 flex flex-col max-h-[90vh]">
+        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
+          <div class="flex items-center space-x-2">
+            <span class="w-7 h-7 rounded-lg bg-white/10 text-emerald-400 flex items-center justify-center text-xs">
+              <i class="fa-solid fa-clock"></i>
+            </span>
+            <div>
+              <h3 id="cronModalTitle" class="text-xs font-bold uppercase tracking-wider text-emerald-400">Add Scheduled Task</h3>
+              <p class="text-[11px] text-slate-300">Run database SQL queries or call external API webhooks automatically.</p>
+            </div>
+          </div>
+          <button type="button" onclick="closeCronJobModal()" class="w-7 h-7 rounded-lg hover:bg-white/10 text-white/80 hover:text-white flex items-center justify-center transition cursor-pointer text-lg shrink-0">&times;</button>
+        </div>
+
+        <form id="cronJobForm" onsubmit="handleSaveCronJob(event)" class="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
+          <input type="hidden" id="cronJobEditId" value="">
+
+          <!-- Name -->
+          <div class="space-y-1">
+            <label class="block font-bold text-slate-700">Task Name <span class="text-rose-500">*</span></label>
+            <input type="text" id="cronJobNameInput" required placeholder="e.g. Daily Database Cleanup or Stripe Sync" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
+          </div>
+
+          <!-- Schedule Expression & Presets -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between">
+              <label class="block font-bold text-slate-700">Cron Schedule Expression <span class="text-rose-500">*</span></label>
+              <span id="cronSchedulePreview" class="text-[11px] font-mono text-emerald-700 font-semibold"></span>
+            </div>
+            <input type="text" id="cronJobScheduleInput" required oninput="updateCronSchedulePreview()" placeholder="*/15 * * * * or @daily" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 focus:bg-white transition font-bold">
+            <div class="flex flex-wrap gap-1.5 pt-1">
+              <button type="button" onclick="setCronSchedulePreset('*/5 * * * *')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 font-mono text-[10px] transition cursor-pointer">Every 5m</button>
+              <button type="button" onclick="setCronSchedulePreset('*/15 * * * *')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 font-mono text-[10px] transition cursor-pointer">Every 15m</button>
+              <button type="button" onclick="setCronSchedulePreset('0 * * * *')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 font-mono text-[10px] transition cursor-pointer">Hourly</button>
+              <button type="button" onclick="setCronSchedulePreset('0 0 * * *')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 font-mono text-[10px] transition cursor-pointer">Daily (00:00)</button>
+              <button type="button" onclick="setCronSchedulePreset('0 0 * * 0')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 font-mono text-[10px] transition cursor-pointer">Weekly</button>
+            </div>
+            <p class="text-[10px] text-slate-400">Format: <code class="font-mono text-slate-600">min hour day month weekday</code> (0=Sun) or macros like <code class="font-mono text-slate-600">@hourly</code>, <code class="font-mono text-slate-600">@daily</code>, <code class="font-mono text-slate-600">@every 30m</code>.</p>
+          </div>
+
+          <!-- Task Type Segmented Switch -->
+          <div class="space-y-1.5 pt-1">
+            <label class="block font-bold text-slate-700">Task Type</label>
+            <div class="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl">
+              <button type="button" id="cronTypeBtn_sql" onclick="switchCronJobType('sql')" class="py-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 bg-white text-purple-700 shadow-2xs">
+                <i class="fa-solid fa-database text-purple-600"></i>
+                <span>Execute SQL Query</span>
+              </button>
+              <button type="button" id="cronTypeBtn_http" onclick="switchCronJobType('http')" class="py-2 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition flex items-center justify-center space-x-1.5">
+                <i class="fa-solid fa-globe text-blue-600"></i>
+                <span>Call HTTP API Endpoint</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- SQL Configuration Pane -->
+          <div id="cronPane_sql" class="space-y-2 bg-purple-50/50 border border-purple-100 rounded-xl p-3.5">
+            <div class="flex items-center justify-between">
+              <label class="block font-bold text-purple-900">SQL Statement(s) <span class="text-rose-500">*</span></label>
+              <span class="text-[10px] text-purple-600">Multi-statement separated by semicolon (;)</span>
+            </div>
+            <textarea id="cronSqlInput" rows="5" placeholder="DELETE FROM logs WHERE created_at < datetime('now', '-30 days');&#10;VACUUM;" class="w-full bg-white border border-purple-200 rounded-lg p-2.5 font-mono text-xs text-slate-900 focus:outline-none focus:border-purple-600 transition leading-relaxed resize-y"></textarea>
+            <p class="text-[10px] text-slate-500">Executed directly in a transaction on the active database pool (<code class="font-mono text-slate-700">SQLite / MySQL / Postgres</code>).</p>
+          </div>
+
+          <!-- HTTP Configuration Pane -->
+          <div id="cronPane_http" class="hidden space-y-3 bg-blue-50/50 border border-blue-100 rounded-xl p-3.5">
+            <div class="grid grid-cols-3 gap-2">
+              <div class="col-span-1 space-y-1">
+                <label class="block font-bold text-blue-900">HTTP Method</label>
+                <select id="cronHttpMethodInput" class="w-full bg-white border border-blue-200 rounded-lg px-2.5 py-2 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-blue-600 transition">
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="DELETE">DELETE</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="HEAD">HEAD</option>
+                </select>
+              </div>
+              <div class="col-span-2 space-y-1">
+                <label class="block font-bold text-blue-900">Endpoint URL <span class="text-rose-500">*</span></label>
+                <input type="text" id="cronHttpUrlInput" placeholder="/api/health or https://api.site.com/hook" class="w-full bg-white border border-blue-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-blue-600 transition">
+              </div>
+            </div>
+            <p class="text-[10px] text-slate-500">Relative paths starting with <code class="font-mono text-slate-700">/api/...</code> automatically target this local PadiBase instance.</p>
+            
+            <div class="space-y-1">
+              <label class="block font-bold text-blue-900">Headers (JSON Object, optional)</label>
+              <textarea id="cronHttpHeadersInput" rows="2" placeholder='{ "Authorization": "Bearer token", "X-Key": "123" }' class="w-full bg-white border border-blue-200 rounded-lg p-2 font-mono text-[11px] text-slate-900 focus:outline-none focus:border-blue-600 transition"></textarea>
+            </div>
+
+            <div class="space-y-1">
+              <label class="block font-bold text-blue-900">Request Body (for POST/PUT/PATCH, optional)</label>
+              <textarea id="cronHttpBodyInput" rows="3" placeholder='{ "event": "cron_tick", "source": "padibase" }' class="w-full bg-white border border-blue-200 rounded-lg p-2 font-mono text-[11px] text-slate-900 focus:outline-none focus:border-blue-600 transition"></textarea>
+            </div>
+          </div>
+
+          <!-- Active Enabled Checkbox -->
+          <div class="pt-1 flex items-center justify-between">
+            <label class="inline-flex items-center space-x-2 cursor-pointer select-none">
+              <input type="checkbox" id="cronJobEnabledInput" checked class="rounded border-slate-300 text-emerald-600 focus:ring-0">
+              <span class="font-bold text-slate-800">Enable this task immediately</span>
+            </label>
+          </div>
+
+          <!-- Form Buttons -->
+          <div class="pt-3 border-t border-slate-100 flex justify-end space-x-2">
+            <button type="button" onclick="closeCronJobModal()" class="px-4 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold transition">Cancel</button>
+            <button type="submit" id="saveCronJobBtn" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition flex items-center space-x-1.5 shadow-2xs">
+              <i class="fa-solid fa-floppy-disk text-xs"></i>
+              <span>Save Task</span>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= MODAL 10: CRON EXECUTION RESULT / LOG MODAL ================= -->
+  <div id="cronResultModal" class="hidden fixed inset-0 z-50 overflow-y-auto">
+    <div onclick="closeCronResultModal()" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"></div>
+    <div class="min-h-full flex items-center justify-center p-3 sm:p-5">
+      <div class="relative bg-white rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden border border-slate-200 z-10 flex flex-col max-h-[85vh]">
+        <div class="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-900 text-white">
+          <div class="flex items-center space-x-2">
+            <span class="w-7 h-7 rounded-lg bg-white/10 text-emerald-400 flex items-center justify-center text-xs">
+              <i class="fa-solid fa-terminal"></i>
+            </span>
+            <div>
+              <h3 class="text-xs font-bold uppercase tracking-wider text-emerald-400">Execution Log</h3>
+              <div id="cronResultTaskName" class="text-xs font-mono text-slate-200 truncate">Task Name</div>
+            </div>
+          </div>
+          <button type="button" onclick="closeCronResultModal()" class="w-7 h-7 rounded-lg hover:bg-white/10 text-white/80 hover:text-white flex items-center justify-center transition cursor-pointer text-lg shrink-0">&times;</button>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-4 space-y-3 text-xs">
+          <div class="grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-[11px]">
+            <div>
+              <div class="text-slate-400 uppercase font-bold text-[9px]">Status</div>
+              <div id="cronResultStatus" class="font-bold font-mono mt-0.5">--</div>
+            </div>
+            <div>
+              <div class="text-slate-400 uppercase font-bold text-[9px]">Duration</div>
+              <div id="cronResultDuration" class="font-mono mt-0.5">--</div>
+            </div>
+            <div>
+              <div class="text-slate-400 uppercase font-bold text-[9px]">Executed At</div>
+              <div id="cronResultTime" class="font-mono mt-0.5">--</div>
+            </div>
+          </div>
+
+          <div>
+            <label class="block font-bold text-slate-700 mb-1">Output / Result</label>
+            <pre id="cronResultOutput" class="w-full max-h-56 overflow-auto bg-slate-950 text-emerald-400 p-3 rounded-xl font-mono text-[11px] leading-relaxed whitespace-pre-wrap">--</pre>
+          </div>
+
+          <div id="cronResultErrorContainer" class="hidden">
+            <label class="block font-bold text-rose-600 mb-1">Error Details</label>
+            <pre id="cronResultError" class="w-full max-h-36 overflow-auto bg-rose-50 text-rose-700 border border-rose-200 p-3 rounded-xl font-mono text-[11px] leading-relaxed whitespace-pre-wrap"></pre>
+          </div>
+        </div>
+
+        <div class="p-3 bg-slate-50 border-t border-slate-100 flex justify-end">
+          <button type="button" onclick="closeCronResultModal()" class="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold transition">Close</button>
+        </div>
       </div>
     </div>
   </div>

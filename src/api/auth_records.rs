@@ -9,10 +9,11 @@ use serde_json::{json, Map, Value};
 
 use crate::core::app::AppState;
 use crate::core::auth::{
-    authenticate_headers, check_permission, create_jwt, generate_token_key, hash_password,
-    verify_password, RecordAction,
+    authenticate_headers, burn_dummy_verify, check_permission, check_session, create_jwt_with_key,
+    generate_token_key, hash_password, verify_password, RecordAction,
 };
 use crate::core::db::{get_collection_by_name_or_id, get_table_metadata, json_get_str, Val};
+use crate::core::env::Env;
 use crate::core::realtime::RealtimeMessage;
 use crate::core::record::{create_record, get_record};
 use crate::core::schema::{Collection, CollectionType};
@@ -157,7 +158,7 @@ async fn handle_auth_with_password(
         "SELECT * FROM `{}` WHERE `email` = ? OR `username` = ? LIMIT 1;",
         col.name
     );
-    let row = state
+    let row = match state
         .db
         .fetch_optional(&sql, &[Val::from(login_id), Val::from(login_id)])
         .await
@@ -166,13 +167,16 @@ async fn handle_auth_with_password(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(json!({ "code": 500, "message": e.to_string() })),
             )
-        })?
-        .ok_or_else(|| {
-            (
+        })? {
+        Some(r) => r,
+        None => {
+            burn_dummy_verify(&payload.password);
+            return Err((
                 StatusCode::BAD_REQUEST,
                 Json(json!({ "code": 400, "message": "Invalid credentials." })),
-            )
-        })?;
+            ));
+        }
+    };
 
     let id = json_get_str(&row, "id");
     let email = json_get_str(&row, "email");
@@ -223,7 +227,36 @@ async fn handle_auth_with_password(
         .execute(&update_login_sql, &[Val::from(&now_iso), Val::from(&id)])
         .await;
 
-    let token = create_jwt(&id, &email, &role, Some(col.id.clone()), 14).map_err(|e| {
+    let mut token_key = json_get_str(&row, "tokenKey");
+    if token_key.is_empty() {
+        if let Ok(meta) = get_table_metadata(&state.db, &col.name).await {
+            if meta.has_column("tokenKey") {
+                let generated = generate_token_key();
+                let tk_sql = format!(
+                    "UPDATE `{}` SET `tokenKey` = ? WHERE `{}` = ?;",
+                    col.name, meta.pk_column
+                );
+                if state
+                    .db
+                    .execute(&tk_sql, &[Val::from(&generated), Val::from(&id)])
+                    .await
+                    .is_ok()
+                {
+                    token_key = generated;
+                }
+            }
+        }
+    }
+
+    let token = create_jwt_with_key(
+        &id,
+        &email,
+        &role,
+        Some(col.id.clone()),
+        14,
+        Some(&token_key),
+    )
+    .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "code": 500, "message": e.to_string() })),
@@ -355,13 +388,20 @@ async fn handle_register(
         data.insert("name".to_string(), Value::String(name));
     }
 
-    // Prevent non-admin users from escalating their own role during public registration
-    let is_admin = auth
-        .as_ref()
-        .map(|c| c.role == "admin" || c.role == "superadmin")
-        .unwrap_or(false);
+    // Prevent non-admin users from escalating their own role or forging internal auth columns during public registration
+    let is_admin = auth.as_ref().map(|c| c.is_admin()).unwrap_or(false);
+    let initial_token_key = generate_token_key();
+    data.insert(
+        "tokenKey".to_string(),
+        Value::String(initial_token_key.clone()),
+    );
+    data.remove("passwordHash");
+    data.remove("remember_token");
+    data.remove("last_login_at");
     if !is_admin {
         data.insert("role".to_string(), Value::String("user".to_string()));
+        data.remove("status");
+        data.remove("verified");
     } else if let Some(role_str) = data.get("role").and_then(|v| v.as_str()) {
         let trimmed = role_str.trim();
         if !trimmed.is_empty() {
@@ -397,7 +437,15 @@ async fn handle_register(
         .unwrap_or("user")
         .to_string();
 
-    let token = create_jwt(&record.id, &email, &role, Some(col.id.clone()), 14).map_err(|e| {
+    let token = create_jwt_with_key(
+        &record.id,
+        &email,
+        &role,
+        Some(col.id.clone()),
+        14,
+        Some(&initial_token_key),
+    )
+    .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "code": 500, "message": e.to_string() })),
@@ -409,6 +457,33 @@ async fn handle_register(
             state.realtime.broadcast(RealtimeMessage::new("create", &col.name, val));
         }
     }
+
+    // Asynchronously send welcome email to newly registered user if enabled in settings
+    let user_name = record
+        .data
+        .get("name")
+        .or_else(|| record.data.get("username"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let reg_email = email.clone();
+    let col_name_str = col.name.clone();
+    let db_clone = state.db.clone();
+    tokio::spawn(async move {
+        let config = crate::core::email::get_smtp_config(&db_clone).await;
+        if config.enabled && config.events.welcome {
+            let (app_name, app_url) = crate::core::email::get_app_meta(&db_clone).await;
+            let (subject, html) = crate::core::email::render_welcome_email(
+                config.templates.welcome.as_ref(),
+                &user_name,
+                &reg_email,
+                &col_name_str,
+                &app_name,
+                &app_url,
+            );
+            let _ = crate::core::email::send_email_with_config(&config, &reg_email, &subject, &html).await;
+        }
+    });
 
     Ok((
         StatusCode::CREATED,
@@ -523,6 +598,33 @@ async fn handle_forgot_password(
                 Json(json!({ "code": 500, "message": e.to_string() })),
             )
         })?;
+    }
+
+    // Asynchronously dispatch password reset email containing the token if enabled in settings
+    if !email.is_empty() && email.contains('@') {
+        let recipient_email = email.clone();
+        let token_str = reset_token.clone();
+        let db_clone = state.db.clone();
+        tokio::spawn(async move {
+            let config = crate::core::email::get_smtp_config(&db_clone).await;
+            if config.enabled && config.events.forgot_password {
+                let (app_name, app_url) = crate::core::email::get_app_meta(&db_clone).await;
+                let (subject, html) = crate::core::email::render_forgot_password_email(
+                    config.templates.forgot_password.as_ref(),
+                    &recipient_email,
+                    &token_str,
+                    &app_name,
+                    &app_url,
+                );
+                let _ = crate::core::email::send_email_with_config(&config, &recipient_email, &subject, &html).await;
+            }
+        });
+    }
+
+    if Env::is_production() {
+        return Ok(Json(json!({
+            "message": "If the account exists, password reset instructions have been sent."
+        })));
     }
 
     Ok(Json(json!({
@@ -676,6 +778,26 @@ async fn handle_reset_password(
             Json(json!({ "code": 500, "message": e.to_string() })),
         )
     })?;
+    crate::core::auth::invalidate_session_cache(&user_id);
+
+    // Asynchronously send notification that password was successfully reset if enabled in settings
+    let notify_email = json_get_str(&row, "email");
+    if !notify_email.is_empty() && notify_email.contains('@') {
+        let db_clone = state.db.clone();
+        tokio::spawn(async move {
+            let config = crate::core::email::get_smtp_config(&db_clone).await;
+            if config.enabled && config.events.password_changed {
+                let (app_name, app_url) = crate::core::email::get_app_meta(&db_clone).await;
+                let (subject, html) = crate::core::email::render_password_changed_email(
+                    config.templates.password_changed.as_ref(),
+                    &notify_email,
+                    &app_name,
+                    &app_url,
+                );
+                let _ = crate::core::email::send_email_with_config(&config, &notify_email, &subject, &html).await;
+            }
+        });
+    }
 
     Ok(Json(json!({
         "message": "Password has been reset successfully."
@@ -718,6 +840,7 @@ async fn handle_change_password(
             Json(json!({ "code": 401, "message": "Authentication required." })),
         )
     })?;
+    check_session(&state, &headers).await?;
 
     let col = resolve_auth_collection(&state, collection_name).await?;
 
@@ -823,13 +946,15 @@ async fn handle_change_password(
             Json(json!({ "code": 500, "message": e.to_string() })),
         )
     })?;
+    crate::core::auth::invalidate_session_cache(&claims.sub);
 
-    let new_token = create_jwt(
+    let new_token = create_jwt_with_key(
         &claims.sub,
         &claims.email,
         &claims.role,
         Some(col.id.clone()),
         14,
+        Some(&rotated_token_key),
     )
     .map_err(|e| {
         (
@@ -837,6 +962,25 @@ async fn handle_change_password(
             Json(json!({ "code": 500, "message": e.to_string() })),
         )
     })?;
+
+    // Asynchronously send notification that password was updated if enabled in settings
+    if !claims.email.is_empty() && claims.email.contains('@') {
+        let notify_email = claims.email.clone();
+        let db_clone = state.db.clone();
+        tokio::spawn(async move {
+            let config = crate::core::email::get_smtp_config(&db_clone).await;
+            if config.enabled && config.events.password_changed {
+                let (app_name, app_url) = crate::core::email::get_app_meta(&db_clone).await;
+                let (subject, html) = crate::core::email::render_password_changed_email(
+                    config.templates.password_changed.as_ref(),
+                    &notify_email,
+                    &app_name,
+                    &app_url,
+                );
+                let _ = crate::core::email::send_email_with_config(&config, &notify_email, &subject, &html).await;
+            }
+        });
+    }
 
     Ok(Json(json!({
         "message": "Password updated successfully.",
@@ -872,6 +1016,7 @@ async fn handle_auth_refresh(
             Json(json!({ "code": 401, "message": "Authentication required." })),
         )
     })?;
+    check_session(&state, &headers).await?;
 
     let col_lookup = collection_override
         .or_else(|| claims.collection_id.clone())
@@ -927,7 +1072,15 @@ async fn handle_auth_refresh(
         .unwrap_or(&claims.role)
         .to_string();
 
-    let token = create_jwt(&record.id, &email, &role, Some(col.id.clone()), 14).map_err(|e| {
+    let token = create_jwt_with_key(
+        &record.id,
+        &email,
+        &role,
+        Some(col.id.clone()),
+        14,
+        claims.tk.as_deref(),
+    )
+    .map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(json!({ "code": 500, "message": e.to_string() })),
@@ -963,6 +1116,7 @@ async fn handle_logout(
     headers: HeaderMap,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     if let Some(claims) = authenticate_headers(&headers)? {
+        crate::core::auth::invalidate_session_cache(&claims.sub);
         let col_lookup = collection_override
             .or_else(|| claims.collection_id.clone())
             .unwrap_or_else(|| "users".to_string());
@@ -1021,6 +1175,7 @@ async fn handle_update_profile(
             Json(json!({ "code": 401, "message": "Authentication required." })),
         )
     })?;
+    check_session(&state, &headers).await?;
 
     let col_lookup = collection_override
         .or_else(|| claims.collection_id.clone())
@@ -1028,8 +1183,7 @@ async fn handle_update_profile(
     let col = resolve_auth_collection(&state, &col_lookup).await?;
 
     // Prevent non-admin users from escalating their own role, status, or verification state
-    let is_admin = claims.role == "admin" || claims.role == "superadmin";
-    if !is_admin {
+    if !claims.is_admin() {
         payload.remove("role");
         payload.remove("status");
         payload.remove("verified");
@@ -1038,6 +1192,8 @@ async fn handle_update_profile(
     payload.remove("tokenKey");
     payload.remove("passwordHash");
     payload.remove("password");
+    payload.remove("remember_token");
+    payload.remove("last_login_at");
 
     let record = crate::core::record::update_record(&state.db, &col, &claims.sub, payload)
         .await

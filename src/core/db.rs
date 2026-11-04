@@ -1117,7 +1117,31 @@ pub fn default_system_settings() -> Value {
             "staff",
             "creator",
             "user"
-        ]
+        ],
+        "smtp": {
+            "enabled": Env::get_or("SMTP_ENABLED", "false").eq_ignore_ascii_case("true") || Env::get_or("SMTP_ENABLED", "false") == "1",
+            "host": Env::get_or("SMTP_HOST", ""),
+            "port": Env::get_or("SMTP_PORT", "587").parse::<u16>().unwrap_or(587),
+            "username": Env::get_or("SMTP_USERNAME", ""),
+            "password": Env::get_or("SMTP_PASSWORD", ""),
+            "encryption": Env::get_or("SMTP_ENCRYPTION", "opportunistic"),
+            "auth_method": Env::get_or("SMTP_AUTH_METHOD", "LOGIN"),
+            "ehlo_domain": Env::get_or("SMTP_EHLO_DOMAIN", ""),
+            "from_name": Env::get_or("SMTP_FROM_NAME", &Env::get_or("APP_NAME", "PadiBase Studio")),
+            "from_address": Env::get_or("SMTP_FROM_ADDRESS", "noreply@example.com"),
+            "events": {
+                "welcome": true,
+                "forgot_password": true,
+                "password_changed": true,
+                "admin_created": true
+            },
+            "templates": {
+                "welcome": crate::core::email::default_welcome_template(),
+                "forgot_password": crate::core::email::default_forgot_password_template(),
+                "password_changed": crate::core::email::default_password_changed_template(),
+                "admin_created": crate::core::email::default_admin_created_template()
+            }
+        }
     })
 }
 
@@ -1174,10 +1198,28 @@ pub async fn save_system_settings(pool: &DbPool, new_settings: Value) -> Result<
     let mut current = get_system_settings(pool).await.unwrap_or_else(|_| default_system_settings());
     if let (Some(curr_obj), Some(new_obj)) = (current.as_object_mut(), new_settings.as_object()) {
         for (k, v) in new_obj {
-            if k == "meta" {
-                if let (Some(curr_meta), Some(new_meta)) = (curr_obj.get_mut("meta").and_then(|m| m.as_object_mut()), v.as_object()) {
-                    for (mk, mv) in new_meta {
-                        curr_meta.insert(mk.clone(), mv.clone());
+            if k == "meta" || k == "smtp" {
+                if let (Some(curr_sub), Some(new_sub)) = (curr_obj.get_mut(k).and_then(|m| m.as_object_mut()), v.as_object()) {
+                    for (sk, sv) in new_sub {
+                        if sk == "events" {
+                            if let (Some(curr_events), Some(new_events)) = (curr_sub.get_mut("events").and_then(|e| e.as_object_mut()), sv.as_object()) {
+                                for (ek, ev) in new_events {
+                                    curr_events.insert(ek.clone(), ev.clone());
+                                }
+                            } else {
+                                curr_sub.insert(sk.clone(), sv.clone());
+                            }
+                        } else if sk == "templates" {
+                            if let (Some(curr_tmpls), Some(new_tmpls)) = (curr_sub.get_mut("templates").and_then(|t| t.as_object_mut()), sv.as_object()) {
+                                for (tk, tv) in new_tmpls {
+                                    curr_tmpls.insert(tk.clone(), tv.clone());
+                                }
+                            } else {
+                                curr_sub.insert(sk.clone(), sv.clone());
+                            }
+                        } else {
+                            curr_sub.insert(sk.clone(), sv.clone());
+                        }
                     }
                 } else {
                     curr_obj.insert(k.clone(), v.clone());

@@ -3,6 +3,7 @@ pub mod api_collection;
 pub mod auth_records;
 pub mod backups;
 pub mod collections;
+pub mod cron;
 pub mod custom;
 pub mod files;
 pub mod health;

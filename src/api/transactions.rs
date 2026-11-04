@@ -8,10 +8,42 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use crate::core::app::AppState;
-use crate::core::auth::{authenticate_headers, check_permission, RecordAction};
+use crate::core::auth::{
+    authenticate_headers, check_permission, check_session, require_admin, Claims, RecordAction,
+};
 use crate::core::db::{get_collection_by_name_or_id, Val};
 use crate::core::realtime::RealtimeMessage;
 use crate::core::record::{create_record_tx, delete_record_tx, get_record_tx, update_record_tx};
+use crate::core::schema::{Collection, CollectionType};
+
+const MAX_TX_OPERATIONS: usize = 500;
+
+fn strip_tx_privileged_fields(
+    col: &Collection,
+    auth: Option<&Claims>,
+    data: &mut Map<String, Value>,
+) {
+    if auth.map(|c| c.is_admin()).unwrap_or(false) {
+        return;
+    }
+    if col.collection_type == CollectionType::Auth {
+        for k in [
+            "role",
+            "status",
+            "verified",
+            "tokenKey",
+            "passwordHash",
+            "remember_token",
+            "last_login_at",
+        ] {
+            data.remove(k);
+        }
+    }
+    if col.blameable || col.collection_type == CollectionType::Auth {
+        data.remove("created_by");
+        data.remove("updated_by");
+    }
+}
 
 #[derive(Deserialize)]
 pub struct TransactionOperation {
@@ -60,11 +92,18 @@ pub async fn execute_transaction(
     Json(payload): Json<TransactionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
     let auth = authenticate_headers(&headers)?;
+    check_session(&state, &headers).await?;
 
     if payload.operations.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({ "code": 400, "message": "Transaction operations list cannot be empty." })),
+        ));
+    }
+    if payload.operations.len() > MAX_TX_OPERATIONS {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({ "code": 413, "message": format!("Too many operations in transaction (max {}).", MAX_TX_OPERATIONS) })),
         ));
     }
 
@@ -116,7 +155,8 @@ pub async fn execute_transaction(
 
                 check_permission(RecordAction::Create, &col, auth.as_ref(), None)?;
 
-                let data = op.data.clone().unwrap_or_default();
+                let mut data = op.data.clone().unwrap_or_default();
+                strip_tx_privileged_fields(&col, auth.as_ref(), &mut data);
                 let record = match create_record_tx(&mut tx, &state.db, &col, data).await {
                     Ok(r) => r,
                     Err(e) => {
@@ -202,7 +242,8 @@ pub async fn execute_transaction(
                     Some(&existing.data),
                 )?;
 
-                let data = op.data.clone().unwrap_or_default();
+                let mut data = op.data.clone().unwrap_or_default();
+                strip_tx_privileged_fields(&col, auth.as_ref(), &mut data);
                 let record = match update_record_tx(&mut tx, &state.db, &col, rec_id, data).await {
                     Ok(r) => r,
                     Err(e) => {
@@ -330,10 +371,7 @@ pub async fn execute_transaction(
 
             "sql" | "query" | "execute" => {
                 // Only admin / superadmin can execute raw SQL inside a transaction
-                let is_admin = auth
-                    .as_ref()
-                    .map(|c| c.role == "admin" || c.role == "superadmin")
-                    .unwrap_or(false);
+                let is_admin = auth.as_ref().map(|c| c.is_admin()).unwrap_or(false);
                 if !is_admin {
                     let _ = tx.rollback().await;
                     return Err((
@@ -449,21 +487,7 @@ pub async fn execute_custom_sql(
     headers: HeaderMap,
     Json(payload): Json<RawSqlRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
-    let auth = authenticate_headers(&headers)?;
-    let is_admin = auth
-        .as_ref()
-        .map(|c| c.role == "admin" || c.role == "superadmin")
-        .unwrap_or(false);
-
-    if !is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({
-                "code": 403,
-                "message": "Only administrators can execute raw SQL queries."
-            })),
-        ));
-    }
+    require_admin(&state, &headers).await?;
 
     let raw_sql = payload.sql.trim();
     if raw_sql.is_empty() {

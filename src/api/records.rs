@@ -9,14 +9,66 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use crate::core::app::AppState;
-use crate::core::auth::{authenticate_headers, check_permission, RecordAction};
+use crate::core::auth::{authenticate_headers, check_permission, Claims, RecordAction};
 use crate::core::db::get_collection_by_name_or_id;
 use crate::core::realtime::RealtimeMessage;
 use crate::core::record::{
-    count_records, create_record, delete_record, delete_records_batch, get_all_records,
-    get_all_records_with_limit, get_record, get_record_with, list_records_with,
-    project_record_fields, update_record,
+    count_records, create_record, delete_record, delete_records_batch, get_all_records_with_limit,
+    get_record, get_record_with, list_records_with, project_record_fields, update_record,
 };
+use crate::core::schema::{Collection, CollectionType, FieldType};
+
+/// Maximum rows accepted by a single import / batch-create / batch-delete request.
+const MAX_BATCH_ITEMS: usize = 5000;
+/// Maximum rows returned by `export`.
+const MAX_EXPORT_ROWS: usize = 100_000;
+
+/// Columns of auth collections that only a superuser may write through the generic REST API.
+/// Without this, any user allowed to PATCH their own record could set `role = "admin"`,
+/// flip `status`/`verified`, or overwrite their own password hash / session key.
+const PRIVILEGED_AUTH_FIELDS: &[&str] = &[
+    "role",
+    "status",
+    "verified",
+    "tokenKey",
+    "passwordHash",
+    "remember_token",
+    "last_login_at",
+];
+
+/// Uploaded files may only target schema fields of type ile; anything else is discarded so a crafted
+/// multipart field name can never write a filename into an arbitrary column.
+fn retain_file_fields(
+    col: &Collection,
+    payload: &mut Map<String, Value>,
+    files: &mut Vec<(String, String, Vec<u8>)>,
+) {
+    files.retain(|(field, _, _)| {
+        let ok = col
+            .schema
+            .iter()
+            .any(|s| s.name == *field && s.field_type == FieldType::File);
+        if !ok {
+            payload.remove(field);
+        }
+        ok
+    });
+}
+
+/// Strip mass-assignment vectors from a client supplied payload.
+fn strip_privileged_fields(col: &Collection, auth: Option<&Claims>, payload: &mut Map<String, Value>) {
+    if auth.map(|c| c.is_admin()).unwrap_or(false) {
+        return;
+    }
+    if col.collection_type == CollectionType::Auth {
+        payload.retain(|k, _| !PRIVILEGED_AUTH_FIELDS.iter().any(|p| k.eq_ignore_ascii_case(p)));
+    }
+    if col.blameable || col.collection_type == CollectionType::Auth {
+        // Blame columns are set by the server from the authenticated identity.
+        payload.remove("created_by");
+        payload.remove("updated_by");
+    }
+}
 
 #[derive(Deserialize, Default)]
 pub struct SingleParams {
@@ -692,7 +744,7 @@ async fn parse_request_payload(
 
         Ok((payload, files))
     } else {
-        let bytes = axum::body::to_bytes(req.into_body(), 64 * 1024 * 1024)
+        let bytes = axum::body::to_bytes(req.into_body(), crate::api::files::max_file_bytes() + 1024 * 1024)
             .await
             .map_err(|e| {
                 (
@@ -739,7 +791,9 @@ pub async fn create(
     let auth = authenticate_headers(req.headers())?;
     check_permission(RecordAction::Create, &col, auth.as_ref(), None)?;
 
-    let (mut payload, pending_files) = parse_request_payload(req, &state).await?;
+    let (mut payload, mut pending_files) = parse_request_payload(req, &state).await?;
+    retain_file_fields(&col, &mut payload, &mut pending_files);
+    strip_privileged_fields(&col, auth.as_ref(), &mut payload);
     validate_role_if_present(&state.db, &payload).await?;
 
     let auth_user_id = auth.as_ref().map(|c| c.sub.clone());
@@ -843,7 +897,9 @@ pub async fn update(
         existing_map.as_ref(),
     )?;
 
-    let (mut payload, pending_files) = parse_request_payload(req, &state).await?;
+    let (mut payload, mut pending_files) = parse_request_payload(req, &state).await?;
+    retain_file_fields(&col, &mut payload, &mut pending_files);
+    strip_privileged_fields(&col, auth.as_ref(), &mut payload);
     validate_role_if_present(&state.db, &payload).await?;
 
     // Save any uploaded files directly to storage for this record
@@ -998,6 +1054,7 @@ pub async fn delete(
 pub async fn export_records(
     State(state): State<AppState>,
     Path(collection_name): Path<String>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Response, (StatusCode, Json<Value>)> {
     let col = get_collection_by_name_or_id(&state.db, &collection_name)
         .await
@@ -1014,8 +1071,20 @@ pub async fn export_records(
             )
         })?;
 
-    let items = get_all_records(&state.db, &col, Some("+created"), None)
-        .await
+    // Exporting dumps the whole table, so it needs at least the collection's list permission.
+    let auth = authenticate_headers(&headers)?;
+    check_permission(RecordAction::List, &col, auth.as_ref(), None)?;
+
+    let items = get_all_records_with_limit(
+        &state.db,
+        &col,
+        Some("+created"),
+        None,
+        None,
+        Some(MAX_EXPORT_ROWS),
+        None,
+    )
+    .await
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -1074,10 +1143,19 @@ pub async fn import_records(
     let auth = authenticate_headers(&headers)?;
     check_permission(RecordAction::Create, &col, auth.as_ref(), None)?;
 
+    if items.len() > MAX_BATCH_ITEMS {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({ "code": 413, "message": format!("Too many rows (max {} per request).", MAX_BATCH_ITEMS) })),
+        ));
+    }
+
     let mut imported_count = 0;
     let mut errors = Vec::new();
 
-    for (index, payload) in items.into_iter().enumerate() {
+    for (index, mut payload) in items.into_iter().enumerate() {
+        strip_privileged_fields(&col, auth.as_ref(), &mut payload);
+        validate_role_if_present(&state.db, &payload).await?;
         match create_record(&state.db, &col, payload).await {
             Ok(rec) => {
                 imported_count += 1;
@@ -1151,6 +1229,12 @@ pub async fn delete_batch(
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({ "code": 400, "message": "No record IDs provided for batch deletion." })),
+        ));
+    }
+    if ids.len() > MAX_BATCH_ITEMS {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({ "code": 413, "message": format!("Too many ids (max {} per request).", MAX_BATCH_ITEMS) })),
         ));
     }
 
@@ -1248,11 +1332,18 @@ pub async fn create_batch(
             Json(json!({ "code": 400, "message": "No records provided for batch creation." })),
         ));
     }
+    if items.len() > MAX_BATCH_ITEMS {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(json!({ "code": 413, "message": format!("Too many rows (max {} per request).", MAX_BATCH_ITEMS) })),
+        ));
+    }
 
     let auth_user_id = auth.as_ref().map(|c| c.sub.clone());
     let mut created_records = Vec::with_capacity(items.len());
 
     for mut item in items {
+        strip_privileged_fields(&col, auth.as_ref(), &mut item);
         validate_role_if_present(&state.db, &item).await?;
         if col.blameable || col.collection_type == crate::core::schema::CollectionType::Auth {
             if let Some(ref uid) = auth_user_id {

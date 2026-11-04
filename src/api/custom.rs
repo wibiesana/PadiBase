@@ -17,13 +17,15 @@ use std::collections::HashMap;
 
 use crate::core::app::AppState;
 use crate::core::auth::{
-    authenticate_headers, check_role_rule, has_role_constraint, Claims,
+    authenticate_headers, check_permission, check_role_rule, check_session, has_role_constraint,
+    require_admin, Claims, RecordAction,
 };
 use crate::core::db::{
-    delete_custom_endpoint, get_all_custom_endpoints, get_custom_endpoint_by_path_or_id,
-    save_custom_endpoint, Val,
+    delete_custom_endpoint, get_all_custom_endpoints, get_collection_by_name_or_id,
+    get_custom_endpoint_by_path_or_id, save_custom_endpoint, Val,
 };
-use crate::core::schema::CustomEndpoint;
+use crate::core::record::get_record_tx;
+use crate::core::schema::{CollectionType, CustomEndpoint};
 
 #[derive(Deserialize)]
 pub struct TransferActionRequest {
@@ -34,28 +36,12 @@ pub struct TransferActionRequest {
     pub amount: f64,
 }
 
-fn require_admin(headers: &HeaderMap) -> Result<Claims, (StatusCode, Json<Value>)> {
-    let claims = authenticate_headers(headers)?.ok_or_else(|| {
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(json!({ "code": 401, "message": "Administrator authentication required." })),
-        )
-    })?;
-    if claims.role != "admin" && claims.role != "superadmin" {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(json!({ "code": 403, "message": "Only administrators can manage custom endpoints." })),
-        ));
-    }
-    Ok(claims)
-}
-
 fn check_endpoint_permission(
     rule: &str,
     auth: Option<&Claims>,
 ) -> Result<(), (StatusCode, Json<Value>)> {
     if let Some(c) = auth {
-        if c.role == "admin" || c.role == "superadmin" {
+        if c.is_admin() {
             return Ok(());
         }
     }
@@ -112,9 +98,7 @@ pub async fn list_endpoints(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
-    if state.has_admins().await.unwrap_or(false) {
-        let _ = require_admin(&headers)?;
-    }
+    require_admin(&state, &headers).await?;
 
     let items = get_all_custom_endpoints(&state.db).await.map_err(|e| {
         (
@@ -132,9 +116,7 @@ pub async fn get_endpoint(
     headers: HeaderMap,
     Path(id_or_path): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
-    if state.has_admins().await.unwrap_or(false) {
-        let _ = require_admin(&headers)?;
-    }
+    require_admin(&state, &headers).await?;
 
     let ep = get_custom_endpoint_by_path_or_id(&state.db, &id_or_path)
         .await
@@ -160,9 +142,7 @@ pub async fn create_endpoint(
     headers: HeaderMap,
     Json(payload): Json<CustomEndpoint>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
-    if state.has_admins().await.unwrap_or(false) {
-        let _ = require_admin(&headers)?;
-    }
+    require_admin(&state, &headers).await?;
 
     let saved = save_custom_endpoint(&state.db, &payload).await.map_err(|e| {
         (
@@ -181,9 +161,7 @@ pub async fn update_endpoint(
     Path(id_or_path): Path<String>,
     Json(mut payload): Json<CustomEndpoint>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
-    if state.has_admins().await.unwrap_or(false) {
-        let _ = require_admin(&headers)?;
-    }
+    require_admin(&state, &headers).await?;
 
     let existing = get_custom_endpoint_by_path_or_id(&state.db, &id_or_path)
         .await
@@ -219,9 +197,7 @@ pub async fn delete_endpoint(
     headers: HeaderMap,
     Path(id_or_path): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
-    if state.has_admins().await.unwrap_or(false) {
-        let _ = require_admin(&headers)?;
-    }
+    require_admin(&state, &headers).await?;
 
     let deleted = delete_custom_endpoint(&state.db, &id_or_path)
         .await
@@ -662,6 +638,7 @@ async fn execute_custom_endpoint_inner(
 
     // Authenticate & check endpoint permission rule
     let auth = authenticate_headers(&headers)?;
+    check_session(&state, &headers).await?;
     check_endpoint_permission(&ep.auth_rule, auth.as_ref())?;
 
     // Merge query parameters + JSON body parameters
@@ -884,17 +861,24 @@ async fn handle_atomic_transfer(
     headers: HeaderMap,
     payload: TransferActionRequest,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
-    let _claims = authenticate_headers(&headers)?.ok_or_else(|| {
+    let claims = authenticate_headers(&headers)?.ok_or_else(|| {
         (
             StatusCode::UNAUTHORIZED,
             Json(json!({ "code": 401, "message": "Authentication required." })),
         )
     })?;
+    check_session(&state, &headers).await?;
 
-    if payload.amount <= 0.0 {
+    if !payload.amount.is_finite() || payload.amount <= 0.0 {
         return Err((
             StatusCode::BAD_REQUEST,
-            Json(json!({ "code": 400, "message": "Transfer amount must be greater than zero." })),
+            Json(json!({ "code": 400, "message": "Transfer amount must be a finite number greater than zero." })),
+        ));
+    }
+    if payload.from_id == payload.to_id {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": "Source and destination records must be different." })),
         ));
     }
 
@@ -908,6 +892,21 @@ async fn handle_atomic_transfer(
         ));
     }
 
+    let col = get_collection_by_name_or_id(&state.db, &payload.collection)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "Collection not found." })),
+            )
+        })?;
+
     let mut tx = state.db.begin().await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -915,9 +914,55 @@ async fn handle_atomic_transfer(
         )
     })?;
 
+    let source_rec = get_record_tx(&mut tx, &state.db, &col, &payload.from_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "code": 400, "message": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "Source record not found." })),
+            )
+        })?;
+
+    // Verify the caller owns / is allowed to debit the source record.
+    if !claims.is_admin() {
+        check_permission(
+            RecordAction::Update,
+            &col,
+            Some(&claims),
+            Some(&source_rec.data),
+        )?;
+        let owns_source = if col.collection_type == CollectionType::Auth {
+            source_rec.id == claims.sub
+        } else if let Some(owner_uid) = source_rec
+            .data
+            .get("user_id")
+            .or_else(|| source_rec.data.get("created_by"))
+            .or_else(|| source_rec.data.get("owner_id"))
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            owner_uid == claims.sub
+        } else {
+            true
+        };
+        if !owns_source {
+            let _ = tx.rollback().await;
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(json!({ "code": 403, "message": "You can only transfer from your own account/record." })),
+            ));
+        }
+    }
+
     let select_sql = format!(
         "SELECT `{}` FROM `{}` WHERE `id` = ? LIMIT 1;",
-        payload.field, payload.collection
+        payload.field, col.name
     );
     let source_row = tx
         .fetch_optional(&state.db, &select_sql, &[Val::from(&payload.from_id)])

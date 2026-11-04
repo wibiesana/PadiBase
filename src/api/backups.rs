@@ -1,13 +1,14 @@
 use axum::{
     body::Body,
     extract::{Multipart, Path, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 use chrono::Utc;
 use serde::Serialize;
 use serde_json::json;
+use std::io::Read;
 use std::path::{Path as StdPath, PathBuf};
 use tokio::fs::File;
 use tokio_util::io::ReaderStream;
@@ -15,7 +16,38 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::core::app::AppState;
+use crate::core::auth::require_admin;
 use crate::core::db::list_collections;
+use crate::core::env::Env;
+
+type ApiError = (StatusCode, Json<serde_json::Value>);
+
+/// Maximum number of bytes a single restore may expand to (zip-bomb guard). Default 4 GiB.
+fn max_restore_bytes() -> u64 {
+    Env::get_int("BACKUP_MAX_RESTORE_MB", 4096).max(1) as u64 * 1024 * 1024
+}
+
+/// Maximum accepted size for an uploaded backup archive. Default 512 MiB.
+pub fn max_upload_bytes() -> usize {
+    Env::get_int("BACKUP_MAX_UPLOAD_MB", 512).max(1) as usize * 1024 * 1024
+}
+
+/// Only plain file names with a known extension are accepted for backup operations.
+fn validate_backup_name(name: &str) -> Result<(), ApiError> {
+    let ok_chars = !name.is_empty()
+        && name.len() <= 200
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_');
+    let ok_ext = name.ends_with(".zip") || name.ends_with(".db") || name.ends_with(".json");
+    if !ok_chars || !ok_ext || name.contains("..") || name.starts_with('.') {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": "Invalid filename." })),
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Serialize)]
 pub struct BackupInfo {
@@ -96,7 +128,7 @@ fn inspect_backup_file(path: &StdPath) -> (bool, bool, usize) {
     // Check manifest if available
     if let Ok(mut manifest_file) = archive.by_name("manifest.json") {
         let mut content = String::new();
-        if std::io::Read::read_to_string(&mut manifest_file, &mut content).is_ok() {
+        if (&mut manifest_file).take(1_000_000).read_to_string(&mut content).is_ok() {
             if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(&content) {
                 let files_count = manifest.get("storage_files").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 return (true, files_count > 0, files_count);
@@ -120,7 +152,9 @@ fn inspect_backup_file(path: &StdPath) -> (bool, bool, usize) {
 /// List all available backups with metadata
 pub async fn list_backups(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    require_admin(&state, &headers).await?;
     let backup_dir = get_backups_dir(&state.data_dir);
     if !backup_dir.exists() {
         let _ = tokio::fs::create_dir_all(&backup_dir).await;
@@ -170,7 +204,9 @@ pub async fn list_backups(
 /// Create a unified point-in-time backup bundle (.zip containing database snapshot + physical storage uploads + manifest)
 pub async fn create_backup(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    require_admin(&state, &headers).await?;
     let backup_dir = get_backups_dir(&state.data_dir);
     if !backup_dir.exists() {
         tokio::fs::create_dir_all(&backup_dir).await.map_err(|e| {
@@ -200,7 +236,10 @@ pub async fn create_backup(
         // Try SQLite VACUUM INTO for a safe, online, atomic, compacted snapshot
         let vacuum_sql = format!(
             "VACUUM INTO '{}';",
-            temp_db_path.to_string_lossy().replace('\\', "/")
+            temp_db_path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .replace('\'', "''")
         );
         let res = state.db.execute(&vacuum_sql, &[]).await;
 
@@ -343,8 +382,10 @@ pub async fn create_backup(
 /// Upload an existing backup archive (.zip, .db, or .json) from local machine
 pub async fn upload_backup(
     State(state): State<AppState>,
+    headers: HeaderMap,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    require_admin(&state, &headers).await?;
     let backup_dir = get_backups_dir(&state.data_dir);
     if !backup_dir.exists() {
         let _ = tokio::fs::create_dir_all(&backup_dir).await;
@@ -392,6 +433,26 @@ pub async fn upload_backup(
             )
         })?;
 
+        if data.len() > max_upload_bytes() {
+            return Err((
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(json!({ "code": 413, "message": "Backup file is too large." })),
+            ));
+        }
+        // Validate magic bytes so arbitrary files cannot be planted in the backup directory.
+        let magic_ok = if safe_name.ends_with(".zip") {
+            data.starts_with(b"PK\x03\x04")
+        } else if safe_name.ends_with(".db") {
+            data.starts_with(b"SQLite format 3\0")
+        } else {
+            serde_json::from_slice::<serde_json::Value>(&data).is_ok()
+        };
+        if !magic_ok {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "code": 400, "message": "File content does not match its extension." })),
+            ));
+        }
         saved_size = data.len() as u64;
         tokio::fs::write(&target_path, &data).await.map_err(|e| {
             (
@@ -430,14 +491,11 @@ pub async fn upload_backup(
 /// Download a backup file with appropriate MIME headers
 pub async fn download_backup(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(filename): Path<String>,
 ) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "code": 400, "message": "Invalid filename." })),
-        ));
-    }
+    require_admin(&state, &headers).await?;
+    validate_backup_name(&filename)?;
 
     let backup_path = get_backups_dir(&state.data_dir).join(&filename);
     if !backup_path.exists() {
@@ -485,14 +543,11 @@ pub async fn download_backup(
 /// Delete a backup file
 pub async fn delete_backup(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(filename): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "code": 400, "message": "Invalid filename." })),
-        ));
-    }
+    require_admin(&state, &headers).await?;
+    validate_backup_name(&filename)?;
 
     let backup_path = get_backups_dir(&state.data_dir).join(&filename);
     if !backup_path.exists() {
@@ -515,14 +570,11 @@ pub async fn delete_backup(
 /// Restore database and physical storage files from a unified .zip (or legacy .db / .json) backup archive
 pub async fn restore_backup(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(filename): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    if filename.contains("..") || filename.contains('/') || filename.contains('\\') {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "code": 400, "message": "Invalid filename." })),
-        ));
-    }
+    require_admin(&state, &headers).await?;
+    validate_backup_name(&filename)?;
 
     let backup_path = get_backups_dir(&state.data_dir).join(&filename);
     if !backup_path.exists() {
@@ -547,22 +599,33 @@ pub async fn restore_backup(
 
             let mut restored_db = false;
             let mut files_restored = 0;
+            let limit = max_restore_bytes();
+            let mut total_written: u64 = 0;
+
+            if archive.len() > 200_000 {
+                return Err("Backup archive contains too many entries.".to_string());
+            }
 
             for i in 0..archive.len() {
                 let mut file = archive
                     .by_index(i)
                     .map_err(|e| format!("Error reading zip entry #{}: {}", i, e))?;
                 let entry_name = file.name().to_string();
+                let remaining = limit.saturating_sub(total_written);
 
                 // A. Database file extraction
                 if entry_name == "data.db" && is_sqlite {
                     let temp_db_path = d_dir.join("data.db.restoring");
                     let mut out = std::fs::File::create(&temp_db_path)
                         .map_err(|e| format!("Failed to create temporary restore DB: {}", e))?;
-                    std::io::copy(&mut file, &mut out)
+                    let copied = std::io::copy(&mut (&mut file).take(remaining + 1), &mut out)
                         .map_err(|e| format!("Failed to extract data.db: {}", e))?;
                     drop(out);
-
+                    total_written += copied;
+                    if total_written > limit {
+                        let _ = std::fs::remove_file(&temp_db_path);
+                        return Err("Backup exceeds the maximum allowed restore size.".to_string());
+                    }
                     // Overwrite data.db
                     let target_db = d_dir.join("data.db");
                     std::fs::rename(&temp_db_path, &target_db)
@@ -588,7 +651,18 @@ pub async fn restore_backup(
                                     let _ = std::fs::create_dir_all(parent);
                                 }
                                 if let Ok(mut out) = std::fs::File::create(&dest_path) {
-                                    if std::io::copy(&mut file, &mut out).is_ok() {
+                                    let remaining = limit.saturating_sub(total_written);
+                                    if let Ok(copied) =
+                                        std::io::copy(&mut (&mut file).take(remaining + 1), &mut out)
+                                    {
+                                        total_written += copied;
+                                        if total_written > limit {
+                                            let _ = std::fs::remove_file(&dest_path);
+                                            return Err(
+                                                "Backup exceeds the maximum allowed restore size."
+                                                    .to_string(),
+                                            );
+                                        }
                                         files_restored += 1;
                                     }
                                 }
@@ -632,7 +706,8 @@ pub async fn restore_backup(
                 filename, restored_db, files_restored
             ),
             "database_restored": restored_db,
-            "storage_files_restored": files_restored
+            "storage_files_restored": files_restored,
+            "restart_required": restored_db
         })));
     }
 

@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
     extract::{Multipart, Path, State},
-    http::{header, HeaderValue, StatusCode},
+    http::{header, HeaderName, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
@@ -12,10 +12,46 @@ use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 
 use crate::core::app::AppState;
-use crate::core::auth::{authenticate_headers, check_permission, RecordAction};
+use crate::core::auth::{authenticate_with_query_token, check_permission, RecordAction};
 use crate::core::db::get_collection_by_name_or_id;
-use crate::core::record::{get_record, update_record};
+use crate::core::env::Env;
 use crate::core::realtime::RealtimeMessage;
+use crate::core::record::{get_record, update_record};
+use crate::core::schema::{Collection, FieldType};
+
+type ApiError = (StatusCode, Json<serde_json::Value>);
+
+/// Maximum size of a single uploaded file (`MAX_UPLOAD_MB`, default 50 MiB).
+pub fn max_file_bytes() -> usize {
+    Env::get_int("MAX_UPLOAD_MB", 50).max(1) as usize * 1024 * 1024
+}
+
+fn err(status: StatusCode, msg: impl Into<String>) -> ApiError {
+    (
+        status,
+        Json(json!({ "code": status.as_u16(), "message": msg.into() })),
+    )
+}
+
+fn internal(context: &str, e: impl std::fmt::Display) -> ApiError {
+    tracing::error!("{}: {}", context, e);
+    err(StatusCode::INTERNAL_SERVER_ERROR, format!("{}.", context))
+}
+
+/// A path segment may only contain `[A-Za-z0-9._-]`, never starts with `.`, and has no `..`.
+/// This rejects separators, drive letters (`C:`), NUL bytes and every traversal trick.
+fn is_safe_segment(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 255
+        && !s.starts_with('.')
+        && !s.contains("..")
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+}
+
+fn invalid_path() -> ApiError {
+    err(StatusCode::BAD_REQUEST, "Invalid file path.")
+}
 
 /// Generate a safe, unique filename preventing directory traversal
 pub fn sanitize_filename(original: &str) -> String {
@@ -24,7 +60,7 @@ pub fn sanitize_filename(original: &str) -> String {
         .and_then(|f| f.to_str())
         .unwrap_or("file");
 
-    let filtered: String = clean_name
+    let mut filtered: String = clean_name
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
@@ -35,12 +71,43 @@ pub fn sanitize_filename(original: &str) -> String {
         })
         .collect();
 
+    // Keep names short (the tail keeps the extension) and never hidden / dot-only
+    if filtered.len() > 100 {
+        filtered = filtered[filtered.len() - 100..].to_string();
+    }
+    let filtered = filtered.trim_start_matches('.').to_string();
+
     let prefix = &Uuid::new_v4().simple().to_string()[..8];
-    if filtered.is_empty() || filtered == "." || filtered == ".." {
+    if filtered.is_empty() {
         format!("{}_attachment", prefix)
     } else {
         format!("{}_{}", prefix, filtered)
     }
+}
+
+/// Content types a browser would execute / render with scripting enabled.
+fn is_active_content(mime: &str) -> bool {
+    let m = mime.to_ascii_lowercase();
+    m.contains("html")
+        || m.contains("svg")
+        || m.contains("xml")
+        || m.contains("javascript")
+        || m.contains("ecmascript")
+}
+
+fn is_public_rule(rule: Option<&str>) -> bool {
+    match rule.map(str::trim) {
+        None | Some("") => true,
+        Some(r) => r.eq_ignore_ascii_case("public") || r == "*" || r.eq_ignore_ascii_case("anyone"),
+    }
+}
+
+/// Only fields declared as `file` in the collection schema may receive uploaded file names.
+/// Prevents overwriting arbitrary columns (`role`, `status`, ...) through a crafted field name.
+fn is_file_field(col: &Collection, name: &str) -> bool {
+    col.schema
+        .iter()
+        .any(|f| f.name == name && f.field_type == FieldType::File)
 }
 
 /// Download / serve static attachment file (with inline preview, download flag & browser caching)
@@ -48,68 +115,91 @@ pub async fn get_file(
     State(state): State<AppState>,
     Path((collection, record_id, filename)): Path<(String, String, String)>,
     axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>,
-) -> Result<Response, (StatusCode, Json<serde_json::Value>)> {
-    // Sanitize parameters to avoid path traversal
-    if filename.contains("..") || collection.contains("..") || record_id.contains("..") {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "code": 400, "message": "Invalid file path." })),
-        ));
+    headers: axum::http::HeaderMap,
+) -> Result<Response, ApiError> {
+    if !is_safe_segment(&collection) || !is_safe_segment(&record_id) || !is_safe_segment(&filename)
+    {
+        return Err(invalid_path());
     }
+
+    let col = get_collection_by_name_or_id(&state.db, &collection)
+        .await
+        .map_err(|e| internal("Failed to load collection", e))?
+        .ok_or_else(|| err(StatusCode::NOT_FOUND, "File not found."))?;
+
+    let auth = authenticate_with_query_token(&state, &headers, query.get("token").map(String::as_str)).await?;
+    check_permission(RecordAction::View, &col, auth.as_ref(), None)?;
 
     let file_path = state
         .storage_dir
-        .join(&collection)
+        .join(&col.name)
         .join(&record_id)
         .join(&filename);
 
-    if !file_path.exists() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(json!({ "code": 404, "message": "File not found." })),
-        ));
+    // Resolve symlinks and make sure we never leave the storage directory.
+    let canonical = tokio::fs::canonicalize(&file_path)
+        .await
+        .map_err(|_| err(StatusCode::NOT_FOUND, "File not found."))?;
+    let storage_root = tokio::fs::canonicalize(&state.storage_dir)
+        .await
+        .map_err(|e| internal("Storage directory unavailable", e))?;
+    if !canonical.starts_with(&storage_root) || !canonical.is_file() {
+        return Err(err(StatusCode::NOT_FOUND, "File not found."));
     }
 
-    let file = File::open(&file_path).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "code": 500, "message": e.to_string() })),
-        )
-    })?;
+    let file = File::open(&canonical)
+        .await
+        .map_err(|e| internal("Failed to open file", e))?;
 
-    let mime = from_path(&file_path).first_or_octet_stream();
+    let guessed = from_path(&file_path).first_or_octet_stream();
+    let active = is_active_content(guessed.as_ref());
+    let content_type = if active {
+        "application/octet-stream".to_string()
+    } else {
+        guessed.to_string()
+    };
+
     let stream = ReaderStream::new(file);
     let body = Body::from_stream(stream);
 
-    let is_download = query.get("download").map(|v| v == "true" || v == "1").unwrap_or(false);
-    let disposition = if is_download {
+    let is_download = query
+        .get("download")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    // Active content is always forced to download so it can never run in our origin.
+    let disposition = if is_download || active {
         format!("attachment; filename=\"{}\"", filename)
     } else {
         format!("inline; filename=\"{}\"", filename)
     };
 
+    let cache_control = if is_public_rule(col.view_rule.as_deref()) {
+        "public, max-age=3600, stale-while-revalidate=86400"
+    } else {
+        "private, no-store"
+    };
+
     let res = Response::builder()
         .header(
             header::CONTENT_TYPE,
-            HeaderValue::from_str(mime.as_ref())
+            HeaderValue::from_str(&content_type)
                 .unwrap_or(HeaderValue::from_static("application/octet-stream")),
         )
         .header(
             header::CONTENT_DISPOSITION,
-            HeaderValue::from_str(&disposition)
-                .unwrap_or(HeaderValue::from_static("inline")),
+            HeaderValue::from_str(&disposition).unwrap_or(HeaderValue::from_static("attachment")),
+        )
+        .header(header::CACHE_CONTROL, HeaderValue::from_static(cache_control))
+        .header(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
         )
         .header(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("public, max-age=604800, stale-while-revalidate=86400"),
+            HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static("default-src 'none'; sandbox"),
         )
         .body(body)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "code": 500, "message": e.to_string() })),
-            )
-        })?;
+        .map_err(|e| internal("Failed to build response", e))?;
 
     Ok(res)
 }
@@ -120,40 +210,36 @@ pub async fn upload_file(
     Path((collection_name, record_id)): Path<(String, String)>,
     headers: axum::http::HeaderMap,
     mut multipart: Multipart,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<impl IntoResponse, ApiError> {
+    if !is_safe_segment(&collection_name) || !is_safe_segment(&record_id) {
+        return Err(invalid_path());
+    }
+
     // 1. Validate collection
     let col = get_collection_by_name_or_id(&state.db, &collection_name)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "code": 500, "message": e.to_string() })),
-            )
-        })?
+        .map_err(|e| internal("Failed to load collection", e))?
         .ok_or_else(|| {
-            (
+            err(
                 StatusCode::NOT_FOUND,
-                Json(json!({ "code": 404, "message": format!("Collection '{}' not found.", collection_name) })),
+                format!("Collection '{}' not found.", collection_name),
             )
         })?;
 
-    // 2. Validate record exists
+    // 2. Authenticate + coarse permission check BEFORE touching the record (no existence oracle)
+    let auth = authenticate_with_query_token(&state, &headers, None).await?;
+    check_permission(RecordAction::Update, &col, auth.as_ref(), None)?;
+
     let record = get_record(&state.db, &col, &record_id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "code": 500, "message": e.to_string() })),
-            )
-        })?
+        .map_err(|e| internal("Failed to load record", e))?
         .ok_or_else(|| {
-            (
+            err(
                 StatusCode::NOT_FOUND,
-                Json(json!({ "code": 404, "message": format!("Record '{}' not found in '{}'.", record_id, col.name) })),
+                format!("Record '{}' not found in '{}'.", record_id, col.name),
             )
         })?;
 
-    let auth = authenticate_headers(&headers)?;
     let existing_map = serde_json::to_value(&record)
         .ok()
         .and_then(|v| v.as_object().cloned());
@@ -161,17 +247,19 @@ pub async fn upload_file(
 
     // 3. Ensure storage directory exists
     let rec_dir = state.storage_dir.join(&col.name).join(&record_id);
-    tokio::fs::create_dir_all(&rec_dir).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "code": 500, "message": format!("Failed to create storage directory: {}", e) })),
-        )
-    })?;
+    tokio::fs::create_dir_all(&rec_dir)
+        .await
+        .map_err(|e| internal("Failed to create storage directory", e))?;
 
+    let max_bytes = max_file_bytes();
     let mut uploaded_files = Vec::new();
     let mut update_payload = serde_json::Map::new();
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| err(StatusCode::BAD_REQUEST, format!("Invalid multipart body: {}", e)))?
+    {
         let field_name = field.name().unwrap_or("file").to_string();
         let file_name = field.file_name().map(String::from);
 
@@ -179,27 +267,34 @@ pub async fn upload_file(
             if orig_name.trim().is_empty() {
                 continue;
             }
+            if !is_file_field(&col, &field_name) {
+                return Err(err(
+                    StatusCode::BAD_REQUEST,
+                    format!("Field '{}' is not a file field of '{}'.", field_name, col.name),
+                ));
+            }
             let safe_name = sanitize_filename(&orig_name);
             let dest = rec_dir.join(&safe_name);
 
-            let data = field.bytes().await.map_err(|e| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({ "code": 400, "message": format!("Failed to read file bytes: {}", e) })),
-                )
-            })?;
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| err(StatusCode::BAD_REQUEST, format!("Failed to read file bytes: {}", e)))?;
 
             let size = data.len();
-            tokio::fs::write(&dest, &data).await.map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "code": 500, "message": format!("Failed to save file: {}", e) })),
-                )
-            })?;
+            if size > max_bytes {
+                return Err(err(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    format!("File exceeds the maximum size of {} MB.", max_bytes / 1024 / 1024),
+                ));
+            }
+            tokio::fs::write(&dest, &data)
+                .await
+                .map_err(|e| internal("Failed to save file", e))?;
 
             // If updating, delete the previous file from storage to avoid orphaned files
             if let Some(old_val) = record.data.get(&field_name).and_then(|v| v.as_str()) {
-                if !old_val.is_empty() && old_val != safe_name {
+                if is_safe_segment(old_val) && old_val != safe_name {
                     let old_dest = rec_dir.join(old_val);
                     if old_dest.exists() {
                         let _ = tokio::fs::remove_file(&old_dest).await;
@@ -224,9 +319,9 @@ pub async fn upload_file(
     }
 
     if uploaded_files.is_empty() {
-        return Err((
+        return Err(err(
             StatusCode::BAD_REQUEST,
-            Json(json!({ "code": 400, "message": "No files provided in multipart request." })),
+            "No files provided in multipart request.",
         ));
     }
 
@@ -235,9 +330,9 @@ pub async fn upload_file(
         let rec = update_record(&state.db, &col, &record_id, update_payload)
             .await
             .map_err(|e| {
-                (
+                err(
                     StatusCode::BAD_REQUEST,
-                    Json(json!({ "code": 400, "message": format!("Failed to link file to record: {}", e) })),
+                    format!("Failed to link file to record: {}", e),
                 )
             })?;
 
@@ -269,45 +364,37 @@ pub async fn delete_file(
     State(state): State<AppState>,
     Path((collection_name, record_id, filename)): Path<(String, String, String)>,
     headers: axum::http::HeaderMap,
-) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
-    if filename.contains("..") || collection_name.contains("..") || record_id.contains("..") {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            Json(json!({ "code": 400, "message": "Invalid file path." })),
-        ));
+) -> Result<impl IntoResponse, ApiError> {
+    if !is_safe_segment(&filename)
+        || !is_safe_segment(&collection_name)
+        || !is_safe_segment(&record_id)
+    {
+        return Err(invalid_path());
     }
 
     let col = get_collection_by_name_or_id(&state.db, &collection_name)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "code": 500, "message": e.to_string() })),
-            )
-        })?
+        .map_err(|e| internal("Failed to load collection", e))?
         .ok_or_else(|| {
-            (
+            err(
                 StatusCode::NOT_FOUND,
-                Json(json!({ "code": 404, "message": format!("Collection '{}' not found.", collection_name) })),
+                format!("Collection '{}' not found.", collection_name),
             )
         })?;
+
+    let auth = authenticate_with_query_token(&state, &headers, None).await?;
+    check_permission(RecordAction::Update, &col, auth.as_ref(), None)?;
 
     let record = get_record(&state.db, &col, &record_id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "code": 500, "message": e.to_string() })),
-            )
-        })?
+        .map_err(|e| internal("Failed to load record", e))?
         .ok_or_else(|| {
-            (
+            err(
                 StatusCode::NOT_FOUND,
-                Json(json!({ "code": 404, "message": format!("Record '{}' not found in '{}'.", record_id, col.name) })),
+                format!("Record '{}' not found in '{}'.", record_id, col.name),
             )
         })?;
 
-    let auth = authenticate_headers(&headers)?;
     let existing_map = serde_json::to_value(&record)
         .ok()
         .and_then(|v| v.as_object().cloned());
@@ -315,7 +402,7 @@ pub async fn delete_file(
 
     let file_path = state
         .storage_dir
-        .join(&collection_name)
+        .join(&col.name)
         .join(&record_id)
         .join(&filename);
 
@@ -323,14 +410,17 @@ pub async fn delete_file(
         let _ = tokio::fs::remove_file(&file_path).await;
     }
 
+    // Only clear columns that are declared file fields.
     let mut clear_payload = serde_json::Map::new();
     for (k, v) in &record.data {
-        if v.as_str() == Some(&filename) {
+        if v.as_str() == Some(filename.as_str()) && is_file_field(&col, k) {
             clear_payload.insert(k.clone(), serde_json::Value::Null);
         }
     }
     if !clear_payload.is_empty() {
-        let _ = update_record(&state.db, &col, &record_id, clear_payload).await;
+        if let Err(e) = update_record(&state.db, &col, &record_id, clear_payload).await {
+            tracing::warn!("failed to clear file column for {}/{}: {}", col.name, record_id, e);
+        }
     }
 
     Ok(Json(json!({

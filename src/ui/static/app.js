@@ -264,8 +264,39 @@ let currentCollection = "users";
         }
         opts.headers = headers;
       }
-      return _originalFetch(url, opts);
+      const res = await _originalFetch(url, opts);
+      // A 401 on an authenticated dashboard call means the admin session was revoked or expired.
+      if (res.status === 401 && token && typeof url === 'string' && url.startsWith('/api/') && !url.includes('auth-with-password')) {
+        localStorage.removeItem('padi_admin_token');
+        localStorage.removeItem('padi_admin_email');
+        location.reload();
+      }
+      return res;
     };
+
+    // Query-string token for resources the browser loads itself (<img>, EventSource).
+    function fileTokenQuery() {
+      const t = localStorage.getItem('padi_admin_token');
+      return t ? '?token=' + encodeURIComponent(t) : '';
+    }
+
+    // Authenticated backup download (a plain <a href> cannot send the Authorization header).
+    async function downloadBackup(key) {
+      try {
+        const res = await fetch('/api/backups/' + encodeURIComponent(key));
+        if (!res.ok) throw new Error('Download failed (' + res.status + ')');
+        const blob = await res.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = key;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
 
     async function init() {
       const token = localStorage.getItem('padi_admin_token');
@@ -454,10 +485,10 @@ let currentCollection = "users";
         loadCustomEndpoints();
         populateQbTables();
       } else if (view === 'settings') {
-        renderQuickMatrixTable();
         loadAppSettings();
         loadBackups();
         loadAdminAccounts();
+        loadCronJobs();
       }
     }
 
@@ -2575,7 +2606,7 @@ let currentCollection = "users";
     }
 
     function switchSettingsTab(tab) {
-      const tabs = ['quickmatrix', 'app', 'roles', 'admins', 'backups'];
+      const tabs = ['app', 'roles', 'admins', 'backups', 'email', 'cron'];
       tabs.forEach(t => {
         const pane = document.getElementById(`settingsPane_${t}`);
         if (pane) pane.classList.toggle('hidden', t !== tab);
@@ -2612,15 +2643,15 @@ let currentCollection = "users";
             : "w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0";
         }
       });
-      if (tab === 'quickmatrix') renderQuickMatrixTable();
       if (tab === 'roles') renderRolesSettings();
       if (tab === 'backups') loadBackups();
       if (tab === 'admins') loadAdminAccounts();
+      if (tab === 'cron') loadCronJobs();
     }
 
     function filterSettingsTabs() {
       const q = (document.getElementById('settingsSearchInput')?.value || '').toLowerCase().trim();
-      const tabs = ['quickmatrix', 'app', 'roles', 'admins', 'backups'];
+      const tabs = ['app', 'roles', 'admins', 'backups', 'email'];
       tabs.forEach(t => {
         const c = document.getElementById(`setTabContainer_${t}`);
         if (!c) return;
@@ -2729,6 +2760,7 @@ let currentCollection = "users";
       currentSort = "";
       localStorage.setItem('padi_active_col', name);
       selectedRecordIds.clear();
+      updateSelectAllCheckboxState();
       updateBulkDeleteBar();
       renderCollectionsList();
 
@@ -3700,7 +3732,9 @@ let currentCollection = "users";
       const col = collections.find(c => c.name === currentCollection);
       const schemaCols = getCollectionColumns(col, items);
 
-      const totalColCount = 2 + schemaCols.length + 1;
+      const isAllSelected = items.length > 0 && items.every(r => selectedRecordIds.has(r.id));
+      const hasSomeSelected = items.some(r => selectedRecordIds.has(r.id));
+      const totalColCount = 3 + schemaCols.length;
 
       const sortIcon = (field) => {
         if (currentSort === field) return '<i class="fa-solid fa-caret-up ml-1 text-emerald-600"></i>';
@@ -3709,8 +3743,11 @@ let currentCollection = "users";
       };
 
       thead.innerHTML = `
-        <th class="py-3 px-4 w-8 border-r border-slate-200/60">
-          <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" class="rounded border-slate-300">
+        <th class="py-3 px-3 w-8 border-r border-slate-200/60 text-center">
+          <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" ${isAllSelected ? 'checked' : ''} class="rounded border-slate-300">
+        </th>
+        <th class="py-3 px-3 w-20 border-r border-slate-200/60 text-center whitespace-nowrap">
+          <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</span>
         </th>
         <th onclick="toggleSort('id')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
           <i class="fa-solid fa-fingerprint text-[10px] text-emerald-600 mr-1"></i> id ${sortIcon('id')}
@@ -3720,8 +3757,13 @@ let currentCollection = "users";
             <i class="${FIELD_ICONS[c.type] || 'fa-solid fa-font'} text-[10px] text-emerald-600 mr-1"></i> ${c.name} ${sortIcon(c.name)}
           </th>
         `).join('')}
-        <th class="py-3 px-4 w-10"></th>
       `;
+
+      const selectAllEl = document.getElementById('selectAllCheckbox');
+      if (selectAllEl) {
+        selectAllEl.checked = isAllSelected;
+        selectAllEl.indeterminate = !isAllSelected && hasSomeSelected;
+      }
 
       if (items.length === 0) {
         tbody.innerHTML = `
@@ -3748,8 +3790,14 @@ let currentCollection = "users";
           const checked = selectedRecordIds.has(item.id) ? 'checked' : '';
           return `
             <tr onclick="openRecordDrawer('${item.id}')" class="hover:bg-emerald-50/40 cursor-pointer transition group">
-              <td onclick="event.stopPropagation()" class="py-2.5 px-4 border-r border-slate-100">
+              <td onclick="event.stopPropagation()" class="py-2.5 px-3 border-r border-slate-100 text-center">
                 <input type="checkbox" ${checked} onchange="toggleSelectRecord('${item.id}', this.checked)" class="rounded border-slate-300">
+              </td>
+              <td onclick="event.stopPropagation()" class="py-2.5 px-3 border-r border-slate-100 text-center whitespace-nowrap">
+                <button type="button" onclick="openRecordDrawer('${item.id}')" class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-[11px] shadow-sm hover:shadow transition inline-flex items-center space-x-1.5 cursor-pointer" title="Edit Record">
+                  <i class="fa-solid fa-pen-to-square text-[10px]"></i>
+                  <span>Edit</span>
+                </button>
               </td>
               <td onclick="event.stopPropagation(); copyToClipboard('${item.id}')" class="py-2.5 px-4 border-r border-slate-100 whitespace-nowrap">
                 <span class="px-2.5 py-0.5 rounded-lg bg-emerald-50 group-hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 font-semibold text-[11px] inline-flex items-center">
@@ -3757,9 +3805,6 @@ let currentCollection = "users";
                 </span>
               </td>
               ${schemaCols.map(c => `<td class="py-2.5 px-4 border-r border-slate-100 max-w-[240px] truncate">${formatCell(item[c.name], c.type, item)}</td>`).join('')}
-              <td class="py-2.5 px-4 text-right text-slate-400 group-hover:text-emerald-700">
-                <i class="fa-solid fa-pen-to-square text-xs"></i>
-              </td>
             </tr>
           `;
         }).join('');
@@ -3776,7 +3821,7 @@ let currentCollection = "users";
       if (type === 'file' || (typeof val === 'string' && /\.(jpg|jpeg|png|gif|webp|svg|pdf|docx|xlsx|zip|mp4|mp3|txt)$/i.test(val))) {
         const isImg = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(String(val));
         const recId = item ? item.id : '';
-        const url = `/api/files/${currentCollection}/${recId}/${val}`;
+        const url = `/api/files/${currentCollection}/${recId}/${val}${fileTokenQuery()}`;
         if (isImg && item) {
           return `
             <div onclick="event.stopPropagation(); openImageLightbox('${url}', '${val}')" class="inline-flex items-center space-x-2 text-xs group/img cursor-pointer py-0.5" title="Click to view full image">
@@ -3817,19 +3862,45 @@ let currentCollection = "users";
       return String(iso).slice(0, 19).replace('T', ' ');
     }
 
+    function updateSelectAllCheckboxState() {
+      const selectAllCb = document.getElementById('selectAllCheckbox');
+      if (!selectAllCb) return;
+      const count = currentRecords.length;
+      if (count === 0) {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = false;
+        return;
+      }
+      const selectedCount = currentRecords.filter(r => selectedRecordIds.has(r.id)).length;
+      if (selectedCount === count) {
+        selectAllCb.checked = true;
+        selectAllCb.indeterminate = false;
+      } else if (selectedCount > 0) {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = true;
+      } else {
+        selectAllCb.checked = false;
+        selectAllCb.indeterminate = false;
+      }
+    }
+
     function toggleSelectAll(checked) {
       if (checked) {
         currentRecords.forEach(r => selectedRecordIds.add(r.id));
       } else {
         selectedRecordIds.clear();
       }
+      // Langsung update checkbox baris di DOM tanpa re-fetch lambat
+      const rowCheckboxes = document.querySelectorAll('#recordsBody input[type="checkbox"]');
+      rowCheckboxes.forEach(cb => { cb.checked = checked; });
+      updateSelectAllCheckboxState();
       updateBulkDeleteBar();
-      loadRecords();
     }
 
     function toggleSelectRecord(id, checked) {
       if (checked) selectedRecordIds.add(id);
       else selectedRecordIds.delete(id);
+      updateSelectAllCheckboxState();
       updateBulkDeleteBar();
     }
 
@@ -3849,6 +3920,7 @@ let currentCollection = "users";
         await fetch(`/api/${currentCollection}/${id}`, { method: 'DELETE' });
       }
       selectedRecordIds.clear();
+      updateSelectAllCheckboxState();
       updateBulkDeleteBar();
       showToast('Selected records deleted successfully');
       loadRecords();
@@ -4004,7 +4076,7 @@ let currentCollection = "users";
           case 'file':
             const currentFile = val || '';
             const isImg = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(currentFile);
-            const fileUrl = `/api/files/${currentCollection}/${editingRecordId}/${currentFile}`;
+            const fileUrl = `/api/files/${currentCollection}/${editingRecordId}/${currentFile}${fileTokenQuery()}`;
             inputEl = `
               <div class="space-y-2.5">
                 ${editingRecordId && currentFile ? `
@@ -4024,7 +4096,7 @@ let currentCollection = "users";
                         <span class="text-xs font-mono font-bold text-slate-800 truncate block">${currentFile}</span>
                         <div class="flex items-center space-x-2 mt-0.5">
                           ${isImg ? `<button type="button" onclick="openImageLightbox('${fileUrl}', '${currentFile}')" class="text-[11px] font-semibold text-emerald-700 hover:underline flex items-center space-x-1"><i class="fa-solid fa-eye text-[10px]"></i><span>View High-Res</span></button>` : ''}
-                          <a href="${fileUrl}?download=1" target="_blank" class="text-[11px] font-semibold text-indigo-700 hover:underline flex items-center space-x-1"><i class="fa-solid fa-download text-[10px]"></i><span>Download</span></a>
+                          <a href="${fileUrl}&download=1" target="_blank" class="text-[11px] font-semibold text-indigo-700 hover:underline flex items-center space-x-1"><i class="fa-solid fa-download text-[10px]"></i><span>Download</span></a>
                         </div>
                       </div>
                     </div>
@@ -4253,7 +4325,7 @@ let currentCollection = "users";
         dimEl.textContent = 'Could not load image';
       };
 
-      if (dlBtn) dlBtn.href = `${url}?download=1`;
+      if (dlBtn) dlBtn.href = `${url}&download=1`;
       if (tabBtn) tabBtn.href = url;
 
       modal.classList.remove('hidden');
@@ -5575,6 +5647,62 @@ let currentCollection = "users";
           const headerTitle = document.getElementById('headerAppName');
           if (headerTitle) headerTitle.textContent = appName;
         }
+        if (settings.smtp) {
+          const enabledInput = document.getElementById('settingSmtpEnabled');
+          if (enabledInput) enabledInput.checked = Boolean(settings.smtp.enabled);
+          const hostInput = document.getElementById('settingSmtpHost');
+          if (hostInput) hostInput.value = settings.smtp.host || '';
+          const portInput = document.getElementById('settingSmtpPort');
+          if (portInput) portInput.value = settings.smtp.port || 587;
+          const encInput = document.getElementById('settingSmtpEncryption');
+          if (encInput) {
+            let enc = (settings.smtp.encryption || 'opportunistic').toLowerCase();
+            if (enc === 'tls' || enc === 'ssl') enc = 'always';
+            if (enc === 'starttls') enc = 'opportunistic';
+            if (enc === 'none') enc = 'disabled';
+            encInput.value = enc;
+          }
+          const authMethodInput = document.getElementById('settingSmtpAuthMethod');
+          if (authMethodInput) authMethodInput.value = settings.smtp.auth_method || 'LOGIN';
+          const ehloInput = document.getElementById('settingSmtpEhloDomain');
+          if (ehloInput) ehloInput.value = settings.smtp.ehlo_domain || '';
+          const userInput = document.getElementById('settingSmtpUsername');
+          if (userInput) userInput.value = settings.smtp.username || '';
+          const passInput = document.getElementById('settingSmtpPassword');
+          if (passInput) passInput.value = settings.smtp.password || '';
+          const nameInput = document.getElementById('settingSmtpFromName');
+          if (nameInput) nameInput.value = settings.smtp.from_name || '';
+          const addrInput = document.getElementById('settingSmtpFromAddress');
+          if (addrInput) addrInput.value = settings.smtp.from_address || '';
+
+          const events = settings.smtp.events || {};
+          const evWelcome = document.getElementById('settingEventWelcome');
+          if (evWelcome) evWelcome.checked = events.welcome !== false;
+          const evForgot = document.getElementById('settingEventForgotPassword');
+          if (evForgot) evForgot.checked = events.forgot_password !== false;
+          const evChanged = document.getElementById('settingEventPasswordChanged');
+          if (evChanged) evChanged.checked = events.password_changed !== false;
+          const evAdmin = document.getElementById('settingEventAdminCreated');
+          if (evAdmin) evAdmin.checked = events.admin_created !== false;
+
+          if (settings.smtp.templates) {
+            ['welcome', 'forgot_password', 'password_changed', 'admin_created'].forEach(k => {
+              if (settings.smtp.templates[k] && settings.smtp.templates[k].subject) {
+                emailTemplates[k] = {
+                  subject: settings.smtp.templates[k].subject,
+                  body: settings.smtp.templates[k].body || ''
+                };
+              } else {
+                emailTemplates[k] = { ...DEFAULT_EMAIL_TEMPLATES[k] };
+              }
+            });
+          } else {
+            ['welcome', 'forgot_password', 'password_changed', 'admin_created'].forEach(k => {
+              emailTemplates[k] = { ...DEFAULT_EMAIL_TEMPLATES[k] };
+            });
+          }
+          selectEmailTemplateTab(currentSelectedTemplateKey);
+        }
       } catch (_) {}
     }
 
@@ -5673,6 +5801,346 @@ let currentCollection = "users";
       }
     }
 
+    function toggleSmtpMoreOptions() {
+      const pane = document.getElementById('smtpMoreOptionsPane');
+      const icon = document.getElementById('toggleMoreOptionsIcon');
+      const text = document.getElementById('toggleMoreOptionsText');
+      if (!pane) return;
+      const isHidden = pane.classList.contains('hidden');
+      if (isHidden) {
+        pane.classList.remove('hidden');
+        if (icon) {
+          icon.classList.remove('fa-chevron-down');
+          icon.classList.add('fa-chevron-up');
+        }
+        if (text) text.textContent = 'Hide more options';
+      } else {
+        pane.classList.add('hidden');
+        if (icon) {
+          icon.classList.remove('fa-chevron-up');
+          icon.classList.add('fa-chevron-down');
+        }
+        if (text) text.textContent = 'Show more options';
+      }
+    }
+
+    async function saveMailSettings() {
+      const enabled = Boolean(document.getElementById('settingSmtpEnabled')?.checked);
+      const host = document.getElementById('settingSmtpHost')?.value.trim() || '';
+      const port = parseInt(document.getElementById('settingSmtpPort')?.value.trim() || '587', 10);
+      const encryption = document.getElementById('settingSmtpEncryption')?.value || 'opportunistic';
+      const auth_method = document.getElementById('settingSmtpAuthMethod')?.value || 'LOGIN';
+      const ehlo_domain = document.getElementById('settingSmtpEhloDomain')?.value.trim() || '';
+      const username = document.getElementById('settingSmtpUsername')?.value.trim() || '';
+      const password = document.getElementById('settingSmtpPassword')?.value || '';
+      const from_name = document.getElementById('settingSmtpFromName')?.value.trim() || '';
+      const from_address = document.getElementById('settingSmtpFromAddress')?.value.trim() || '';
+
+      const welcome = Boolean(document.getElementById('settingEventWelcome')?.checked);
+      const forgot_password = Boolean(document.getElementById('settingEventForgotPassword')?.checked);
+      const password_changed = Boolean(document.getElementById('settingEventPasswordChanged')?.checked);
+      const admin_created = Boolean(document.getElementById('settingEventAdminCreated')?.checked);
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) {
+        headers['Authorization'] = `Bearer ${currentToken}`;
+      }
+
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({
+            smtp: {
+              enabled,
+              host,
+              port,
+              encryption,
+              auth_method,
+              ehlo_domain,
+              username,
+              password,
+              from_name,
+              from_address,
+              events: {
+                welcome,
+                forgot_password,
+                password_changed,
+                admin_created
+              },
+              templates: emailTemplates
+            }
+          })
+        });
+        if (res.ok) {
+          showToast('Mail & SMTP settings & templates saved successfully!');
+        } else {
+          const d = await res.json();
+          showToast(d.message || 'Failed to save mail settings', 'error');
+        }
+      } catch (err) {
+        showToast('Network error while saving settings: ' + err.message, 'error');
+      }
+    }
+
+    // ================= EMAIL TEMPLATES STATE & ACTIONS =================
+    let currentSelectedTemplateKey = 'welcome';
+    const DEFAULT_EMAIL_TEMPLATES = {
+      welcome: {
+        subject: "Welcome to {appName}!",
+        body: `<h2 style="margin-top: 0; color: #0f172a; font-size: 22px; font-weight: 800;">Welcome, {name}! 🎉</h2>
+<p>Thank you for creating an account with <strong>{appName}</strong>. Your account has been successfully set up and is ready to use.</p>
+
+<div style="background-color: #f8fafc; border-radius: 12px; padding: 16px; margin: 20px 0; border: 1px solid #e2e8f0; font-size: 14px;">
+  <div style="margin-bottom: 8px;"><strong>Email:</strong> <span style="color: #334155;">{email}</span></div>
+  <div style="margin-bottom: 8px;"><strong>Collection / Table:</strong> <span style="font-family: monospace; background: #e2e8f0; padding: 2px 6px; border-radius: 4px;">{collection}</span></div>
+  <div><strong>Status:</strong> <span style="color: #059669; font-weight: 600;">Active</span></div>
+</div>
+
+<p>You can now log in to your account and explore all available features:</p>
+<div style="text-align: center;">
+  <a href="{appUrl}" class="btn">Go to Dashboard &rarr;</a>
+</div>
+
+<p style="color: #64748b; font-size: 13px; margin-top: 30px;">If you did not register for this account, please contact your administrator or ignore this email.</p>`
+      },
+      forgot_password: {
+        subject: "Password Reset Request - {appName}",
+        body: `<h2 style="margin-top: 0; color: #0f172a; font-size: 22px; font-weight: 800;">Password Reset Request 🔐</h2>
+<p>We received a request to reset the password for your account (<strong>{email}</strong>).</p>
+
+<p>Use the following secure token to complete your password reset:</p>
+
+<div class="token-box">
+  {token}
+</div>
+
+<p style="font-size: 13px; color: #64748b;">Copy and paste this token into the password reset form in your application, or submit it to the <code>/reset-password</code> endpoint.</p>
+
+<div style="text-align: center;">
+  <a href="{appUrl}" class="btn">Open Application</a>
+</div>
+
+<div style="margin-top: 30px; padding: 14px; background-color: #fff1f2; border-left: 4px solid #f43f5e; border-radius: 8px; font-size: 13px; color: #9f1239;">
+  <strong>Security note:</strong> If you did not request a password reset, you can safely ignore this email. Your current password will remain unchanged.
+</div>`
+      },
+      password_changed: {
+        subject: "Security Alert: Password Changed - {appName}",
+        body: `<h2 style="margin-top: 0; color: #0f172a; font-size: 22px; font-weight: 800;">Password Successfully Changed 🛡️</h2>
+<p>This is a confirmation that the password for your account (<strong>{email}</strong>) was changed on <strong>{date}</strong>.</p>
+
+<div style="margin: 20px 0; padding: 16px; background-color: #f0fdf4; border-left: 4px solid #10b981; border-radius: 8px; font-size: 14px; color: #065f46;">
+  Your account is now secured with the new password. All active sessions have been safely updated.
+</div>
+
+<div style="text-align: center;">
+  <a href="{appUrl}" class="btn">Sign In to Your Account &rarr;</a>
+</div>
+
+<p style="color: #64748b; font-size: 13px; margin-top: 25px;">If you did not make this change, please contact your system administrator immediately to secure your account.</p>`
+      },
+      admin_created: {
+        subject: "Administrator Access Granted - {appName}",
+        body: `<h2 style="margin-top: 0; color: #0f172a; font-size: 22px; font-weight: 800;">Administrator Account Created 👑</h2>
+<p>You have been granted administrator access to <strong>{appName}</strong> with the email address <strong>{email}</strong>.</p>
+
+<p>You can now access the management console and configure databases, collections, and security settings:</p>
+
+<div style="text-align: center;">
+  <a href="{appUrl}" class="btn">Open Admin Console &rarr;</a>
+</div>
+
+<p style="color: #64748b; font-size: 13px; margin-top: 25px;">Please ensure your administrator credentials are stored securely and never shared.</p>`
+      }
+    };
+
+    let emailTemplates = JSON.parse(JSON.stringify(DEFAULT_EMAIL_TEMPLATES));
+
+    function selectEmailTemplateTab(key) {
+      currentSelectedTemplateKey = key;
+      const keys = ['welcome', 'forgot_password', 'password_changed', 'admin_created'];
+      keys.forEach(k => {
+        const btn = document.getElementById(`tmplTab_${k}`);
+        if (!btn) return;
+        const isSelected = k === key;
+        btn.className = isSelected
+          ? "px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-600 text-white shadow-2xs transition shrink-0 cursor-pointer"
+          : "px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition shrink-0 cursor-pointer";
+      });
+
+      const tmpl = emailTemplates[key] || DEFAULT_EMAIL_TEMPLATES[key];
+      const subjInput = document.getElementById('settingTmplSubject');
+      const bodyInput = document.getElementById('settingTmplBody');
+      if (subjInput) subjInput.value = tmpl.subject || '';
+      if (bodyInput) bodyInput.value = tmpl.body || '';
+    }
+
+    function handleTemplateSubjectChange(e) {
+      if (!emailTemplates[currentSelectedTemplateKey]) {
+        emailTemplates[currentSelectedTemplateKey] = {};
+      }
+      emailTemplates[currentSelectedTemplateKey].subject = e.target.value;
+    }
+
+    function handleTemplateBodyChange(e) {
+      if (!emailTemplates[currentSelectedTemplateKey]) {
+        emailTemplates[currentSelectedTemplateKey] = {};
+      }
+      emailTemplates[currentSelectedTemplateKey].body = e.target.value;
+    }
+
+    function insertPlaceholderToTemplate(tag) {
+      const textarea = document.getElementById('settingTmplBody');
+      if (!textarea) return;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const val = textarea.value;
+      textarea.value = val.substring(0, start) + tag + val.substring(end);
+      textarea.selectionStart = textarea.selectionEnd = start + tag.length;
+      textarea.focus();
+      handleTemplateBodyChange({ target: textarea });
+    }
+
+    function resetCurrentEmailTemplateToDefault() {
+      const def = DEFAULT_EMAIL_TEMPLATES[currentSelectedTemplateKey];
+      if (!def) return;
+      emailTemplates[currentSelectedTemplateKey] = { ...def };
+      const subjInput = document.getElementById('settingTmplSubject');
+      const bodyInput = document.getElementById('settingTmplBody');
+      if (subjInput) subjInput.value = def.subject;
+      if (bodyInput) bodyInput.value = def.body;
+      showToast(`Template reset to system default`);
+    }
+
+    function previewCurrentEmailTemplate() {
+      const modal = document.getElementById('emailPreviewModal');
+      const frame = document.getElementById('emailPreviewFrame');
+      const subjTitle = document.getElementById('emailPreviewSubjectTitle');
+      if (!modal || !frame) return;
+
+      const tmpl = emailTemplates[currentSelectedTemplateKey] || DEFAULT_EMAIL_TEMPLATES[currentSelectedTemplateKey];
+      const appName = document.getElementById('settingAppName')?.value.trim() || 'PadiBase Studio';
+      const appUrl = document.getElementById('settingAppUrl')?.value.trim() || window.location.origin;
+
+      let renderedSubj = tmpl.subject || '';
+      let renderedBody = tmpl.body || '';
+
+      const sampleMap = {
+        '{name}': 'Jane Doe',
+        '{email}': 'jane.doe@example.com',
+        '{appName}': appName,
+        '{appUrl}': appUrl,
+        '{token}': 'tkn_9a8b7c6d5e4f3a2b1c',
+        '{collection}': 'users',
+        '{date}': new Date().toLocaleString()
+      };
+
+      for (const [k, v] of Object.entries(sampleMap)) {
+        renderedSubj = renderedSubj.replaceAll(k, v);
+        renderedBody = renderedBody.replaceAll(k, v);
+      }
+
+      if (subjTitle) subjTitle.textContent = `Subject: ${renderedSubj}`;
+
+      let fullHtml = renderedBody;
+      if (!renderedBody.includes('<!DOCTYPE') && !renderedBody.includes('<html')) {
+        fullHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { margin: 0; padding: 25px 15px; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1e293b; }
+    .card { max-width: 580px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+    .header { background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 26px 32px; color: #ffffff; font-size: 18px; font-weight: 800; }
+    .content { padding: 32px; line-height: 1.6; font-size: 15px; }
+    .btn { display: inline-block; background-color: #059669; color: #ffffff !important; text-decoration: none; font-size: 14px; font-weight: 700; padding: 12px 24px; border-radius: 10px; margin: 18px 0; }
+    .token-box { background-color: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 10px; padding: 16px; font-family: monospace; font-size: 18px; font-weight: 700; text-align: center; color: #0f172a; margin: 18px 0; }
+    .footer { padding: 20px 32px; background-color: #f8fafc; border-top: 1px solid #f1f5f9; text-align: center; font-size: 12px; color: #64748b; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">${appName}</div>
+    <div class="content">${renderedBody}</div>
+    <div class="footer">&copy; ${new Date().getFullYear()} ${appName}. All rights reserved.</div>
+  </div>
+</body>
+</html>`;
+      }
+
+      frame.srcdoc = fullHtml;
+      modal.classList.remove('hidden');
+    }
+
+    function closeEmailPreviewModal() {
+      const modal = document.getElementById('emailPreviewModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function handleSendTestEmail() {
+      const recipientInput = document.getElementById('testEmailRecipient');
+      const email = recipientInput?.value.trim();
+      const templateSelect = document.getElementById('testEmailTemplateSelect');
+      const template = templateSelect ? templateSelect.value : 'test';
+      const resultDiv = document.getElementById('testEmailResult');
+      const btn = document.getElementById('sendTestEmailBtn');
+      const icon = document.getElementById('sendTestEmailIcon');
+      const text = document.getElementById('sendTestEmailText');
+
+      if (!email || !email.includes('@')) {
+        showToast('Please enter a valid recipient email address', 'error');
+        if (recipientInput) recipientInput.focus();
+        return;
+      }
+
+      if (btn) btn.disabled = true;
+      if (icon) icon.className = 'fa-solid fa-spinner fa-spin text-xs';
+      if (text) text.textContent = 'Sending...';
+      if (resultDiv) resultDiv.classList.add('hidden');
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) {
+        headers['Authorization'] = `Bearer ${currentToken}`;
+      }
+
+      try {
+        const res = await fetch('/api/settings/test-email', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ email, template })
+        });
+        const data = await res.json();
+
+        if (res.ok) {
+          showToast(data.message || 'Test email sent successfully!');
+          if (resultDiv) {
+            resultDiv.className = 'p-3 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200';
+            resultDiv.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-600 mr-1.5"></i> ${data.message || 'Test email delivered successfully!'}`;
+            resultDiv.classList.remove('hidden');
+          }
+        } else {
+          showToast(data.message || 'Failed to send test email', 'error');
+          if (resultDiv) {
+            resultDiv.className = 'p-3 rounded-lg text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200';
+            resultDiv.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-rose-600 mr-1.5"></i> ${data.message || 'SMTP delivery failed'}`;
+            resultDiv.classList.remove('hidden');
+          }
+        }
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+        if (resultDiv) {
+          resultDiv.className = 'p-3 rounded-lg text-xs font-semibold bg-rose-50 text-rose-800 border border-rose-200';
+          resultDiv.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-rose-600 mr-1.5"></i> Connection error: ${err.message}`;
+          resultDiv.classList.remove('hidden');
+        }
+      } finally {
+        if (btn) btn.disabled = false;
+        if (icon) icon.className = 'fa-solid fa-vial text-xs';
+        if (text) text.textContent = 'Send Test Email';
+      }
+    }
+
     function triggerUploadBackup() {
       const input = document.getElementById('backupUploadInput');
       if (input) {
@@ -5741,10 +6209,10 @@ let currentCollection = "users";
                 <td class="py-3 px-4">${filesCount}</td>
                 <td class="py-3 px-4 text-slate-400 text-xs">${formatDateCell(b.created)}</td>
                 <td class="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
-                  <a href="/api/backups/${encodeURIComponent(b.key)}" download class="px-2.5 py-1 rounded-lg text-emerald-700 hover:bg-emerald-50 font-bold transition inline-flex items-center space-x-1 text-xs">
+                  <button type="button" onclick="downloadBackup('${b.key}')" class="px-2.5 py-1 rounded-lg text-emerald-700 hover:bg-emerald-50 font-bold transition inline-flex items-center space-x-1 text-xs cursor-pointer">
                     <i class="fa-solid fa-download text-[10px]"></i>
                     <span>Download</span>
-                  </a>
+                  </button>
                   <button onclick="handleRestoreBackup('${b.key}')" class="px-2.5 py-1 rounded-lg text-amber-700 hover:bg-amber-50 font-bold transition inline-flex items-center space-x-1 text-xs cursor-pointer">
                     <i class="fa-solid fa-rotate-left text-[10px]"></i>
                     <span>Restore</span>
@@ -5956,7 +6424,7 @@ let currentCollection = "users";
     // ================= REALTIME SSE =================
     function initSSE() {
       if (sseSource) sseSource.close();
-      sseSource = new EventSource('/api/realtime');
+      sseSource = new EventSource('/api/realtime?token=' + encodeURIComponent(localStorage.getItem('padi_admin_token') || ''));
       sseSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
@@ -6081,6 +6549,506 @@ let currentCollection = "users";
       return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
+    // ================= CRON & BACKGROUND SCHEDULED TASKS =================
+    let cronJobsList = [];
+    let currentCronJobType = 'sql';
+
+    function describeCronSchedule(schedule) {
+      if (!schedule) return '';
+      const s = schedule.trim().toLowerCase();
+      if (s === '@yearly' || s === '@annually') return 'Once a year (Jan 1, 00:00)';
+      if (s === '@monthly') return 'Once a month (1st, 00:00)';
+      if (s === '@weekly') return 'Once a week (Sunday, 00:00)';
+      if (s === '@daily' || s === '@midnight' || s === '0 0 * * *') return 'Every day at 00:00';
+      if (s === '@hourly' || s === '0 * * * *') return 'Every hour at :00';
+      if (s === '*/5 * * * *' || s === '@every 5m') return 'Every 5 minutes';
+      if (s === '*/10 * * * *' || s === '@every 10m') return 'Every 10 minutes';
+      if (s === '*/15 * * * *' || s === '@every 15m') return 'Every 15 minutes';
+      if (s === '*/30 * * * *' || s === '@every 30m') return 'Every 30 minutes';
+      if (s === '0 */2 * * *' || s === '@every 2h') return 'Every 2 hours';
+      if (s === '0 */6 * * *' || s === '@every 6h') return 'Every 6 hours';
+      if (s === '0 */12 * * *' || s === '@every 12h') return 'Every 12 hours';
+      return 'Custom interval';
+    }
+
+    async function loadCronJobs() {
+      const loading = document.getElementById('cronLoadingState');
+      const empty = document.getElementById('cronEmptyState');
+      const tableWrapper = document.getElementById('cronTableWrapper');
+      const statTotal = document.getElementById('cronStatTotal');
+      const statActive = document.getElementById('cronStatActive');
+
+      if (loading) loading.classList.remove('hidden');
+      if (empty) empty.classList.add('hidden');
+      if (tableWrapper) tableWrapper.classList.add('hidden');
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
+
+      try {
+        const res = await fetch('/api/cron/jobs', { headers });
+        if (loading) loading.classList.add('hidden');
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          showToast(errData.message || 'Failed to load cron jobs', 'error');
+          return;
+        }
+
+        const data = await res.json();
+        cronJobsList = data.items || [];
+
+        const total = cronJobsList.length;
+        const active = cronJobsList.filter(j => j.enabled).length;
+
+        if (statTotal) statTotal.textContent = total;
+        if (statActive) statActive.textContent = active;
+
+        if (total === 0) {
+          if (empty) empty.classList.remove('hidden');
+          if (tableWrapper) tableWrapper.classList.add('hidden');
+        } else {
+          if (empty) empty.classList.add('hidden');
+          if (tableWrapper) tableWrapper.classList.remove('hidden');
+          renderCronJobsTable();
+        }
+      } catch (err) {
+        if (loading) loading.classList.add('hidden');
+        showToast('Error loading cron jobs: ' + err.message, 'error');
+      }
+    }
+
+    function renderCronJobsTable() {
+      const tbody = document.getElementById('cronTableBody');
+      if (!tbody) return;
+
+      tbody.innerHTML = cronJobsList.map(item => {
+        const job = item.job || item;
+        const nextRun = item.next_run_at;
+        const isSql = (job.job_type || 'sql').toLowerCase() === 'sql';
+        const typeBadge = isSql
+          ? '<span class="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-purple-100 text-purple-700 border border-purple-200"><i class="fa-solid fa-database text-[9px] mr-1"></i>SQL</span>'
+          : `<span class="px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-blue-100 text-blue-700 border border-blue-200"><i class="fa-solid fa-globe text-[9px] mr-1"></i>HTTP ${job.http_method || 'GET'}</span>`;
+
+        const scheduleDesc = describeCronSchedule(job.schedule);
+        const lastStatus = job.last_status || 'none';
+        let statusBadge = '<span class="text-slate-400 font-mono text-[11px]">Never run</span>';
+
+        if (lastStatus === 'success') {
+          statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200"><i class="fa-solid fa-circle-check text-[9px] mr-1"></i>success (${job.last_duration_ms || 0}ms)</span>`;
+        } else if (lastStatus === 'failed') {
+          statusBadge = `<span class="inline-flex items-center px-2 py-0.5 rounded-md font-mono text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200" title="${escapeHtml(job.last_error || '')}"><i class="fa-solid fa-triangle-exclamation text-[9px] mr-1"></i>failed (${job.last_duration_ms || 0}ms)</span>`;
+        }
+
+        const detailSnippet = isSql
+          ? (job.sql_query || '').substring(0, 70) + ((job.sql_query || '').length > 70 ? '...' : '')
+          : (job.http_url || '');
+
+        return `
+          <tr class="hover:bg-slate-50/80 transition group">
+            <!-- Active Toggle -->
+            <td class="p-3 text-center align-middle">
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" onchange="toggleCronJobEnabled('${job.id}', this.checked)" ${job.enabled ? 'checked' : ''} class="sr-only peer">
+                <div class="w-8 h-4.5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-emerald-600"></div>
+              </label>
+            </td>
+
+            <!-- Name & Detail -->
+            <td class="p-3">
+              <div class="flex items-center space-x-2">
+                <span class="font-bold text-slate-800 text-xs">${escapeHtml(job.name)}</span>
+                ${typeBadge}
+              </div>
+              <div class="text-[11px] font-mono text-slate-400 truncate max-w-sm sm:max-w-md mt-0.5" title="${escapeHtml(detailSnippet)}">
+                ${escapeHtml(detailSnippet)}
+              </div>
+            </td>
+
+            <!-- Schedule -->
+            <td class="p-3">
+              <div class="font-mono text-xs font-bold text-slate-700">${escapeHtml(job.schedule)}</div>
+              <div class="text-[10px] text-slate-400">${escapeHtml(scheduleDesc)}</div>
+            </td>
+
+            <!-- Next Run -->
+            <td class="p-3 font-mono text-[11px] text-slate-600">
+              ${job.enabled && nextRun ? formatDateTime(nextRun) : '<span class="text-slate-400 italic">Paused</span>'}
+            </td>
+
+            <!-- Last Run & Status -->
+            <td class="p-3">
+              <div>${statusBadge}</div>
+              <div class="text-[10px] text-slate-400 font-mono mt-0.5">${job.last_run_at ? formatDateTime(job.last_run_at) : '--'}</div>
+            </td>
+
+            <!-- Actions -->
+            <td class="p-3 text-right space-x-1 whitespace-nowrap">
+              <button type="button" onclick="runCronJobNow('${job.id}')" id="cronRunBtn_${job.id}" class="p-1.5 rounded-lg border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 text-slate-600 hover:text-emerald-700 transition cursor-pointer" title="Trigger manual execution now">
+                <i class="fa-solid fa-play text-xs"></i>
+              </button>
+              <button type="button" onclick="viewCronJobResult('${job.id}')" class="p-1.5 rounded-lg border border-slate-200 hover:border-blue-300 hover:bg-blue-50 text-slate-600 hover:text-blue-700 transition cursor-pointer" title="View execution log & output">
+                <i class="fa-solid fa-file-lines text-xs"></i>
+              </button>
+              <button type="button" onclick="openCronJobModal('${job.id}')" class="p-1.5 rounded-lg border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-600 hover:text-indigo-700 transition cursor-pointer" title="Edit task">
+                <i class="fa-solid fa-pencil text-xs"></i>
+              </button>
+              <button type="button" onclick="deleteCronJob('${job.id}')" class="p-1.5 rounded-lg border border-slate-200 hover:border-rose-300 hover:bg-rose-50 text-slate-400 hover:text-rose-600 transition cursor-pointer" title="Delete task">
+                <i class="fa-solid fa-trash-can text-xs"></i>
+              </button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function openCronJobModal(id = null) {
+      const modal = document.getElementById('cronJobModal');
+      const title = document.getElementById('cronModalTitle');
+      const editId = document.getElementById('cronJobEditId');
+      const nameInput = document.getElementById('cronJobNameInput');
+      const scheduleInput = document.getElementById('cronJobScheduleInput');
+      const enabledInput = document.getElementById('cronJobEnabledInput');
+      const sqlInput = document.getElementById('cronSqlInput');
+      const httpMethodInput = document.getElementById('cronHttpMethodInput');
+      const httpUrlInput = document.getElementById('cronHttpUrlInput');
+      const httpHeadersInput = document.getElementById('cronHttpHeadersInput');
+      const httpBodyInput = document.getElementById('cronHttpBodyInput');
+
+      if (!modal) return;
+
+      if (id) {
+        const item = cronJobsList.find(j => (j.job ? j.job.id : j.id) === id);
+        const job = item ? (item.job || item) : null;
+        if (!job) return;
+
+        if (title) title.textContent = 'Edit Scheduled Task';
+        if (editId) editId.value = job.id;
+        if (nameInput) nameInput.value = job.name || '';
+        if (scheduleInput) scheduleInput.value = job.schedule || '';
+        if (enabledInput) enabledInput.checked = job.enabled !== false;
+
+        switchCronJobType(job.job_type || 'sql');
+
+        if (sqlInput) sqlInput.value = job.sql_query || '';
+        if (httpMethodInput) httpMethodInput.value = job.http_method || 'GET';
+        if (httpUrlInput) httpUrlInput.value = job.http_url || '';
+        if (httpHeadersInput) {
+          httpHeadersInput.value = job.http_headers ? JSON.stringify(job.http_headers, null, 2) : '';
+        }
+        if (httpBodyInput) httpBodyInput.value = job.http_body || '';
+      } else {
+        if (title) title.textContent = 'Add Scheduled Task';
+        if (editId) editId.value = '';
+        if (nameInput) nameInput.value = '';
+        if (scheduleInput) scheduleInput.value = '*/15 * * * *';
+        if (enabledInput) enabledInput.checked = true;
+
+        switchCronJobType('sql');
+
+        if (sqlInput) sqlInput.value = '';
+        if (httpMethodInput) httpMethodInput.value = 'GET';
+        if (httpUrlInput) httpUrlInput.value = '';
+        if (httpHeadersInput) httpHeadersInput.value = '';
+        if (httpBodyInput) httpBodyInput.value = '';
+      }
+
+      updateCronSchedulePreview();
+      modal.classList.remove('hidden');
+    }
+
+    function closeCronJobModal() {
+      const modal = document.getElementById('cronJobModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function switchCronJobType(type) {
+      currentCronJobType = type;
+      const btnSql = document.getElementById('cronTypeBtn_sql');
+      const btnHttp = document.getElementById('cronTypeBtn_http');
+      const paneSql = document.getElementById('cronPane_sql');
+      const paneHttp = document.getElementById('cronPane_http');
+
+      if (type === 'sql') {
+        if (btnSql) {
+          btnSql.className = "py-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 bg-white text-purple-700 shadow-2xs";
+        }
+        if (btnHttp) {
+          btnHttp.className = "py-2 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition flex items-center justify-center space-x-1.5";
+        }
+        if (paneSql) paneSql.classList.remove('hidden');
+        if (paneHttp) paneHttp.classList.add('hidden');
+      } else {
+        if (btnSql) {
+          btnSql.className = "py-2 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 transition flex items-center justify-center space-x-1.5";
+        }
+        if (btnHttp) {
+          btnHttp.className = "py-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 bg-white text-blue-700 shadow-2xs";
+        }
+        if (paneSql) paneSql.classList.add('hidden');
+        if (paneHttp) paneHttp.classList.remove('hidden');
+      }
+    }
+
+    function setCronSchedulePreset(expr) {
+      const input = document.getElementById('cronJobScheduleInput');
+      if (input) {
+        input.value = expr;
+        updateCronSchedulePreview();
+      }
+    }
+
+    function updateCronSchedulePreview() {
+      const input = document.getElementById('cronJobScheduleInput');
+      const preview = document.getElementById('cronSchedulePreview');
+      if (!input || !preview) return;
+      const val = input.value.trim();
+      preview.textContent = describeCronSchedule(val);
+    }
+
+    async function handleSaveCronJob(event) {
+      event.preventDefault();
+      const editId = document.getElementById('cronJobEditId')?.value;
+      const name = document.getElementById('cronJobNameInput')?.value.trim();
+      const schedule = document.getElementById('cronJobScheduleInput')?.value.trim();
+      const enabled = Boolean(document.getElementById('cronJobEnabledInput')?.checked);
+      const sql_query = document.getElementById('cronSqlInput')?.value.trim();
+      const http_method = document.getElementById('cronHttpMethodInput')?.value;
+      const http_url = document.getElementById('cronHttpUrlInput')?.value.trim();
+      const rawHeaders = document.getElementById('cronHttpHeadersInput')?.value.trim();
+      const http_body = document.getElementById('cronHttpBodyInput')?.value;
+
+      if (!name) {
+        showToast('Please enter a task name', 'error');
+        return;
+      }
+      if (!schedule) {
+        showToast('Please enter a cron schedule expression', 'error');
+        return;
+      }
+
+      let http_headers = null;
+      if (rawHeaders) {
+        try {
+          http_headers = JSON.parse(rawHeaders);
+        } catch (_) {
+          showToast('HTTP Headers must be a valid JSON object', 'error');
+          return;
+        }
+      }
+
+      if (currentCronJobType === 'sql' && !sql_query) {
+        showToast('Please provide at least one SQL statement to execute', 'error');
+        return;
+      }
+
+      if (currentCronJobType === 'http' && !http_url) {
+        showToast('Please enter an endpoint URL for HTTP task', 'error');
+        return;
+      }
+
+      const payload = {
+        name,
+        schedule,
+        job_type: currentCronJobType,
+        enabled,
+        sql_query: currentCronJobType === 'sql' ? sql_query : null,
+        http_method: currentCronJobType === 'http' ? http_method : null,
+        http_url: currentCronJobType === 'http' ? http_url : null,
+        http_headers: currentCronJobType === 'http' ? http_headers : null,
+        http_body: currentCronJobType === 'http' ? http_body : null
+      };
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
+
+      const btn = document.getElementById('saveCronJobBtn');
+      if (btn) btn.disabled = true;
+
+      try {
+        const url = editId ? `/api/cron/jobs/${editId}` : '/api/cron/jobs';
+        const method = editId ? 'PATCH' : 'POST';
+
+        const res = await fetch(url, {
+          method,
+          headers,
+          body: JSON.stringify(payload)
+        });
+
+        if (btn) btn.disabled = false;
+
+        if (res.ok) {
+          showToast(`Cron task "${name}" saved successfully!`);
+          closeCronJobModal();
+          await loadCronJobs();
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          showToast(errData.message || 'Failed to save task', 'error');
+        }
+      } catch (err) {
+        if (btn) btn.disabled = false;
+        showToast('Network error: ' + err.message, 'error');
+      }
+    }
+
+    async function runCronJobNow(id) {
+      const btn = document.getElementById(`cronRunBtn_${id}`);
+      let origHtml = '';
+      if (btn) {
+        origHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin text-xs text-emerald-600"></i>';
+        btn.disabled = true;
+      }
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
+
+      try {
+        const res = await fetch(`/api/cron/jobs/${id}/run`, {
+          method: 'POST',
+          headers
+        });
+        const data = await res.json();
+
+        if (btn) {
+          btn.innerHTML = origHtml;
+          btn.disabled = false;
+        }
+
+        if (res.ok) {
+          const dur = data.result ? data.result.duration_ms : 0;
+          showToast(`Cron job executed successfully in ${dur}ms!`);
+        } else {
+          showToast(data.message || (data.result && data.result.error) || 'Job execution failed', 'error');
+        }
+
+        await loadCronJobs();
+      } catch (err) {
+        if (btn) {
+          btn.innerHTML = origHtml;
+          btn.disabled = false;
+        }
+        showToast('Execution trigger failed: ' + err.message, 'error');
+      }
+    }
+
+    async function toggleCronJobEnabled(id, enabled) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
+
+      try {
+        const res = await fetch(`/api/cron/jobs/${id}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ enabled })
+        });
+        if (res.ok) {
+          showToast(`Task ${enabled ? 'enabled' : 'disabled'}`);
+          await loadCronJobs();
+        } else {
+          showToast('Failed to toggle task status', 'error');
+          await loadCronJobs();
+        }
+      } catch (err) {
+        showToast('Network error: ' + err.message, 'error');
+      }
+    }
+
+    async function deleteCronJob(id) {
+      const item = cronJobsList.find(j => (j.job ? j.job.id : j.id) === id);
+      const name = item ? (item.job ? item.job.name : item.name) : 'this task';
+
+      if (!confirm(`Are you sure you want to delete the scheduled task "${name}"?`)) {
+        return;
+      }
+
+      const headers = { 'Content-Type': 'application/json' };
+      if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
+
+      try {
+        const res = await fetch(`/api/cron/jobs/${id}`, {
+          method: 'DELETE',
+          headers
+        });
+        if (res.ok) {
+          showToast(`Task "${name}" deleted successfully`);
+          await loadCronJobs();
+        } else {
+          showToast('Failed to delete task', 'error');
+        }
+      } catch (err) {
+        showToast('Network error: ' + err.message, 'error');
+      }
+    }
+
+    function viewCronJobResult(id) {
+      const item = cronJobsList.find(j => (j.job ? j.job.id : j.id) === id);
+      const job = item ? (item.job || item) : null;
+      if (!job) return;
+
+      const modal = document.getElementById('cronResultModal');
+      const nameEl = document.getElementById('cronResultTaskName');
+      const statusEl = document.getElementById('cronResultStatus');
+      const durationEl = document.getElementById('cronResultDuration');
+      const timeEl = document.getElementById('cronResultTime');
+      const outputEl = document.getElementById('cronResultOutput');
+      const errContainer = document.getElementById('cronResultErrorContainer');
+      const errEl = document.getElementById('cronResultError');
+
+      if (!modal) return;
+
+      if (nameEl) nameEl.textContent = job.name;
+      if (statusEl) {
+        const isOk = job.last_status === 'success';
+        statusEl.textContent = (job.last_status || 'Never executed').toUpperCase();
+        statusEl.className = isOk
+          ? 'font-bold font-mono mt-0.5 text-emerald-600'
+          : (job.last_status === 'failed' ? 'font-bold font-mono mt-0.5 text-rose-600' : 'font-bold font-mono mt-0.5 text-slate-400');
+      }
+      if (durationEl) durationEl.textContent = job.last_duration_ms != null ? `${job.last_duration_ms} ms` : '--';
+      if (timeEl) timeEl.textContent = job.last_run_at ? formatDateTime(job.last_run_at) : '--';
+
+      if (outputEl) {
+        outputEl.textContent = job.last_result || (job.last_status ? '(No textual output)' : 'Task has not executed yet.');
+      }
+
+      if (job.last_error) {
+        if (errContainer) errContainer.classList.remove('hidden');
+        if (errEl) errEl.textContent = job.last_error;
+      } else {
+        if (errContainer) errContainer.classList.add('hidden');
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function closeCronResultModal() {
+      const modal = document.getElementById('cronResultModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function createPresetCronJob(preset) {
+      openCronJobModal();
+      if (preset === 'vacuum') {
+        const nameInput = document.getElementById('cronJobNameInput');
+        const scheduleInput = document.getElementById('cronJobScheduleInput');
+        const sqlInput = document.getElementById('cronSqlInput');
+        if (nameInput) nameInput.value = 'Daily Database Vacuum & Optimize';
+        if (scheduleInput) scheduleInput.value = '0 3 * * *'; // 03:00 AM
+        switchCronJobType('sql');
+        if (sqlInput) sqlInput.value = 'VACUUM; ANALYZE;';
+      } else if (preset === 'health') {
+        const nameInput = document.getElementById('cronJobNameInput');
+        const scheduleInput = document.getElementById('cronJobScheduleInput');
+        const httpUrlInput = document.getElementById('cronHttpUrlInput');
+        if (nameInput) nameInput.value = 'Hourly Health Check Ping';
+        if (scheduleInput) scheduleInput.value = '0 * * * *'; // Hourly
+        switchCronJobType('http');
+        if (httpUrlInput) httpUrlInput.value = '/api/health';
+      }
+      updateCronSchedulePreview();
+    }
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         closeRecordEditorPage();
@@ -6090,6 +7058,8 @@ let currentCollection = "users";
         closeDrawer('importRecordsModal');
         closeDrawer('quickGuideModal');
         closeDrawer('imageLightboxModal');
+        closeCronJobModal();
+        closeCronResultModal();
       }
     });
 

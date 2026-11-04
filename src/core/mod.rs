@@ -1,7 +1,9 @@
 pub mod api_collection;
 pub mod app;
 pub mod auth;
+pub mod cron;
 pub mod db;
+pub mod email;
 pub mod env;
 pub mod realtime;
 pub mod record;

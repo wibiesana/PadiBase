@@ -9,12 +9,39 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use std::sync::LazyLock;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+use std::time::{Duration as StdDuration, Instant};
 
+use super::app::AppState;
+use super::db::{get_collection_by_name_or_id, is_safe_identifier, json_get_str, Val};
 use super::env::Env;
 use crate::core::schema::{Collection, CollectionType};
 
 const DEFAULT_JWT_SECRET: &str = "PadiBase_default_secure_secret_key_change_me_in_prod";
+const MIN_JWT_SECRET_LEN: usize = 32;
+const MAX_PASSWORD_LEN: usize = 1024;
+
+/// True when `JWT_SECRET` is missing, equals the public default, or is too short to be safe.
+pub fn jwt_secret_is_weak() -> bool {
+    match Env::get("JWT_SECRET") {
+        Some(s) => {
+            let s = s.trim();
+            s == DEFAULT_JWT_SECRET || s.len() < MIN_JWT_SECRET_LEN
+        }
+        None => true,
+    }
+}
+
+/// Run CPU-heavy work (Argon2) without starving the async executor.
+fn run_blocking<T>(f: impl FnOnce() -> T) -> T {
+    match tokio::runtime::Handle::try_current() {
+        Ok(h) if h.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(f)
+        }
+        _ => f(),
+    }
+}
 
 /// Pre-computed JWT encoding & decoding keys initialized once from `JWT_SECRET` config.
 static JWT_KEYS: LazyLock<(EncodingKey, DecodingKey, Validation)> = LazyLock::new(|| {
@@ -37,40 +64,56 @@ pub struct Claims {
     pub collection_id: Option<String>,
     pub exp: i64,
     pub iat: i64,
+    /// Session key (matches `tokenKey` in DB). Rotating it revokes every issued token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tk: Option<String>,
+}
+
+impl Claims {
+    /// Real superuser: admin-role token issued for the `_admins` table (no collection).
+    /// A user of an auth collection with `role = admin` is NOT a superuser.
+    pub fn is_admin(&self) -> bool {
+        self.collection_id.is_none() && (self.role == "admin" || self.role == "superadmin")
+    }
 }
 
 pub fn hash_password(password: &str) -> Result<String> {
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-    let hash = argon2
-        .hash_password(password.as_bytes(), &salt)
-        .map_err(|e| anyhow!("Failed to hash password: {}", e))?
-        .to_string();
-    Ok(hash)
+    if password.len() > MAX_PASSWORD_LEN {
+        return Err(anyhow!("Password is too long (max {} bytes).", MAX_PASSWORD_LEN));
+    }
+    run_blocking(|| {
+        let salt = SaltString::generate(&mut OsRng);
+        let argon2 = Argon2::default();
+        argon2
+            .hash_password(password.as_bytes(), &salt)
+            .map(|h| h.to_string())
+            .map_err(|e| anyhow!("Failed to hash password: {}", e))
+    })
+}
+
+/// Pre-computed hash used to burn equal CPU time when an account does not exist
+/// (prevents user enumeration through response timing).
+static DUMMY_HASH: LazyLock<String> =
+    LazyLock::new(|| hash_password("padibase-dummy-password").unwrap_or_default());
+
+pub fn burn_dummy_verify(password: &str) {
+    let _ = verify_password(password, &DUMMY_HASH);
 }
 
 pub fn verify_password(password: &str, password_hash: &str) -> bool {
     let trimmed = password_hash.trim();
-    if trimmed.is_empty() {
+    if trimmed.is_empty() || password.len() > MAX_PASSWORD_LEN {
         return false;
     }
-    if let Ok(parsed_hash) = PasswordHash::new(trimmed) {
-        if Argon2::default()
-            .verify_password(password.as_bytes(), &parsed_hash)
-            .is_ok()
-        {
-            return true;
-        }
+    // Only PHC-formatted Argon2 hashes are accepted. Plaintext legacy fallback was removed.
+    match PasswordHash::new(trimmed) {
+        Ok(parsed_hash) => run_blocking(|| {
+            Argon2::default()
+                .verify_password(password.as_bytes(), &parsed_hash)
+                .is_ok()
+        }),
+        Err(_) => false,
     }
-    // Constant-time comparison fallback only if legacy DB stored non-PHC plain password
-    if !trimmed.starts_with('$') && trimmed.len() == password.len() {
-        let mut diff = 0u8;
-        for (a, b) in trimmed.bytes().zip(password.bytes()) {
-            diff |= a ^ b;
-        }
-        return diff == 0;
-    }
-    false
 }
 
 pub fn generate_token_key() -> String {
@@ -88,6 +131,17 @@ pub fn create_jwt(
     collection_id: Option<String>,
     duration_days: i64,
 ) -> Result<String> {
+    create_jwt_with_key(id, email, role, collection_id, duration_days, None)
+}
+
+pub fn create_jwt_with_key(
+    id: &str,
+    email: &str,
+    role: &str,
+    collection_id: Option<String>,
+    duration_days: i64,
+    token_key: Option<&str>,
+) -> Result<String> {
     let now = Utc::now();
     let expires = now + Duration::days(duration_days);
 
@@ -98,6 +152,7 @@ pub fn create_jwt(
         collection_id,
         iat: now.timestamp(),
         exp: expires.timestamp(),
+        tk: token_key.filter(|k| !k.is_empty()).map(String::from),
     };
 
     let (ref enc_key, _, _) = *JWT_KEYS;
@@ -151,6 +206,146 @@ pub fn authenticate_headers(
     } else {
         Ok(None)
     }
+}
+
+fn unauthorized(msg: &str) -> (StatusCode, Json<Value>) {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(json!({ "code": 401, "message": msg })),
+    )
+}
+
+/// Short-lived cache of `tokenKey` lookups so revocation checks stay cheap.
+static SESSION_CACHE: LazyLock<Mutex<HashMap<String, (Option<String>, Instant)>>> =
+    LazyLock::new(|| Mutex::new(HashMap::with_capacity(256)));
+const SESSION_CACHE_TTL: StdDuration = StdDuration::from_secs(3);
+const SESSION_CACHE_MAX: usize = 10_000;
+
+async fn fetch_token_key(state: &AppState, claims: &Claims) -> Option<String> {
+    let sql = if let Some(cid) = &claims.collection_id {
+        let col = get_collection_by_name_or_id(&state.db, cid).await.ok()??;
+        if !is_safe_identifier(&col.name) {
+            return None;
+        }
+        format!("SELECT `tokenKey` FROM `{}` WHERE `id` = ? LIMIT 1;", col.name)
+    } else {
+        "SELECT `tokenKey` FROM `_admins` WHERE `id` = ? LIMIT 1;".to_string()
+    };
+    let row = state
+        .db
+        .fetch_optional(&sql, &[Val::from(&claims.sub)])
+        .await
+        .ok()??;
+    let key = json_get_str(&row, "tokenKey");
+    if key.is_empty() {
+        None
+    } else {
+        Some(key)
+    }
+}
+
+/// Verify that the presented token has not been revoked (logout, password change/reset,
+/// account deletion). Invalid/absent tokens pass through; handlers reject them separately.
+pub async fn check_session(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let Some(token) = extract_token_from_headers(headers) else {
+        return Ok(());
+    };
+    let Ok(claims) = verify_jwt(token) else {
+        return Ok(());
+    };
+    check_claims_session(state, &claims).await
+}
+
+/// Resolve the caller from the `Authorization` header, or from a `?token=` value for
+/// clients that cannot set headers (EventSource, `<img>`). Revoked sessions are rejected.
+pub async fn authenticate_with_query_token(
+    state: &AppState,
+    headers: &HeaderMap,
+    query_token: Option<&str>,
+) -> Result<Option<Claims>, (StatusCode, Json<Value>)> {
+    if let Some(claims) = authenticate_headers(headers)? {
+        check_claims_session(state, &claims).await?;
+        return Ok(Some(claims));
+    }
+    if let Some(t) = query_token.map(str::trim).filter(|t| !t.is_empty()) {
+        let claims =
+            verify_jwt(t).map_err(|_| unauthorized("Invalid or expired authentication token."))?;
+        check_claims_session(state, &claims).await?;
+        return Ok(Some(claims));
+    }
+    Ok(None)
+}
+
+pub fn invalidate_session_cache(sub: &str) {
+    if let Ok(mut map) = SESSION_CACHE.lock() {
+        let suffix = format!(":{}", sub);
+        map.retain(|k, _| !k.ends_with(&suffix));
+    }
+}
+
+pub async fn check_claims_session(
+    state: &AppState,
+    claims: &Claims,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let Some(tk) = claims.tk.clone() else {
+        return Ok(());
+    };
+
+    let cache_key = format!(
+        "{}:{}",
+        claims.collection_id.as_deref().unwrap_or("_admins"),
+        claims.sub
+    );
+    let cached = {
+        let map = SESSION_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        map.get(&cache_key)
+            .filter(|(_, at)| at.elapsed() < SESSION_CACHE_TTL)
+            .and_then(|(k, _)| k.clone())
+    };
+
+    if let Some(ref k) = cached {
+        if k == &tk {
+            return Ok(());
+        }
+    }
+
+    // Cache miss or key changed: fetch fresh from database
+    let fresh = fetch_token_key(state, claims).await;
+    {
+        let mut map = SESSION_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+        if map.len() >= SESSION_CACHE_MAX {
+            map.retain(|_, (_, at)| at.elapsed() < SESSION_CACHE_TTL);
+            if map.len() >= SESSION_CACHE_MAX {
+                map.clear();
+            }
+        }
+        map.insert(cache_key, (fresh.clone(), Instant::now()));
+    }
+
+    match fresh {
+        Some(k) if k == tk => Ok(()),
+        _ => Err(unauthorized("Session expired or revoked. Please sign in again.")),
+    }
+}
+
+/// Require a valid, non-revoked superuser token. Used by every administrative endpoint.
+pub async fn require_admin(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<Claims, (StatusCode, Json<Value>)> {
+    let claims = authenticate_headers(headers)?
+        .ok_or_else(|| unauthorized("Authentication required. Administrator token is missing."))?;
+    if !claims.is_admin() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "code": 403, "message": "Only administrators can perform this action." })),
+        ));
+    }
+    check_session(state, headers).await?;
+    Ok(claims)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -315,7 +510,7 @@ pub fn check_permission(
 ) -> Result<(), (StatusCode, Json<Value>)> {
     // 1. Superuser / Admin always has full access
     if let Some(claims) = auth {
-        if claims.role == "admin" || claims.role == "superadmin" {
+        if claims.is_admin() {
             return Ok(());
         }
     }
@@ -379,16 +574,15 @@ pub fn check_permission(
                     return Ok(());
                 }
 
-                if r.eq_ignore_ascii_case("auth") || r.contains("@request.auth.id") {
-                    if auth.is_none() {
-                        return Err((
-                            StatusCode::UNAUTHORIZED,
-                            Json(json!({
-                                "code": 401,
-                                "message": "Authentication required. You must be logged in to view records in this collection."
-                            })),
-                        ));
-                    }
+                // Unrecognised rule: fail closed to "must be logged in" instead of public.
+                if auth.is_none() {
+                    return Err((
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({
+                            "code": 401,
+                            "message": "Authentication required. You must be logged in to view records in this collection."
+                        })),
+                    ));
                 }
                 return Ok(());
             }

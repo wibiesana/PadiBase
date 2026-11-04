@@ -80,6 +80,7 @@ async fn test_default_rules_require_authenticated_user() {
                 .method("POST")
                 .uri("/api/collections")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(col_body))
                 .unwrap(),
         )
@@ -188,6 +189,7 @@ async fn test_default_rules_require_authenticated_user() {
                 .method("POST")
                 .uri("/api/collections")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(pub_col_body))
                 .unwrap(),
         )
@@ -224,6 +226,7 @@ async fn test_role_based_access_rules() {
     let _ = std::fs::remove_dir_all(&test_dir);
     let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
     let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url)).await.expect("init app state");
+    let admin_token = PadiBase::core::auth::create_jwt("admin_roles", "admin@roles.local", "admin", None, 7).unwrap();
     let app = create_router(state);
 
     // 1. Create collection `chapters` with `createRule: "@request.auth.role in ['admin', 'creator']"`
@@ -245,6 +248,7 @@ async fn test_role_based_access_rules() {
                 .method("POST")
                 .uri("/api/collections")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(col_body))
                 .unwrap(),
         )
@@ -268,6 +272,7 @@ async fn test_role_based_access_rules() {
                 .method("POST")
                 .uri("/api/collections/users/records")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(user_rec))
                 .unwrap(),
         )
@@ -291,6 +296,7 @@ async fn test_role_based_access_rules() {
                 .method("POST")
                 .uri("/api/collections/users/records")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(creator_rec))
                 .unwrap(),
         )

@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 
 use crate::core::api_collection::{build_all_collections_json, build_single_collection_json};
 use crate::core::app::AppState;
+use crate::core::auth::authenticate_with_query_token;
 use crate::core::db::{get_collection_by_name_or_id, list_collections};
 use crate::core::env::Env;
 
@@ -17,6 +18,29 @@ use crate::core::env::Env;
 pub struct ApiCollectionQuery {
     pub download: Option<bool>,
     pub base_url: Option<String>,
+    pub token: Option<String>,
+}
+
+async fn ensure_admin(
+    state: &AppState,
+    headers: &HeaderMap,
+    query_token: Option<&str>,
+) -> Result<(), (StatusCode, Json<Value>)> {
+    let claims = authenticate_with_query_token(state, headers, query_token)
+        .await?
+        .ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(json!({ "code": 401, "message": "Administrator authentication required." })),
+            )
+        })?;
+    if !claims.is_admin() {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({ "code": 403, "message": "Only administrators can export API collections." })),
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_base_url(headers: &HeaderMap, query_url: Option<&str>) -> String {
@@ -41,6 +65,7 @@ pub async fn export_all(
     headers: HeaderMap,
     Query(query): Query<ApiCollectionQuery>,
 ) -> Result<Response, (StatusCode, Json<Value>)> {
+    ensure_admin(&state, &headers, query.token.as_deref()).await?;
     let cols = list_collections(&state.db).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -82,6 +107,7 @@ pub async fn export_single(
     headers: HeaderMap,
     Query(query): Query<ApiCollectionQuery>,
 ) -> Result<Response, (StatusCode, Json<Value>)> {
+    ensure_admin(&state, &headers, query.token.as_deref()).await?;
     let col = get_collection_by_name_or_id(&state.db, &collection_name)
         .await
         .map_err(|e| {

@@ -593,45 +593,196 @@ pub async fn delete_record_tx(
     Ok(rows_affected > 0)
 }
 
-fn is_unsafe_filter_sql(f: &str) -> bool {
-    if f.contains(';') || f.contains("--") || f.contains("/*") || f.contains("*/") || f.contains('\0') {
-        return true;
+/// Columns that must never be referenced from a client supplied filter. Allowing them would turn
+/// `filter=password~'a'` into a blind oracle that leaks hashes / session keys character by character.
+const HIDDEN_FILTER_COLUMNS: &[&str] = &["password", "passwordhash", "tokenkey", "remember_token"];
+
+/// SQL keywords that can never appear as a bare identifier in a filter (subqueries, DDL, DML, ...).
+const DENIED_FILTER_WORDS: &[&str] = &[
+    "select", "from", "where", "union", "join", "exists", "case", "when", "then", "else", "end",
+    "group", "having", "order", "limit", "offset", "with", "as", "intersect", "except", "insert",
+    "update", "delete", "drop", "alter", "create", "attach", "detach", "pragma", "values", "set",
+    "replace", "truncate", "exec", "execute", "call", "collate", "returning",
+];
+
+/// Convert a PocketBase-style filter into a SQL boolean expression using a strict whitelist
+/// tokenizer. Only column names, literals, comparison operators, `AND`/`OR`/`NOT`, `LIKE`, `IS NULL`,
+/// `IN (...)`, `BETWEEN` and parentheses survive. Function calls, sub-selects, comments, statement
+/// separators, backslashes and cross-table references are rejected (`None`).
+fn tokenize_filter(f: &str) -> Option<String> {
+    if f.len() > 1000 {
+        return None;
     }
-    let upper = f.to_ascii_uppercase();
-    const FORBIDDEN_PATTERNS: &[&str] = &[
-        " UNION ",
-        " DROP ",
-        " DELETE ",
-        " UPDATE ",
-        " INSERT ",
-        " ALTER ",
-        " ATTACH ",
-        " DETACH ",
-        " PRAGMA ",
-        "_ADMINS",
-        "_SETTINGS",
-        "_COLLECTIONS",
-        "_ENDPOINTS",
-        "SQLITE_MASTER",
-        "INFORMATION_SCHEMA",
-        "PG_CATALOG",
-        "SLEEP(",
-        "BENCHMARK(",
-        "LOAD_EXTENSION",
-    ];
-    let padded = format!(" {} ", upper);
-    FORBIDDEN_PATTERNS.iter().any(|pat| padded.contains(pat))
+    let chars: Vec<char> = f.chars().collect();
+    let n = chars.len();
+    let mut i = 0;
+    let mut out: Vec<String> = Vec::new();
+
+    while i < n {
+        let c = chars[i];
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        if out.len() > 120 {
+            return None;
+        }
+        match c {
+            '(' | ')' | ',' => {
+                out.push(c.to_string());
+                i += 1;
+            }
+            '\'' | '"' => {
+                let quote = c;
+                i += 1;
+                let mut s = String::new();
+                let mut closed = false;
+                while i < n {
+                    let d = chars[i];
+                    if d == quote {
+                        if i + 1 < n && chars[i + 1] == quote {
+                            s.push(quote);
+                            i += 2;
+                            continue;
+                        }
+                        closed = true;
+                        i += 1;
+                        break;
+                    }
+                    // Backslash is an escape character on MySQL: refuse it outright.
+                    if d == '\\' || d == '\0' {
+                        return None;
+                    }
+                    s.push(d);
+                    i += 1;
+                    if s.len() > 256 {
+                        return None;
+                    }
+                }
+                if !closed {
+                    return None;
+                }
+                out.push(format!("'{}'", s.replace('\'', "''")));
+            }
+            '&' => {
+                if i + 1 < n && chars[i + 1] == '&' {
+                    out.push("AND".to_string());
+                    i += 2;
+                } else {
+                    return None;
+                }
+            }
+            '|' => {
+                if i + 1 < n && chars[i + 1] == '|' {
+                    out.push("OR".to_string());
+                    i += 2;
+                } else {
+                    return None;
+                }
+            }
+            '=' => {
+                out.push("=".to_string());
+                i += 1;
+            }
+            '!' => {
+                if i + 1 < n && chars[i + 1] == '=' {
+                    out.push("!=".to_string());
+                    i += 2;
+                } else if i + 1 < n && chars[i + 1] == '~' {
+                    out.push("NOT LIKE".to_string());
+                    i += 2;
+                } else {
+                    return None;
+                }
+            }
+            '<' => {
+                if i + 1 < n && chars[i + 1] == '=' {
+                    out.push("<=".to_string());
+                    i += 2;
+                } else if i + 1 < n && chars[i + 1] == '>' {
+                    out.push("<>".to_string());
+                    i += 2;
+                } else {
+                    out.push("<".to_string());
+                    i += 1;
+                }
+            }
+            '>' => {
+                if i + 1 < n && chars[i + 1] == '=' {
+                    out.push(">=".to_string());
+                    i += 2;
+                } else {
+                    out.push(">".to_string());
+                    i += 1;
+                }
+            }
+            '~' => {
+                out.push("LIKE".to_string());
+                i += 1;
+            }
+            '-' | '0'..='9' => {
+                let start = i;
+                if c == '-' {
+                    i += 1;
+                    if i >= n || !chars[i].is_ascii_digit() {
+                        return None; // `--` comments and stray minus signs are not allowed
+                    }
+                }
+                while i < n && (chars[i].is_ascii_digit() || chars[i] == '.') {
+                    i += 1;
+                }
+                out.push(chars[start..i].iter().collect());
+            }
+            c if c.is_ascii_alphabetic() || c == '_' => {
+                let start = i;
+                while i < n && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    i += 1;
+                }
+                let word: String = chars[start..i].iter().collect();
+                let lower = word.to_ascii_lowercase();
+                // `table.column` style references are not allowed
+                if i < n && chars[i] == '.' {
+                    return None;
+                }
+                let mut j = i;
+                while j < n && chars[j].is_whitespace() {
+                    j += 1;
+                }
+                let followed_by_paren = j < n && chars[j] == '(';
+
+                match lower.as_str() {
+                    "and" | "or" | "not" | "like" | "is" | "null" | "in" | "between" => {
+                        out.push(lower.to_ascii_uppercase())
+                    }
+                    "true" => out.push("1".to_string()),
+                    "false" => out.push("0".to_string()),
+                    _ => {
+                        if followed_by_paren
+                            || word.len() > 64
+                            || DENIED_FILTER_WORDS.contains(&lower.as_str())
+                            || HIDDEN_FILTER_COLUMNS.contains(&lower.as_str())
+                        {
+                            return None;
+                        }
+                        out.push(format!("`{}`", word));
+                    }
+                }
+            }
+            _ => return None,
+        }
+    }
+
+    if out.is_empty() {
+        None
+    } else {
+        Some(out.join(" "))
+    }
 }
 
-fn parse_pocketbase_filter(raw: &str, col: &Collection) -> String {
+fn parse_pocketbase_filter(raw: &str, col: &Collection) -> Result<String> {
     let f = raw.trim();
     if f.is_empty() {
-        return String::new();
-    }
-
-    // Block SQL injection payloads immediately
-    if is_unsafe_filter_sql(f) {
-        return "WHERE 1 = 0".to_string();
+        return Ok(String::new());
     }
 
     let has_operator = f.contains('=')
@@ -643,34 +794,42 @@ fn parse_pocketbase_filter(raw: &str, col: &Collection) -> String {
         || f.to_uppercase().contains(" IN ");
 
     if !has_operator {
-        // Quick keyword search across id and text columns
-        let safe_kw = f.replace('\'', "''").replace('%', "\\%").replace('_', "\\_");
-        let mut clauses = vec![format!("`id` LIKE '%{}%'", safe_kw)];
+        // Quick keyword search across id and text columns. The keyword is reduced to a harmless
+        // literal: no backslashes / NULs, quotes doubled, LIKE wildcards escaped with `!`.
+        let kw: String = f
+            .chars()
+            .filter(|c| *c != '\\' && *c != '\0')
+            .take(100)
+            .collect();
+        let safe_kw = kw
+            .replace('!', "!!")
+            .replace('%', "!%")
+            .replace('_', "!_")
+            .replace('\'', "''");
+        let like = |column: &str| format!("`{}` LIKE '%{}%' ESCAPE '!'", column, safe_kw);
+        let mut clauses = vec![like("id")];
         if col.collection_type == CollectionType::Auth {
-            clauses.push(format!("`email` LIKE '%{}%'", safe_kw));
-            clauses.push(format!("`username` LIKE '%{}%'", safe_kw));
+            clauses.push(like("email"));
+            clauses.push(like("username"));
         }
         for field in &col.schema {
             if matches!(
                 field.field_type,
                 FieldType::Text | FieldType::Email | FieldType::Url | FieldType::Select
             ) && super::db::is_safe_identifier(&field.name)
+                && !HIDDEN_FILTER_COLUMNS.contains(&field.name.to_ascii_lowercase().as_str())
             {
-                clauses.push(format!("`{}` LIKE '%{}%'", field.name, safe_kw));
+                clauses.push(like(&field.name));
             }
         }
-        return format!("WHERE ({})", clauses.join(" OR "));
+        return Ok(format!("WHERE ({})", clauses.join(" OR ")));
     }
 
-    // Translate PocketBase filter syntax to SQL WHERE clause
-    let mut expr = f.to_string();
-    expr = expr.replace("&&", " AND ");
-    expr = expr.replace("||", " OR ");
-    expr = expr.replace("!~", " NOT LIKE ");
-    expr = expr.replace('~', " LIKE ");
-    expr = expr.replace("= true", "= 1").replace("=true", "=1");
-    expr = expr.replace("= false", "= 0").replace("=false", "=0");
-    format!("WHERE {}", expr)
+    match tokenize_filter(f) {
+        Some(expr) => Ok(format!("WHERE {}", expr)),
+        // Anything outside the whitelist matches nothing instead of reaching the database.
+        None => Ok("WHERE 1 = 0".to_string()),
+    }
 }
 
 fn build_filter_and_sort_sql(
@@ -678,10 +837,11 @@ fn build_filter_and_sort_sql(
     col: &Collection,
     sort: Option<&str>,
     filter: Option<&str>,
-) -> (String, String) {
-    let filter_sql = filter
-        .map(|f| parse_pocketbase_filter(f, col))
-        .unwrap_or_default();
+) -> Result<(String, String)> {
+    let filter_sql = match filter {
+        Some(f) => parse_pocketbase_filter(f, col)?,
+        None => String::new(),
+    };
 
     let default_sort = if meta.has_created {
         "ORDER BY `created` DESC".to_string()
@@ -737,7 +897,7 @@ fn build_filter_and_sort_sql(
         default_sort
     };
 
-    (filter_sql, sort_sql)
+    Ok((filter_sql, sort_sql))
 }
 
 pub async fn eager_load_relations(
@@ -902,7 +1062,7 @@ pub async fn get_all_records_with_limit(
     offset: Option<usize>,
 ) -> Result<Vec<Record>> {
     let meta = super::db::get_table_metadata(pool, &col.name).await?;
-    let (filter_sql, sort_sql) = build_filter_and_sort_sql(&meta, col, sort, filter);
+    let (filter_sql, sort_sql) = build_filter_and_sort_sql(&meta, col, sort, filter)?;
 
     let limit_clause = match limit {
         Some(lim) => {
@@ -970,7 +1130,7 @@ pub async fn list_records_with(
     let offset = (page - 1) * per_page;
 
     let meta = super::db::get_table_metadata(pool, &col.name).await?;
-    let (filter_sql, sort_sql) = build_filter_and_sort_sql(&meta, col, sort, filter);
+    let (filter_sql, sort_sql) = build_filter_and_sort_sql(&meta, col, sort, filter)?;
 
     // Count query
     let count_sql = format!(
@@ -1105,7 +1265,7 @@ pub async fn count_records(
     filter: Option<&str>,
 ) -> Result<i64> {
     let meta = super::db::get_table_metadata(pool, &col.name).await?;
-    let (filter_sql, _) = build_filter_and_sort_sql(&meta, col, None, filter);
+    let (filter_sql, _) = build_filter_and_sort_sql(&meta, col, None, filter)?;
     let count_sql = format!(
         "SELECT COUNT(*) as `total` FROM `{}` {};",
         col.name, filter_sql

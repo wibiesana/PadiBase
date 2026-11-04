@@ -122,6 +122,7 @@ async fn test_full_padi_baas_flow() {
                 .method("POST")
                 .uri("/api/collections")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(col_body))
                 .unwrap(),
         )
@@ -216,6 +217,7 @@ async fn test_per_collection_realtime_rule() {
     let _ = std::fs::remove_dir_all(&test_dir);
     let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
     let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url)).await.expect("init app state");
+    let admin_token = PadiBase::core::auth::create_jwt("admin_rt", "rt@padi.local", "admin", None, 7).unwrap();
     let mut rx = state.realtime.subscribe();
     let app = create_router(state);
 
@@ -238,6 +240,7 @@ async fn test_per_collection_realtime_rule() {
                 .method("POST")
                 .uri("/api/collections")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(col_body))
                 .unwrap(),
         )
@@ -283,6 +286,7 @@ async fn test_per_collection_realtime_rule() {
                 .method("PATCH")
                 .uri("/api/collections/audit_logs")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(update_col_body))
                 .unwrap(),
         )
@@ -326,6 +330,7 @@ async fn test_all_records_and_padi_rust_envelope() {
     let _ = std::fs::remove_dir_all(&test_dir);
     let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
     let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url)).await.expect("init app state");
+    let admin_token = PadiBase::core::auth::create_jwt("admin_all", "all@padi.local", "admin", None, 7).unwrap();
     let app = create_router(state);
 
     // Create collection `posts`
@@ -346,6 +351,7 @@ async fn test_all_records_and_padi_rust_envelope() {
                 .method("POST")
                 .uri("/api/collections")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(col_body))
                 .unwrap(),
         )
@@ -484,6 +490,7 @@ async fn test_eager_load_relations_student() {
         .await
         .expect("insert grade");
 
+    let admin_token = PadiBase::core::auth::create_jwt("admin_rel", "rel@padi.local", "admin", None, 7).unwrap();
     let app = create_router(state);
 
     // Sync collections
@@ -493,6 +500,7 @@ async fn test_eager_load_relations_student() {
             Request::builder()
                 .method("POST")
                 .uri("/api/collections/sync")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -555,6 +563,7 @@ async fn test_eager_load_relations_student() {
                 .method("PATCH")
                 .uri("/api/collections/grades")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(patch_payload))
                 .unwrap(),
         )
@@ -596,6 +605,7 @@ async fn test_eager_load_relations_student() {
                 .method("PATCH")
                 .uri("/api/collections/grades")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(patch_payload2))
                 .unwrap(),
         )
@@ -631,6 +641,7 @@ async fn test_eager_load_relations_student() {
         .oneshot(
             Request::builder()
                 .uri("/api/api-collection")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -654,6 +665,7 @@ async fn test_eager_load_relations_student() {
         .oneshot(
             Request::builder()
                 .uri("/api/api-collection?download=true")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -674,6 +686,7 @@ async fn test_eager_load_relations_student() {
         .oneshot(
             Request::builder()
                 .uri("/api/collections/grades/api-collection?download=true")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -706,6 +719,7 @@ async fn test_file_upload_download_and_delete() {
     let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
         .await
         .expect("init app state");
+    let admin_token = PadiBase::core::auth::create_jwt("admin_file", "file@padi.local", "admin", None, 7).unwrap();
     let app = create_router(state);
 
     // 1. Create collection `documents` with fields `title` and `file`
@@ -729,6 +743,7 @@ async fn test_file_upload_download_and_delete() {
                 .method("POST")
                 .uri("/api/collections")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(col_body))
                 .unwrap(),
         )
@@ -892,6 +907,7 @@ async fn test_settings_reload_in_memory() {
     let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
         .await
         .expect("init app state");
+    let admin_token = PadiBase::core::auth::create_jwt("admin_set", "set@padi.local", "admin", None, 7).unwrap();
     let app = create_router(state);
 
     // 1. Initial settings
@@ -910,7 +926,7 @@ async fn test_settings_reload_in_memory() {
     let json_val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert!(json_val["item"]["meta"]["appName"].is_string());
 
-    // 2. User updates setting
+    // 2. Admin updates setting
     let updated_payload = json!({
         "meta": {
             "appName": "Super Padi App",
@@ -927,6 +943,7 @@ async fn test_settings_reload_in_memory() {
                 .method("PATCH")
                 .uri("/api/settings")
                 .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::from(patch_body))
                 .unwrap(),
         )
@@ -1146,6 +1163,9 @@ async fn test_auth_flow_and_transactions() {
         .await
         .unwrap();
     assert_eq!(res_login_new.status(), StatusCode::OK);
+    let login_bytes = axum::body::to_bytes(res_login_new.into_body(), 1024 * 1024).await.unwrap();
+    let login_val: serde_json::Value = serde_json::from_slice(&login_bytes).unwrap();
+    let user_token = login_val["item"]["token"].as_str().or_else(|| login_val["token"].as_str()).unwrap().to_string();
 
     // 5. Test Change Password while logged in
     let change_pw_body = serde_json::to_vec(&json!({
@@ -1168,6 +1188,13 @@ async fn test_auth_flow_and_transactions() {
         .await
         .unwrap();
     assert_eq!(res_change.status(), StatusCode::OK);
+    let change_bytes = axum::body::to_bytes(res_change.into_body(), 1024 * 1024).await.unwrap();
+    let change_val: serde_json::Value = serde_json::from_slice(&change_bytes).unwrap();
+    let user_token = change_val["item"]["token"]
+        .as_str()
+        .or_else(|| change_val["token"].as_str())
+        .unwrap()
+        .to_string();
 
     // 6. Test Atomic Transactions (`POST /api/transactions`) & Custom Transfer (`POST /api/custom/transfer`)
     let col_wallets = serde_json::to_vec(&json!({
@@ -1701,6 +1728,7 @@ async fn test_unified_backup_and_restore_zip() {
     let note_file_path = note_file_dir.join("attachment.txt");
     std::fs::write(&note_file_path, "Hello PadiBase Unified Backup!").unwrap();
 
+    let admin_token = PadiBase::core::auth::create_jwt("admin_bk", "bk@padi.local", "admin", None, 7).unwrap();
     let app = create_router(state.clone());
 
     // 1. Create unified backup
@@ -1710,6 +1738,7 @@ async fn test_unified_backup_and_restore_zip() {
             Request::builder()
                 .method("POST")
                 .uri("/api/backups")
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1732,6 +1761,7 @@ async fn test_unified_backup_and_restore_zip() {
             Request::builder()
                 .method("GET")
                 .uri(format!("/api/backups/{}", backup_key))
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1756,6 +1786,7 @@ async fn test_unified_backup_and_restore_zip() {
             Request::builder()
                 .method("POST")
                 .uri(format!("/api/backups/{}/restore", backup_key))
+                .header("Authorization", format!("Bearer {}", admin_token))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -1771,6 +1802,357 @@ async fn test_unified_backup_and_restore_zip() {
     assert!(note_file_path.exists(), "Storage file must be restored");
     let content = std::fs::read_to_string(&note_file_path).unwrap();
     assert_eq!(content, "Hello PadiBase Unified Backup!");
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
+async fn test_cron_jobs_scheduler_and_execution_flow() {
+    let test_dir = std::path::PathBuf::from(format!(
+        "./target/test_cron_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let _ = std::fs::remove_dir_all(&test_dir);
+
+    // 1. Test Cron Schedule expression evaluator
+    assert!(PadiBase::core::cron::validate_cron_schedule("*/15 * * * *").is_ok());
+    assert!(PadiBase::core::cron::validate_cron_schedule("@hourly").is_ok());
+    assert!(PadiBase::core::cron::validate_cron_schedule("@daily").is_ok());
+    assert!(PadiBase::core::cron::validate_cron_schedule("@every 10m").is_ok());
+    assert!(PadiBase::core::cron::validate_cron_schedule("invalid syntax").is_err());
+
+    let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
+        .await
+        .unwrap();
+
+    // Create an admin to obtain authorization token
+    state
+        .create_admin("cron_admin@example.com", "password123")
+        .await
+        .unwrap();
+
+    let admin_token = PadiBase::core::auth::create_jwt("admin_1", "cron_admin@example.com", "admin", None, 7).unwrap();
+    let app = PadiBase::api::router::create_router(state.clone());
+
+    // 2. Create a SQL Cron Job
+    let create_sql_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/cron/jobs")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Database Cleanup Task",
+                        "schedule": "*/10 * * * *",
+                        "job_type": "sql",
+                        "sql_query": "CREATE TABLE IF NOT EXISTS _cron_test (id INTEGER PRIMARY KEY, note TEXT); INSERT INTO _cron_test (note) VALUES ('cron execution test');"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_sql_res.status(), StatusCode::CREATED);
+    let bytes = axum::body::to_bytes(create_sql_res.into_body(), 1024 * 1024).await.unwrap();
+    let created_sql_val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let sql_job_id = created_sql_val["item"]["id"].as_str().unwrap().to_string();
+
+    // 3. Immediately trigger manual run of the SQL Cron Job
+    let run_sql_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/cron/jobs/{}/run", sql_job_id))
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(run_sql_res.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(run_sql_res.into_body(), 1024 * 1024).await.unwrap();
+    let run_sql_val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let res_obj = if run_sql_val.get("item").is_some() {
+        &run_sql_val["item"]
+    } else {
+        &run_sql_val["result"]
+    };
+    assert_eq!(res_obj["status"], "success");
+    assert!(res_obj["result"].as_str().unwrap().contains("SQL statement(s) successfully"));
+
+    // 4. Create an HTTP Cron Job
+    let create_http_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/cron/jobs")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Periodic Health Ping",
+                        "schedule": "@hourly",
+                        "job_type": "http",
+                        "http_method": "GET",
+                        "http_url": "/api/health"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_http_res.status(), StatusCode::CREATED);
+    let bytes = axum::body::to_bytes(create_http_res.into_body(), 1024 * 1024).await.unwrap();
+    let created_http_val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let http_job_id = created_http_val["item"]["id"].as_str().unwrap().to_string();
+
+    // 5. List all Cron Jobs
+    let list_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/cron/jobs")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(list_res.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(list_res.into_body(), 1024 * 1024).await.unwrap();
+    let list_val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let items = list_val
+        .get("item")
+        .or_else(|| list_val.get("items"))
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(items[0]["next_run_at"].is_string());
+
+    // 6. Update (Patch) job to disable it
+    let patch_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri(format!("/api/cron/jobs/{}", sql_job_id))
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(json!({ "enabled": false }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(patch_res.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(patch_res.into_body(), 1024 * 1024).await.unwrap();
+    let patch_val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let patched_item = patch_val.get("item").unwrap_or(&patch_val);
+    assert_eq!(patched_item["enabled"], false);
+
+    // 7. Delete job
+    let del_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/cron/jobs/{}", http_job_id))
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(del_res.status(), StatusCode::OK);
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
+async fn test_security_hardening_and_access_control() {
+    let test_dir = std::path::PathBuf::from(format!(
+        "./target/test_sec_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let _ = std::fs::remove_dir_all(&test_dir);
+    let sqlite_url = format!(
+        "sqlite://{}/data.db",
+        test_dir.display().to_string().replace('\\', "/")
+    );
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
+        .await
+        .expect("init app state");
+    let app = create_router(state.clone());
+
+    // 1. Unauthenticated requests to admin endpoints MUST be rejected (401)
+    for (method, uri) in [
+        ("GET", "/api/collections"),
+        ("POST", "/api/collections/sync"),
+        ("GET", "/api/backups"),
+        ("POST", "/api/backups"),
+        ("PATCH", "/api/settings"),
+        ("GET", "/api/api-collection"),
+        ("GET", "/api/admins"),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .header("Content-Type", "application/json")
+                    .body(Body::from("{}"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            res.status(),
+            StatusCode::UNAUTHORIZED,
+            "Expected 401 for unauthenticated {} {}",
+            method,
+            uri
+        );
+    }
+
+    // 2. First admin bootstrap succeeds; second anonymous admin creation MUST fail (401)
+    let first_admin = serde_json::to_vec(&json!({
+        "email": "root@padi.local",
+        "password": "rootpassword12345"
+    }))
+    .unwrap();
+    let res1 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admins")
+                .header("Content-Type", "application/json")
+                .body(Body::from(first_admin))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res1.status(), StatusCode::CREATED);
+
+    let second_admin = serde_json::to_vec(&json!({
+        "email": "attacker@padi.local",
+        "password": "attackerpassword123"
+    }))
+    .unwrap();
+    let res2 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admins")
+                .header("Content-Type", "application/json")
+                .body(Body::from(second_admin))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res2.status(), StatusCode::UNAUTHORIZED);
+
+    // 3. Register a normal user and verify privilege escalation fields are stripped
+    let reg_body = serde_json::to_vec(&json!({
+        "email": "normal@padi.local",
+        "password": "normalpassword123",
+        "name": "Normal User",
+        "role": "admin",
+        "verified": true
+    }))
+    .unwrap();
+    let res_reg = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/register")
+                .header("Content-Type", "application/json")
+                .body(Body::from(reg_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_reg.status(), StatusCode::CREATED);
+    let reg_bytes = axum::body::to_bytes(res_reg.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let reg_val: serde_json::Value = serde_json::from_slice(&reg_bytes).unwrap();
+    assert_eq!(reg_val["item"]["record"]["role"], "user");
+    let user_token = reg_val["item"]["token"].as_str().unwrap().to_string();
+
+    // 4. SQL injection via filter parameter MUST be blocked (returns 0 items with WHERE 1 = 0, never leaks data)
+    for payload in [
+        "1=1; DROP TABLE users",
+        "name = 'a' UNION SELECT passwordHash FROM users",
+        "passwordHash != ''",
+        "1=1 -- comment",
+    ] {
+        let encoded: String = payload
+            .bytes()
+            .map(|b| format!("%{:02X}", b))
+            .collect();
+        let res_sqli = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/collections/users/records?filter={}", encoded))
+                    .header("Authorization", format!("Bearer {}", user_token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res_sqli.status(), StatusCode::OK);
+        let sqli_bytes = axum::body::to_bytes(res_sqli.into_body(), 1024 * 1024)
+            .await
+            .unwrap();
+        let sqli_val: serde_json::Value = serde_json::from_slice(&sqli_bytes).unwrap();
+        assert_eq!(
+            sqli_val["item"].as_array().unwrap().len(),
+            0,
+            "Expected 0 leaked rows for SQLi filter: {}",
+            payload
+        );
+    }
+
+    // 5. Logout revokes the JWT session immediately
+    let res_logout = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/logout")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_logout.status(), StatusCode::OK);
+
+    let res_after_logout = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/auth/me")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_after_logout.status(), StatusCode::UNAUTHORIZED);
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }

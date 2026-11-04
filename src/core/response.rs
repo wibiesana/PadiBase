@@ -5,13 +5,14 @@
 
 use axum::{
     body::{to_bytes, Body},
-    extract::{Request, State},
+    extract::{ConnectInfo, Request, State},
     http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -30,27 +31,50 @@ struct RateBucket {
 
 static RATE_LIMITER: LazyLock<Mutex<HashMap<String, RateBucket>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(256)));
+const MAX_RATE_BUCKETS: usize = 16_384;
 
-fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
-        if let Some(first) = xff.split(',').next() {
-            let trimmed = first.trim();
-            if !trimmed.is_empty() {
+fn extract_client_ip(req: &Request) -> String {
+    let peer_ip = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ci| ci.0.ip());
+    let trust_proxy = Env::get_bool("TRUST_PROXY", false)
+        || peer_ip.map(|ip| ip.is_loopback()).unwrap_or(false);
+
+    if trust_proxy {
+        let headers = req.headers();
+        if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+            if let Some(first) = xff.split(',').next() {
+                let trimmed = first.trim();
+                if !trimmed.is_empty() && trimmed.len() <= 64 {
+                    return trimmed.to_string();
+                }
+            }
+        }
+        if let Some(xri) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+            let trimmed = xri.trim();
+            if !trimmed.is_empty() && trimmed.len() <= 64 {
                 return trimmed.to_string();
             }
         }
     }
-    if let Some(xri) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-        let trimmed = xri.trim();
-        if !trimmed.is_empty() {
-            return trimmed.to_string();
-        }
-    }
-    "127.0.0.1".to_string()
+    peer_ip
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "127.0.0.1".to_string())
 }
 
-/// Check rate limit for IP if `RATE_LIMIT_PER_MINUTE > 0`. Returns `Ok((limit, remaining))` or `Err(retry_after_secs)`.
-fn check_rate_limit(ip: &str, max_per_min: u64) -> Result<(u64, u64), u64> {
+fn is_auth_sensitive_path(path: &str) -> bool {
+    path.ends_with("/auth-with-password")
+        || path.ends_with("/login")
+        || path.ends_with("/register")
+        || path.ends_with("/forgot-password")
+        || path.ends_with("/request-password-reset")
+        || path.ends_with("/reset-password")
+        || path.ends_with("/confirm-password-reset")
+}
+
+/// Check rate limit for bucket key if `max_per_min > 0`. Returns `Ok((limit, remaining))` or `Err(retry_after_secs)`.
+fn check_rate_limit(key: &str, max_per_min: u64) -> Result<(u64, u64), u64> {
     if max_per_min == 0 {
         return Ok((0, 0));
     }
@@ -60,12 +84,15 @@ fn check_rate_limit(ip: &str, max_per_min: u64) -> Result<(u64, u64), u64> {
         return Ok((max_per_min, max_per_min));
     };
 
-    // Periodic cleanup if map grows large
-    if map.len() > 4096 {
+    // Bounded cleanup so spoofed keys can never cause unbounded memory growth
+    if map.len() >= 4096 {
         map.retain(|_, b| now.duration_since(b.window_start) < window);
+        if map.len() >= MAX_RATE_BUCKETS {
+            map.clear();
+        }
     }
 
-    let bucket = map.entry(ip.to_string()).or_insert(RateBucket {
+    let bucket = map.entry(key.to_string()).or_insert(RateBucket {
         count: 0,
         window_start: now,
     });
@@ -96,17 +123,24 @@ fn apply_security_headers(headers: &mut HeaderMap, rate_info: Option<(u64, u64)>
             HeaderValue::from_static("SAMEORIGIN"),
         );
         headers.insert(
-            HeaderName::from_static("x-xss-protection"),
-            HeaderValue::from_static("1; mode=block"),
-        );
-        headers.insert(
             header::REFERRER_POLICY,
             HeaderValue::from_static("strict-origin-when-cross-origin"),
         );
         headers.insert(
-            HeaderName::from_static("x-powered-by"),
-            HeaderValue::from_static("PadiBase"),
+            HeaderName::from_static("x-permitted-cross-domain-policies"),
+            HeaderValue::from_static("none"),
         );
+        if Env::is_production() {
+            headers.insert(
+                header::STRICT_TRANSPORT_SECURITY,
+                HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+            );
+        } else {
+            headers.insert(
+                HeaderName::from_static("x-powered-by"),
+                HeaderValue::from_static("PadiBase"),
+            );
+        }
     }
     if let Some((limit, remaining)) = rate_info {
         if limit > 0 {
@@ -305,11 +339,27 @@ pub async fn padi_response_middleware(
         return res;
     }
 
-    // Fast in-memory IP Rate Limiting (matching Padi Framework rate limiter)
-    let rate_limit = Env::rate_limit_per_minute() as u64;
-    let rate_info = if rate_limit > 0 {
-        let ip = extract_client_ip(req.headers());
-        match check_rate_limit(&ip, rate_limit) {
+    // Fast in-memory IP Rate Limiting (matching Padi Framework rate limiter) + dedicated auth brute-force guard
+    let global_limit = Env::rate_limit_per_minute() as u64;
+    let is_auth_ep = is_auth_sensitive_path(path);
+    let auth_limit = if is_auth_ep {
+        Env::get_int("AUTH_RATE_LIMIT_PER_MINUTE", 60).max(0) as u64
+    } else {
+        0
+    };
+    let effective_limit = if auth_limit > 0 && (global_limit == 0 || auth_limit < global_limit) {
+        auth_limit
+    } else {
+        global_limit
+    };
+    let rate_info = if effective_limit > 0 {
+        let ip = extract_client_ip(&req);
+        let bucket_key = if is_auth_ep && effective_limit == auth_limit {
+            format!("auth:{}", ip)
+        } else {
+            ip
+        };
+        match check_rate_limit(&bucket_key, effective_limit) {
             Ok(info) => Some(info),
             Err(retry_after) => {
                 let err_json = format_padi_json(
@@ -323,7 +373,7 @@ pub async fn padi_response_middleware(
                     &[],
                 );
                 let mut res = (StatusCode::TOO_MANY_REQUESTS, axum::Json(err_json)).into_response();
-                apply_security_headers(res.headers_mut(), Some((rate_limit, 0)));
+                apply_security_headers(res.headers_mut(), Some((effective_limit, 0)));
                 if let Ok(v) = HeaderValue::from_str(&retry_after.to_string()) {
                     res.headers_mut().insert(header::RETRY_AFTER, v);
                 }
@@ -333,6 +383,19 @@ pub async fn padi_response_middleware(
     } else {
         None
     };
+
+    // Enforce tokenKey session revocation across every API request carrying a Bearer token
+    if req.headers().contains_key(header::AUTHORIZATION) && !path.ends_with("/logout") {
+        if let Err((status, axum::Json(err_val))) =
+            super::auth::check_session(&state, req.headers()).await
+        {
+            let formatted =
+                format_padi_json(status.as_u16(), err_val, state.db.driver_name(), 0.0, &[]);
+            let mut res = (status, axum::Json(formatted)).into_response();
+            apply_security_headers(res.headers_mut(), rate_info);
+            return res;
+        }
+    }
 
     let debug_enabled = Env::is_debug() || Env::is_development();
     let start = std::time::Instant::now();
@@ -416,7 +479,7 @@ pub async fn padi_response_middleware(
     let db_driver = state.db.driver_name();
 
     let (mut parts, body) = res.into_parts();
-    let Ok(bytes) = to_bytes(body, 64 * 1024 * 1024).await else {
+    let Ok(bytes) = to_bytes(body, 16 * 1024 * 1024).await else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
 

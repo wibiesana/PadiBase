@@ -59,7 +59,16 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tokio-util = { version = "0.7", features = ["io"] }
 hex = "0.4"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
+lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [profile.dev]
-incremental = false
+incremental = true
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
 

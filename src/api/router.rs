@@ -1,8 +1,13 @@
 use axum::{
-    extract::Path,
+    extract::{DefaultBodyLimit, Path},
+    http::HeaderMap,
     middleware,
-    routing::{any, delete, get, post, put},
+    routing::{any, delete, get, patch, post, put},
     Router,
+};
+use tower_http::compression::{
+    predicate::{NotForContentType, Predicate, SizeAbove},
+    CompressionLayer,
 };
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
@@ -12,7 +17,7 @@ use crate::core::response::padi_response_middleware;
 use crate::ui::serve_admin_ui;
 
 use super::{
-    admins, api_collection, auth_records, backups, collections, custom, files, health, realtime,
+    admins, api_collection, auth_records, backups, collections, cron, custom, files, health, realtime,
     records, transactions,
 };
 
@@ -72,7 +77,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/admins/auth-with-password", post(admins::auth_with_password))
         .route("/api/admins", get(admins::list_admins).post(admins::create_admin))
         .route("/api/admins/{id}", delete(admins::delete_admin))
-        .route("/api/settings", get(admins::get_settings).patch(admins::update_settings))
+        .route("/api/settings", get(admins::get_settings).patch(admins::update_settings).post(admins::update_settings))
+        .route("/api/settings/test-email", post(admins::test_email))
+        // Cron & Background Tasks
+        .route("/api/cron/jobs", get(cron::list_jobs).post(cron::create_job))
+        .route("/api/cron/jobs/{id}", patch(cron::update_job).delete(cron::delete_job))
+        .route("/api/cron/jobs/{id}/run", post(cron::run_job_now))
         // Tables & Collections (dual routing: /api/tables and /api/collections)
         .route("/api/collections", get(collections::list).post(collections::create))
         .route("/api/collections/sync", post(collections::sync).get(collections::sync))
@@ -483,7 +493,11 @@ pub fn create_router(state: AppState) -> Router {
         )
         // System Backups
         .route("/api/backups", get(backups::list_backups).post(backups::create_backup))
-        .route("/api/backups/upload", post(backups::upload_backup))
+        .route(
+            "/api/backups/upload",
+            post(backups::upload_backup)
+                .layer(DefaultBodyLimit::max(backups::max_upload_bytes())),
+        )
         .route(
             "/api/backups/{filename}",
             get(backups::download_backup).delete(backups::delete_backup),
@@ -492,32 +506,43 @@ pub fn create_router(state: AppState) -> Router {
         // Admin UI Dashboard
         .route(
             "/dashboard",
-            get(|| async { serve_admin_ui(Path(Some("index.html".to_string()))).await }),
+            get(|h: HeaderMap| async move { serve_admin_ui(h, Path(Some("index.html".to_string()))).await }),
         )
         .route(
             "/dashboard/",
-            get(|| async { serve_admin_ui(Path(Some("index.html".to_string()))).await }),
+            get(|h: HeaderMap| async move { serve_admin_ui(h, Path(Some("index.html".to_string()))).await }),
         )
         .route(
             "/dashboard/{*path}",
-            get(|Path(path): Path<String>| async move { serve_admin_ui(Path(Some(path))).await }),
+            get(|h: HeaderMap, Path(path): Path<String>| async move {
+                serve_admin_ui(h, Path(Some(path))).await
+            }),
         )
         .route(
             "/favicon.ico",
-            get(|| async { serve_admin_ui(Path(Some("favicon.svg".to_string()))).await }),
+            get(|h: HeaderMap| async move { serve_admin_ui(h, Path(Some("favicon.svg".to_string()))).await }),
         )
         .route(
             "/favicon.svg",
-            get(|| async { serve_admin_ui(Path(Some("favicon.svg".to_string()))).await }),
+            get(|h: HeaderMap| async move { serve_admin_ui(h, Path(Some("favicon.svg".to_string()))).await }),
         )
         .route(
             "/",
-            get(|| async { serve_admin_ui(Path(Some("index.html".to_string()))).await }),
+            get(|h: HeaderMap| async move { serve_admin_ui(h, Path(Some("index.html".to_string()))).await }),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             padi_response_middleware,
         ))
+        .layer(DefaultBodyLimit::max(files::max_file_bytes() + 2 * 1024 * 1024))
+        .layer(
+            CompressionLayer::new().compress_when(
+                SizeAbove::new(512)
+                    .and(NotForContentType::new("text/event-stream"))
+                    .and(NotForContentType::IMAGES)
+                    .and(NotForContentType::GRPC),
+            ),
+        )
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

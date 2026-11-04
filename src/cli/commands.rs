@@ -167,11 +167,29 @@ pub async fn run_cli() -> Result<()> {
 
     match cli.command.unwrap_or(Commands::Serve { http: None }) {
         Commands::Serve { http } => {
+            if Env::is_production() && crate::core::auth::jwt_secret_is_weak() {
+                anyhow::bail!(
+                    "Refusing to start in production mode with a default or weak JWT_SECRET (< 32 chars). Set a strong JWT_SECRET in your .env or environment."
+                );
+            }
+            if crate::core::auth::jwt_secret_is_weak() {
+                tracing::warn!(
+                    "⚠️  Using default or short JWT_SECRET. Set a >=32 character JWT_SECRET in .env before deploying to production."
+                );
+            }
+            if Env::is_production() && Env::get_or("CORS_ALLOWED_ORIGINS", "*").trim() == "*" {
+                tracing::warn!(
+                    "⚠️  CORS_ALLOWED_ORIGINS is '*' in production. Consider restricting it to your frontend origin(s)."
+                );
+            }
+
             let state = AppState::new_with_db_url(&data_dir, db_url.as_deref()).await?;
             let db_driver = state.db.driver_name();
             let app_env = Env::get_or("APP_ENV", "development");
             let app_debug = Env::is_debug();
             let resp_fmt = Env::get_or("RESPONSE_FORMAT", "full");
+            // Start background cron scheduler daemon
+            crate::core::cron::start_cron_scheduler(state.db.clone());
             let app = create_router(state);
 
             let bind_str = http.unwrap_or_else(|| {
@@ -189,7 +207,15 @@ pub async fn run_cli() -> Result<()> {
             info!("👉 REST API endpoints available at http://{}/api/", addr);
 
             let listener = tokio::net::TcpListener::bind(addr).await?;
-            axum::serve(listener, app).await?;
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .with_graceful_shutdown(async {
+                let _ = tokio::signal::ctrl_c().await;
+                info!("🛑 Shutdown signal received, draining active requests...");
+            })
+            .await?;
         }
         Commands::Admin { action } => match action {
             AdminCommands::Create { email, password } => {
