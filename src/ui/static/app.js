@@ -466,7 +466,7 @@ let currentCollection = "users";
       if (view !== 'collections' && window.innerWidth < 1024) {
         toggleMobileSidebar(false);
       }
-      const views = ['collections', 'endpoints', 'logs', 'settings'];
+      const views = ['collections', 'endpoints', 'logs', 'settings', 'sqlbuilder'];
       views.forEach(v => {
         const el = document.getElementById(`${v}View`);
         if (el) el.classList.toggle('hidden', v !== view);
@@ -489,6 +489,13 @@ let currentCollection = "users";
         loadBackups();
         loadAdminAccounts();
         loadCronJobs();
+      } else if (view === 'sqlbuilder') {
+        initQueryBuilder();
+      } else if (view === 'logs') {
+        updateRealtimeTableOptions();
+        if (!sseSource || sseSource.readyState === EventSource.CLOSED) {
+          initSSE();
+        }
       }
     }
 
@@ -1013,23 +1020,23 @@ let currentCollection = "users";
         const isOverride = isOverrideEndpointPath(ep.path);
         const method = ep.method || 'GET';
         return `
-          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold'}">
+          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-slate-200/90 text-slate-900 border-slate-300 shadow-xs font-bold' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200/60 font-semibold'}">
             <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
               <div class="flex items-center space-x-2.5 truncate">
-                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">
+                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white text-slate-800 shadow-2xs' : 'bg-slate-100 text-slate-600'}">
                   <i class="fa-solid fa-code text-[11px]"></i>
                 </span>
                 <div class="text-left truncate">
                   <div class="truncate font-mono">${ep.name || ep.path}</div>
-                  <div class="text-[10px] ${isActive ? 'text-emerald-100' : 'text-slate-400'}">${fullDisplayPath}</div>
+                  <div class="text-[10px] ${isActive ? 'text-slate-500 font-medium' : 'text-slate-400'}">${fullDisplayPath}</div>
                 </div>
               </div>
               <div class="flex items-center space-x-1 shrink-0 ml-1">
-                ${isOverride ? `<span class="px-1.5 py-0.5 rounded text-[8px] font-mono font-extrabold tracking-wider ${isActive ? 'bg-amber-300 text-amber-950 shadow-2xs' : 'bg-amber-100 text-amber-900 border border-amber-300'}" title="Overrides Built-in Route">OVERRIDE</span>` : ''}
-                <span class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-extrabold ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">${method}</span>
+                ${isOverride ? `<span class="px-1.5 py-0.5 rounded text-[8px] font-mono font-extrabold tracking-wider ${isActive ? 'bg-amber-400 text-amber-950 shadow-2xs' : 'bg-amber-100 text-amber-900 border border-amber-300'}" title="Overrides Built-in Route">OVERRIDE</span>` : ''}
+                <span class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-extrabold ${isActive ? 'bg-white text-slate-800 shadow-2xs border border-slate-200' : 'bg-slate-100 text-slate-700'}">${method}</span>
               </div>
             </button>
-            <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="p-2 mr-1 rounded-lg ${isActive ? 'text-emerald-100 hover:bg-white/15 hover:text-white' : 'text-slate-400 hover:bg-emerald-100 hover:text-emerald-800'} transition" title="Edit Endpoint">
+            <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="p-2 mr-1 rounded-lg ${isActive ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/60' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'} transition" title="Edit Endpoint">
               <i class="fa-solid fa-sliders text-[11px]"></i>
             </button>
           </div>
@@ -1214,6 +1221,8 @@ let currentCollection = "users";
     let qbFilterConditions = []; // Array of { logic: 'AND', col: '', op: '=', val: ':val' }
     let qbJoins = []; // Array of { id, type: 'LEFT JOIN'|'INNER JOIN'|'RIGHT JOIN', table, mainCol, joinCol, selectedCols: Set() }
     let qbExtraTables = []; // Array of { id, table, selectedCols: Set(), whereCol, whereVal }
+    let qbCurrentResultTab = 'json'; // 'json' | 'table'
+    let qbLastResultData = null;
 
     function qbEscapeAttr(str) {
       if (str === null || str === undefined) return '';
@@ -1270,12 +1279,15 @@ let currentCollection = "users";
       populateQbTables();
       if (!qbSelectedTable && collections.length > 0) {
         qbSelectedTable = currentCollection || collections[0].name;
-        const sel = document.getElementById('qbTableSelect');
-        if (sel) sel.value = qbSelectedTable;
+      }
+      const sel = document.getElementById('qbTableSelect');
+      if (sel && qbSelectedTable) {
+        sel.value = qbSelectedTable;
         onQbTableChange(qbSelectedTable, false);
       }
       renderQbJoins();
       renderQbExtraTables();
+      buildSqlFromQb(true);
     }
 
     function populateQbTables() {
@@ -1984,6 +1996,11 @@ let currentCollection = "users";
     }
 
     function applyQbPlainText(message = 'hello') {
+      const qbSql = document.getElementById('qbSqlOutput');
+      const qbParams = document.getElementById('qbParamsOutput');
+      if (qbSql) qbSql.value = `'${message}'`;
+      if (qbParams) qbParams.value = '{}';
+
       const nameEl = document.getElementById('epNameInput');
       const pathEl = document.getElementById('epPathInput');
       const methodEl = document.getElementById('epMethodInput');
@@ -1998,7 +2015,9 @@ let currentCollection = "users";
       if (sqlEl) sqlEl.value = `'${message}'`;
       if (paramsEl) paramsEl.value = '{}';
 
-      updateCustomEpUrlPreview();
+      if (typeof updateCustomEpUrlPreview === 'function') {
+        updateCustomEpUrlPreview();
+      }
       showToast(`Set direct plain text '${message}' (No SQL)`);
     }
 
@@ -2226,17 +2245,352 @@ let currentCollection = "users";
         sql = `SELECT COUNT(*) AS total_count\nFROM \`${table}\`${joinClauses}${whereClause} LIMIT 1;`;
       }
 
+      const qbSqlEl = document.getElementById('qbSqlOutput');
+      if (qbSqlEl) {
+        qbSqlEl.value = sql;
+      }
+      const qbParamsEl = document.getElementById('qbParamsOutput');
+      if (qbParamsEl) {
+        qbParamsEl.value = Object.keys(paramsObj).length > 0 ? JSON.stringify(paramsObj, null, 2) : '{}';
+      }
+
       const sqlEl = document.getElementById('epSqlInput');
-      if (sqlEl) {
+      if (sqlEl && force) {
         sqlEl.value = sql;
         autoDetectTransactionCheckbox();
       }
 
       const paramsEl = document.getElementById('epTestParamsInput');
-      if (paramsEl && Object.keys(paramsObj).length > 0) {
+      if (paramsEl && force && Object.keys(paramsObj).length > 0) {
         paramsEl.value = JSON.stringify(paramsObj, null, 2);
       }
     }
+
+    // ================= VISUAL SQL BUILDER ACTIONS =================
+    function copyGeneratedSql() {
+      const sqlEl = document.getElementById('qbSqlOutput');
+      const sql = sqlEl ? sqlEl.value : '';
+      if (!sql.trim()) {
+        showToast('No SQL generated to copy', 'warning');
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(sql).then(() => {
+          showToast('SQL query copied to clipboard!', 'success');
+        }).catch(() => {
+          fallbackCopyText(sql);
+        });
+      } else {
+        fallbackCopyText(sql);
+      }
+    }
+
+    function fallbackCopyText(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        showToast('SQL query copied to clipboard!', 'success');
+      } catch (e) {
+        showToast('Failed to copy SQL to clipboard', 'error');
+      }
+      document.body.removeChild(ta);
+    }
+
+    function insertSqlIntoCustomApi() {
+      const sql = document.getElementById('qbSqlOutput')?.value || '';
+      if (!sql.trim()) {
+        showToast('No SQL query generated to insert into Custom API', 'warning');
+        return;
+      }
+      const rawParams = document.getElementById('qbParamsOutput')?.value || '{}';
+
+      // 1. Switch to Custom API view
+      switchMainView('endpoints');
+
+      // 2. If no endpoint is currently selected, start new endpoint
+      if (!currentCustomEpId) {
+        startNewCustomEndpoint();
+        const table = qbSelectedTable || 'records';
+        const action = qbCurrentAction.toLowerCase();
+        const epNameInput = document.getElementById('epNameInput');
+        const epPathInput = document.getElementById('epPathInput');
+        const epMethodInput = document.getElementById('epMethodInput');
+
+        if (epNameInput && !epNameInput.value) {
+          epNameInput.value = `${qbCurrentAction} ${table.charAt(0).toUpperCase() + table.slice(1)}`;
+        }
+        if (epPathInput && !epPathInput.value) {
+          epPathInput.value = `${table}/${action}`;
+        }
+        if (epMethodInput) {
+          if (qbCurrentAction === 'SELECT' || qbCurrentAction === 'COUNT') epMethodInput.value = 'GET';
+          else if (qbCurrentAction === 'INSERT') epMethodInput.value = 'POST';
+          else if (qbCurrentAction === 'UPDATE') epMethodInput.value = 'PATCH';
+          else if (qbCurrentAction === 'DELETE') epMethodInput.value = 'DELETE';
+        }
+      }
+
+      // 3. Put SQL and params into the Custom API editor
+      const sqlInput = document.getElementById('epSqlInput');
+      if (sqlInput) {
+        sqlInput.value = sql;
+        autoDetectTransactionCheckbox();
+        sqlInput.focus();
+        sqlInput.classList.add('ring-2', 'ring-emerald-500');
+        setTimeout(() => sqlInput.classList.remove('ring-2', 'ring-emerald-500'), 1500);
+      }
+
+      const paramsInput = document.getElementById('epTestParamsInput');
+      if (paramsInput && rawParams.trim()) {
+        paramsInput.value = rawParams;
+      }
+
+      updateCustomEpUrlPreview();
+      showToast('SQL query and parameters inserted into Custom API!', 'success');
+    }
+
+    function resetQueryBuilder() {
+      qbCurrentAction = 'SELECT';
+      qbFilterConditions = [];
+      qbJoins = [];
+      qbExtraTables = [];
+      if (collections.length > 0) {
+        qbSelectedTable = currentCollection || collections[0].name;
+      }
+      const sel = document.getElementById('qbTableSelect');
+      if (sel && qbSelectedTable) {
+        sel.value = qbSelectedTable;
+      }
+      setQbAction('SELECT');
+      if (qbSelectedTable) {
+        onQbTableChange(qbSelectedTable, true);
+      }
+      const resContainer = document.getElementById('qbResultContainer');
+      if (resContainer) resContainer.classList.add('hidden');
+      showToast('Visual SQL Builder has been reset', 'info');
+    }
+
+    function switchQbResultTab(tab) {
+      qbCurrentResultTab = tab;
+      const btnJson = document.getElementById('qbResultTab_json');
+      const btnTable = document.getElementById('qbResultTab_table');
+      const paneJson = document.getElementById('qbResultJsonPane');
+      const paneTable = document.getElementById('qbResultTablePane');
+
+      if (tab === 'json') {
+        if (btnJson) {
+          btnJson.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 bg-slate-900 text-white shadow-2xs cursor-pointer';
+        }
+        if (btnTable) {
+          btnTable.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition flex items-center space-x-1.5 cursor-pointer';
+        }
+        if (paneJson) paneJson.classList.remove('hidden');
+        if (paneTable) paneTable.classList.add('hidden');
+      } else {
+        if (btnJson) {
+          btnJson.className = 'px-3.5 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-white transition flex items-center space-x-1.5 cursor-pointer';
+        }
+        if (btnTable) {
+          btnTable.className = 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 bg-emerald-600 text-white shadow-2xs cursor-pointer';
+        }
+        if (paneJson) paneJson.classList.add('hidden');
+        if (paneTable) paneTable.classList.remove('hidden');
+      }
+    }
+    window.switchQbResultTab = switchQbResultTab;
+
+    function copyQbResultJson() {
+      if (!qbLastResultData) {
+        showToast('No execution result to copy', 'warning');
+        return;
+      }
+      const text = typeof qbLastResultData === 'string' ? qbLastResultData : JSON.stringify(qbLastResultData, null, 2);
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('Result JSON copied to clipboard!', 'success');
+      }).catch(() => {
+        showToast('Failed to copy to clipboard', 'error');
+      });
+    }
+    window.copyQbResultJson = copyQbResultJson;
+
+    async function testGeneratedSqlQuery() {
+      const sql = document.getElementById('qbSqlOutput')?.value || '';
+      if (!sql.trim()) {
+        showToast('No SQL query to execute', 'warning');
+        return;
+      }
+
+      const resultContainer = document.getElementById('qbResultContainer');
+      const resultStatus = document.getElementById('qbResultStatus');
+      const resultJsonPre = document.getElementById('qbResultJsonPre');
+      const resultTableWrapper = document.getElementById('qbResultTableWrapper');
+
+      if (resultContainer) {
+        resultContainer.classList.remove('hidden');
+        resultContainer.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      if (resultStatus) {
+        resultStatus.textContent = 'Executing...';
+        resultStatus.className = 'text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-amber-100 text-amber-800 animate-pulse';
+      }
+      if (resultJsonPre) {
+        resultJsonPre.textContent = 'Running query against database...';
+      }
+      if (resultTableWrapper) {
+        resultTableWrapper.innerHTML = '<div class="p-6 text-center text-xs text-slate-400 font-mono"><i class="fa-solid fa-spinner fa-spin text-cyan-600 mr-2"></i>Running query against database...</div>';
+      }
+
+      // Default tab is always JSON
+      switchQbResultTab('json');
+
+      let params = [];
+      const rawParams = (document.getElementById('qbParamsOutput')?.value || '').trim();
+      if (rawParams && rawParams !== '{}') {
+        try {
+          const parsed = JSON.parse(rawParams);
+          if (Array.isArray(parsed)) {
+            params = parsed;
+          } else if (typeof parsed === 'object') {
+            params = Object.values(parsed);
+          }
+        } catch (e) {
+          if (resultStatus) {
+            resultStatus.textContent = 'Invalid JSON Params';
+            resultStatus.className = 'text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800';
+          }
+          if (resultJsonPre) {
+            resultJsonPre.textContent = `Error parsing Parameters JSON: ${e.message}`;
+          }
+          if (resultTableWrapper) {
+            resultTableWrapper.innerHTML = `<div class="p-4 text-xs font-mono text-rose-600 bg-rose-50">Error parsing Parameters JSON: ${escapeHtml(e.message)}</div>`;
+          }
+          return;
+        }
+      }
+
+      const t0 = performance.now();
+      try {
+        const res = await fetch('/api/sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql, params, transaction: true })
+        });
+        const dur = Math.round(performance.now() - t0);
+        const data = await res.json();
+        qbLastResultData = data;
+
+        if (res.ok) {
+          if (resultStatus) {
+            resultStatus.textContent = `200 OK (${dur}ms)`;
+            resultStatus.className = 'text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800';
+          }
+          renderQbQueryResult(data);
+        } else {
+          if (resultStatus) {
+            resultStatus.textContent = `${res.status} Error (${dur}ms)`;
+            resultStatus.className = 'text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800';
+          }
+          const errMsg = data.message || JSON.stringify(data, null, 2);
+          if (resultJsonPre) {
+            resultJsonPre.textContent = errMsg;
+          }
+          if (resultTableWrapper) {
+            resultTableWrapper.innerHTML = `<div class="p-4 text-xs font-mono text-rose-600 bg-rose-50 whitespace-pre-wrap">${escapeHtml(errMsg)}</div>`;
+          }
+        }
+      } catch (err) {
+        const dur = Math.round(performance.now() - t0);
+        if (resultStatus) {
+          resultStatus.textContent = `Error (${dur}ms)`;
+          resultStatus.className = 'text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800';
+        }
+        if (resultJsonPre) {
+          resultJsonPre.textContent = `Network / Execution Error: ${err.message}`;
+        }
+        if (resultTableWrapper) {
+          resultTableWrapper.innerHTML = `<div class="p-4 text-xs font-mono text-rose-600 bg-rose-50">${escapeHtml(err.message)}</div>`;
+        }
+      }
+    }
+    window.testGeneratedSqlQuery = testGeneratedSqlQuery;
+
+    function renderQbQueryResult(data) {
+      qbLastResultData = data;
+      const resultJsonPre = document.getElementById('qbResultJsonPre');
+      const resultTableWrapper = document.getElementById('qbResultTableWrapper');
+
+      // 1. Populate JSON view
+      if (resultJsonPre) {
+        resultJsonPre.textContent = JSON.stringify(data, null, 2);
+      }
+
+      // 2. Populate Table view
+      if (resultTableWrapper) {
+        const items = data?.items || (Array.isArray(data) ? data : null);
+        if (Array.isArray(items)) {
+          if (items.length === 0) {
+            resultTableWrapper.innerHTML = '<div class="p-6 text-center text-xs text-slate-500 italic bg-white">Query returned 0 rows.</div>';
+          } else {
+            const headers = Object.keys(items[0] || {});
+            let tableHtml = `
+              <table class="w-full text-left text-xs text-slate-700 bg-white border-collapse">
+                <thead class="bg-slate-100 text-slate-800 font-bold sticky top-0 border-b border-slate-200 text-[11px] font-mono">
+                  <tr>
+                    ${headers.map(h => `<th class="px-3 py-2 whitespace-nowrap">${escapeHtml(h)}</th>`).join('')}
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-150 font-mono text-[11px]">
+            `;
+
+            items.forEach((row, idx) => {
+              tableHtml += `<tr class="${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'} hover:bg-slate-100/70 transition">`;
+              headers.forEach(h => {
+                const val = row[h];
+                let displayVal = val === null || val === undefined ? '<span class="text-slate-400 italic">null</span>' : (typeof val === 'object' ? JSON.stringify(val) : String(val));
+                tableHtml += `<td class="px-3 py-1.5 whitespace-nowrap max-w-xs truncate" title="${escapeHtml(String(val))}">${typeof val === 'object' || val === null || val === undefined ? displayVal : escapeHtml(displayVal)}</td>`;
+              });
+              tableHtml += '</tr>';
+            });
+
+            tableHtml += '</tbody></table>';
+            resultTableWrapper.innerHTML = tableHtml;
+          }
+        } else {
+          // Mutation result (e.g. rowsAffected, lastInsertId) or summary object
+          let summaryRows = '';
+          if (typeof data === 'object' && data !== null) {
+            for (const [k, v] of Object.entries(data)) {
+              summaryRows += `
+                <tr class="hover:bg-slate-50 border-b border-slate-100 last:border-b-0">
+                  <td class="px-3 py-2 font-bold text-slate-600 bg-slate-50 border-r border-slate-200 w-1/3">${escapeHtml(k)}</td>
+                  <td class="px-3 py-2 text-slate-900">${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}</td>
+                </tr>
+              `;
+            }
+          }
+          resultTableWrapper.innerHTML = `
+            <div class="p-4 bg-white space-y-3">
+              <div class="flex items-center space-x-2 text-emerald-700 font-bold text-xs">
+                <i class="fa-solid fa-circle-check"></i>
+                <span>Statement Executed Successfully</span>
+              </div>
+              <table class="w-full text-left text-xs border border-slate-200 rounded-lg overflow-hidden font-mono">
+                <tbody>${summaryRows || '<tr><td class="p-3 text-slate-500">Success</td></tr>'}</tbody>
+              </table>
+            </div>
+          `;
+        }
+      }
+
+      // Default active tab is JSON
+      switchQbResultTab('json');
+    }
+    window.renderQbQueryResult = renderQbQueryResult;
 
     function applySqlEndpointTemplate(kind) {
       if (!kind) return;
@@ -2416,8 +2770,22 @@ let currentCollection = "users";
           break;
       }
 
-      updateCustomEpUrlPreview();
-      autoDetectTransactionCheckbox();
+      // Also sync into Visual SQL Builder if present
+      const qbSql = document.getElementById('qbSqlOutput');
+      if (qbSql && sqlEl) {
+        qbSql.value = sqlEl.value;
+      }
+      const qbParams = document.getElementById('qbParamsOutput');
+      if (qbParams && paramsEl) {
+        qbParams.value = paramsEl.value;
+      }
+
+      if (typeof updateCustomEpUrlPreview === 'function') {
+        updateCustomEpUrlPreview();
+      }
+      if (typeof autoDetectTransactionCheckbox === 'function') {
+        autoDetectTransactionCheckbox();
+      }
       showToast('SQL Template applied.');
     }
 
@@ -2726,25 +3094,25 @@ let currentCollection = "users";
         const isRel = c.autoLoadRelations === true || c.auto_load_relations === true;
         const fieldCount = (c.schema || []).length;
         return `
-          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold'}">
+          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-slate-200/90 text-slate-900 border-slate-300 shadow-xs font-bold' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200/60 font-semibold'}">
             <button onclick="selectCollection('${c.name}')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
               <div class="flex items-center space-x-2.5 truncate">
-                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">
+                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white text-slate-800 shadow-2xs' : 'bg-slate-100 text-slate-600'}">
                   <i class="fa-solid ${icon} text-[11px]"></i>
                 </span>
                 <div class="text-left truncate">
                   <div class="truncate font-mono">${c.name}</div>
-                  <div class="text-[10px] ${isActive ? 'text-emerald-100' : 'text-slate-400'}">${c.type} &bull; ${fieldCount} columns</div>
+                  <div class="text-[10px] ${isActive ? 'text-slate-500 font-medium' : 'text-slate-400'}">${c.type} &bull; ${fieldCount} columns</div>
                 </div>
               </div>
               <div class="flex items-center space-x-1 shrink-0 ml-1">
-                ${isRel ? `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-700'}" title="Auto Relations Active"><i class="fa-solid fa-link"></i></span>` : ''}
+                ${isRel ? `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white text-teal-800 shadow-2xs border border-slate-200' : 'bg-teal-50 text-teal-700'}" title="Auto Relations Active"><i class="fa-solid fa-link"></i></span>` : ''}
                 ${isRealtime
-                  ? `<span class="px-2 py-1 rounded-lg text-[10px] font-mono ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}" title="Realtime SSE Active"><i class="fa-solid fa-bolt"></i></span>`
-                  : `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/10 text-emerald-200' : 'bg-slate-100 text-slate-400'}" title="Realtime Inactive">off</span>`}
+                  ? `<span class="px-2 py-1 rounded-lg text-[10px] font-mono ${isActive ? 'bg-white text-emerald-700 shadow-2xs border border-slate-200' : 'bg-emerald-50 text-emerald-700'}" title="Realtime SSE Active"><i class="fa-solid fa-bolt"></i></span>`
+                  : `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-slate-300/80 text-slate-600' : 'bg-slate-100 text-slate-400'}" title="Realtime Inactive">off</span>`}
               </div>
             </button>
-            <button onclick="selectCollection('${c.name}'); switchWorkspaceSubView('settings');" class="p-2 mr-1 rounded-lg ${isActive ? 'text-white/80 hover:text-white' : 'text-slate-400 hover:bg-emerald-100 hover:text-emerald-800'} transition" title="Settings for table ${c.name}">
+            <button onclick="selectCollection('${c.name}'); switchWorkspaceSubView('settings');" class="p-2 mr-1 rounded-lg ${isActive ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/60' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'} transition" title="Settings for table ${c.name}">
               <i class="fa-solid fa-gear text-[11px]"></i>
             </button>
           </div>
@@ -3794,8 +4162,8 @@ let currentCollection = "users";
                 <input type="checkbox" ${checked} onchange="toggleSelectRecord('${item.id}', this.checked)" class="rounded border-slate-300">
               </td>
               <td onclick="event.stopPropagation()" class="py-2.5 px-3 border-r border-slate-100 text-center whitespace-nowrap">
-                <button type="button" onclick="openRecordDrawer('${item.id}')" class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-[11px] shadow-sm hover:shadow transition inline-flex items-center space-x-1.5 cursor-pointer" title="Edit Record">
-                  <i class="fa-solid fa-pen-to-square text-[10px]"></i>
+                <button type="button" onclick="openRecordDrawer('${item.id}')" class="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-500 active:scale-95 text-slate-900 font-bold text-[11px] shadow-xs hover:shadow transition inline-flex items-center space-x-1.5 cursor-pointer border border-amber-300" title="Edit Record">
+                  <i class="fa-solid fa-pen-to-square text-[10px] text-amber-950"></i>
                   <span>Edit</span>
                 </button>
               </td>
@@ -6421,34 +6789,197 @@ let currentCollection = "users";
       }
     }
 
-    // ================= REALTIME SSE =================
-    function initSSE() {
-      if (sseSource) sseSource.close();
-      sseSource = new EventSource('/api/realtime?token=' + encodeURIComponent(localStorage.getItem('padi_admin_token') || ''));
-      sseSource.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          logSSEEvent(data);
-          const targetTable = data.table || data.collection;
-          if (targetTable === currentCollection) loadRecords();
-        } catch (_) {}
-      };
+    // ================= REALTIME SSE MONITOR =================
+    let realtimeEvents = [];
+    let isRealtimePaused = false;
+    let pausedRealtimeQueue = [];
+    let realtimeActionFilter = 'all';
+    let realtimeTableFilterVal = 'all';
+    let realtimeSearchText = '';
+    let realtimeFormatPretty = true;
+    let sseReconnectTimer = null;
+    let sseRetryDelay = 2000;
+    const MAX_REALTIME_EVENTS = 250;
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
     }
 
-    let realtimeFormatPretty = true;
+    function setRealtimeStatus(status, message) {
+      const badge = document.getElementById('realtimeStatusBadge');
+      const dot = document.getElementById('realtimeStatusDot');
+      const text = document.getElementById('realtimeStatusText');
+      const railDot = document.getElementById('sseStatusDot');
+      const reconnectBtn = document.getElementById('reconnectSseBtn');
+
+      if (status === 'connected') {
+        if (badge) badge.className = "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-emerald-50 text-emerald-700 border border-emerald-200";
+        if (dot) dot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-1.5";
+        if (text) text.textContent = isRealtimePaused ? 'Paused' : 'Live';
+        if (railDot) {
+          railDot.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-auto hidden md:block";
+          railDot.title = "Realtime SSE: Connected";
+        }
+        if (reconnectBtn) reconnectBtn.classList.add('hidden');
+      } else if (status === 'connecting') {
+        if (badge) badge.className = "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-amber-50 text-amber-700 border border-amber-200";
+        if (dot) dot.className = "w-2 h-2 rounded-full bg-amber-500 animate-ping mr-1.5";
+        if (text) text.textContent = message || 'Connecting...';
+        if (railDot) {
+          railDot.className = "w-2 h-2 rounded-full bg-amber-400 animate-ping ml-auto hidden md:block";
+          railDot.title = "Realtime SSE: Connecting";
+        }
+        if (reconnectBtn) reconnectBtn.classList.remove('hidden');
+      } else if (status === 'disconnected') {
+        if (badge) badge.className = "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-rose-50 text-rose-700 border border-rose-200";
+        if (dot) dot.className = "w-2 h-2 rounded-full bg-rose-500 mr-1.5";
+        if (text) text.textContent = 'Disconnected';
+        if (railDot) {
+          railDot.className = "w-2 h-2 rounded-full bg-rose-500 ml-auto hidden md:block";
+          railDot.title = "Realtime SSE: Disconnected";
+        }
+        if (reconnectBtn) reconnectBtn.classList.remove('hidden');
+      }
+    }
+
+    function initSSE() {
+      if (sseSource) {
+        try { sseSource.close(); } catch (_) {}
+        sseSource = null;
+      }
+      if (sseReconnectTimer) {
+        clearTimeout(sseReconnectTimer);
+        sseReconnectTimer = null;
+      }
+
+      const token = localStorage.getItem('padi_admin_token') || '';
+      setRealtimeStatus('connecting', 'Connecting...');
+
+      try {
+        sseSource = new EventSource('/api/realtime?token=' + encodeURIComponent(token));
+
+        sseSource.onopen = () => {
+          sseRetryDelay = 2000;
+          setRealtimeStatus('connected');
+        };
+
+        sseSource.onmessage = (event) => {
+          try {
+            if (!event.data || event.data === 'keep-alive-ping') return;
+            const data = JSON.parse(event.data);
+            handleIncomingRealtimeEvent(data);
+            const targetTable = data.table || data.collection;
+            if (targetTable === currentCollection) loadRecords();
+          } catch (_) {}
+        };
+
+        sseSource.addEventListener('lagged', () => {
+          showToast('Realtime stream resynchronized (slow consumer lagged)', 'warning');
+        });
+
+        sseSource.onerror = () => {
+          setRealtimeStatus('connecting', 'Reconnecting...');
+          if (sseSource) {
+            try { sseSource.close(); } catch (_) {}
+            sseSource = null;
+          }
+          if (!sseReconnectTimer) {
+            sseReconnectTimer = setTimeout(() => {
+              sseReconnectTimer = null;
+              sseRetryDelay = Math.min(sseRetryDelay * 1.5, 15000);
+              initSSE();
+            }, sseRetryDelay);
+          }
+        };
+      } catch (e) {
+        setRealtimeStatus('disconnected');
+      }
+    }
+
+    function reconnectSSEManually() {
+      if (sseReconnectTimer) {
+        clearTimeout(sseReconnectTimer);
+        sseReconnectTimer = null;
+      }
+      sseRetryDelay = 2000;
+      initSSE();
+      showToast('Reconnecting to Realtime SSE stream...', 'info');
+    }
+
+    function handleIncomingRealtimeEvent(data) {
+      const now = new Date();
+      const evt = {
+        id: 'evt_' + now.getTime() + '_' + Math.random().toString(36).substr(2, 6),
+        action: String(data.action || 'event').toLowerCase(),
+        table: String(data.table || data.collection || 'unknown'),
+        record: data.record || {},
+        recordId: (data.record && (data.record.id !== undefined && data.record.id !== null)) ? String(data.record.id) : '',
+        timestamp: now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0'),
+        isoTime: now.toISOString()
+      };
+
+      if (isRealtimePaused) {
+        pausedRealtimeQueue.push(evt);
+        updatePauseButtonState();
+        return;
+      }
+
+      realtimeEvents.unshift(evt);
+      if (realtimeEvents.length > MAX_REALTIME_EVENTS) {
+        realtimeEvents.length = MAX_REALTIME_EVENTS;
+      }
+
+      updateRealtimeTableOptions();
+      updateRealtimeStats();
+      renderRealtimeEvents();
+    }
+
+    function toggleRealtimePause() {
+      isRealtimePaused = !isRealtimePaused;
+      if (!isRealtimePaused && pausedRealtimeQueue.length > 0) {
+        while (pausedRealtimeQueue.length > 0) {
+          realtimeEvents.unshift(pausedRealtimeQueue.shift());
+        }
+        if (realtimeEvents.length > MAX_REALTIME_EVENTS) {
+          realtimeEvents.length = MAX_REALTIME_EVENTS;
+        }
+        updateRealtimeTableOptions();
+        updateRealtimeStats();
+        renderRealtimeEvents();
+      }
+      updatePauseButtonState();
+      setRealtimeStatus(sseSource && sseSource.readyState === EventSource.OPEN ? 'connected' : 'connecting');
+    }
+
+    function updatePauseButtonState() {
+      const btn = document.getElementById('toggleRealtimePauseBtn');
+      const icon = document.getElementById('realtimePauseIcon');
+      const text = document.getElementById('realtimePauseText');
+      if (!btn || !icon || !text) return;
+
+      if (isRealtimePaused) {
+        btn.className = "px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-xs font-bold text-amber-800 transition flex items-center space-x-1.5 shadow-2xs";
+        icon.className = "fa-solid fa-play text-amber-700";
+        const queued = pausedRealtimeQueue.length;
+        text.textContent = queued > 0 ? `Resume (${queued})` : 'Resume';
+      } else {
+        btn.className = "px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-bold text-slate-700 transition flex items-center space-x-1.5 shadow-2xs";
+        icon.className = "fa-solid fa-pause text-slate-500";
+        text.textContent = 'Pause';
+      }
+    }
 
     function toggleRealtimeFormat() {
       realtimeFormatPretty = !realtimeFormatPretty;
       const lbl = document.getElementById('realtimeFormatLabel');
       if (lbl) lbl.textContent = realtimeFormatPretty ? 'Pretty JSON' : 'Compact JSON';
-      document.querySelectorAll('#eventLogContainer [data-realtime-record]').forEach(el => {
-        try {
-          const raw = el.getAttribute('data-realtime-record');
-          const obj = JSON.parse(decodeURIComponent(raw));
-          const jsonStr = realtimeFormatPretty ? JSON.stringify(obj, null, 2) : JSON.stringify(obj);
-          el.innerHTML = syntaxHighlightJson(jsonStr);
-        } catch (_) {}
-      });
+      renderRealtimeEvents();
     }
 
     function syntaxHighlightJson(jsonStr) {
@@ -6474,42 +7005,6 @@ let currentCollection = "users";
       });
     }
 
-    function logSSEEvent(data) {
-      const container = document.getElementById('eventLogContainer');
-      const action = (data.action || 'event').toUpperCase();
-      let badgeCls = 'text-emerald-400 bg-emerald-950/80 border-emerald-800/60';
-      if (data.action === 'update') badgeCls = 'text-amber-400 bg-amber-950/80 border-amber-800/60';
-      if (data.action === 'delete') badgeCls = 'text-rose-400 bg-rose-950/80 border-rose-800/60';
-
-      const jsonStr = realtimeFormatPretty ? JSON.stringify(data.record, null, 2) : JSON.stringify(data.record);
-      const highlighted = syntaxHighlightJson(jsonStr);
-      const encodedRecord = encodeURIComponent(JSON.stringify(data.record || {}));
-      const recordId = data.record && (data.record.id !== undefined && data.record.id !== null) ? data.record.id : '';
-
-      const el = document.createElement('div');
-      el.className = "border border-slate-800/80 bg-slate-900/60 rounded-xl p-3 sm:p-3.5 space-y-2.5 hover:border-slate-700 transition shadow-xs";
-      el.innerHTML = `
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex items-center space-x-2 shrink-0 flex-wrap gap-y-1">
-            <span class="text-slate-500 font-mono text-xs whitespace-nowrap shrink-0">[${new Date().toLocaleTimeString()}]</span>
-            <span class="font-extrabold uppercase px-2 py-0.5 rounded text-[11px] border ${badgeCls} shrink-0">${action}</span>
-            <span class="text-teal-300 font-bold text-xs font-mono shrink-0">${data.table || data.collection}</span>
-            ${recordId !== '' ? `<span class="text-slate-400 text-xs font-mono bg-slate-800/80 px-1.5 py-0.5 rounded shrink-0">#${recordId}</span>` : ''}
-          </div>
-          <div class="flex items-center space-x-2 shrink-0">
-            <button type="button" onclick="copyRealtimePayload(this)" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold transition flex items-center space-x-1.5 border border-slate-700/80">
-              <i class="fa-regular fa-copy text-[11px]"></i>
-              <span>Copy JSON</span>
-            </button>
-          </div>
-        </div>
-        <div class="bg-slate-950/90 rounded-lg p-3 border border-slate-900/90 overflow-x-auto">
-          <pre class="text-slate-200 text-xs font-mono leading-relaxed whitespace-pre-wrap break-all select-all" data-realtime-record="${encodedRecord}">${highlighted}</pre>
-        </div>
-      `;
-      container.prepend(el);
-    }
-
     function copyRealtimePayload(btn) {
       const card = btn.closest('.border');
       if (!card) return;
@@ -6527,10 +7022,210 @@ let currentCollection = "users";
     }
 
     function clearEventLogs() {
-      const container = document.getElementById('eventLogContainer');
-      if (container) {
-        container.innerHTML = '<div class="text-emerald-400/80">🌾 PadiBase Realtime monitor ready — live mutations on tables with Realtime enabled will appear here...</div>';
+      realtimeEvents = [];
+      pausedRealtimeQueue = [];
+      updateRealtimeStats();
+      renderRealtimeEvents();
+      updatePauseButtonState();
+      showToast('Realtime logs cleared', 'info');
+    }
+
+    function exportRealtimeLogs() {
+      if (realtimeEvents.length === 0) {
+        showToast('No realtime events captured to export', 'warning');
+        return;
       }
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(realtimeEvents, null, 2));
+      const dlAnchor = document.createElement('a');
+      dlAnchor.setAttribute("href", dataStr);
+      dlAnchor.setAttribute("download", `padibase-realtime-logs-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`);
+      document.body.appendChild(dlAnchor);
+      dlAnchor.click();
+      dlAnchor.remove();
+      showToast(`Exported ${realtimeEvents.length} realtime events`, 'success');
+    }
+
+    function setRealtimeActionFilter(action) {
+      realtimeActionFilter = action;
+      document.querySelectorAll('[data-rt-action]').forEach(btn => {
+        const act = btn.getAttribute('data-rt-action');
+        if (act === action) {
+          btn.className = "px-2.5 py-1 rounded-lg text-xs font-bold transition bg-slate-900 text-white shadow-2xs";
+        } else {
+          btn.className = "px-2 py-1 rounded-lg text-xs font-bold transition text-slate-600 hover:text-slate-900 hover:bg-slate-100";
+        }
+      });
+      renderRealtimeEvents();
+    }
+
+    function applyRealtimeFilters() {
+      const searchInput = document.getElementById('realtimeSearchInput');
+      const tableSelect = document.getElementById('realtimeTableFilter');
+      realtimeSearchText = (searchInput ? searchInput.value : '').trim().toLowerCase();
+      realtimeTableFilterVal = tableSelect ? tableSelect.value : 'all';
+      renderRealtimeEvents();
+    }
+
+    function updateRealtimeTableOptions() {
+      const select = document.getElementById('realtimeTableFilter');
+      if (!select) return;
+      const currentVal = select.value || 'all';
+      const tableNames = Array.from(new Set([
+        ...(collections || []).map(c => c.name),
+        ...realtimeEvents.map(e => e.table)
+      ])).filter(Boolean).sort();
+
+      let html = '<option value="all">All Tables</option>';
+      tableNames.forEach(name => {
+        html += `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`;
+      });
+      select.innerHTML = html;
+      if (tableNames.includes(currentVal)) {
+        select.value = currentVal;
+      } else {
+        select.value = 'all';
+      }
+    }
+
+    function updateRealtimeStats() {
+      const statTotal = document.getElementById('rtStatTotal');
+      const statCreate = document.getElementById('rtStatCreate');
+      const statUpdate = document.getElementById('rtStatUpdate');
+      const statDelete = document.getElementById('rtStatDelete');
+
+      const total = realtimeEvents.length;
+      let creates = 0, updates = 0, deletes = 0;
+      for (let i = 0; i < total; i++) {
+        const act = realtimeEvents[i].action;
+        if (act === 'create') creates++;
+        else if (act === 'update') updates++;
+        else if (act === 'delete') deletes++;
+      }
+
+      if (statTotal) statTotal.textContent = total;
+      if (statCreate) statCreate.textContent = creates;
+      if (statUpdate) statUpdate.textContent = updates;
+      if (statDelete) statDelete.textContent = deletes;
+    }
+
+    function openRecordFromRealtime(table, recordId) {
+      if (!table) return;
+      switchMainView('collections');
+      selectCollection(table);
+      if (recordId !== undefined && recordId !== null && recordId !== '') {
+        const filterInput = document.getElementById('recordFilterInput');
+        if (filterInput) {
+          filterInput.value = `id = '${recordId}'`;
+          applyFilterSearch();
+        }
+      }
+    }
+
+    function renderRealtimeEvents() {
+      const container = document.getElementById('eventLogContainer');
+      if (!container) return;
+
+      if (realtimeEvents.length === 0) {
+        container.innerHTML = `
+          <div class="h-full min-h-[300px] flex flex-col items-center justify-center text-center p-8 text-slate-400 space-y-3">
+            <div class="w-14 h-14 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center text-teal-400 shadow-lg">
+              <i class="fa-solid fa-wave-square text-2xl animate-pulse"></i>
+            </div>
+            <div class="space-y-1 max-w-md">
+              <h3 class="text-sm font-bold text-slate-200">Realtime Monitor Active</h3>
+              <p class="text-xs text-slate-400 leading-relaxed font-sans">
+                Listening for live <code class="text-emerald-400 font-bold">create</code>, <code class="text-amber-400 font-bold">update</code>, and <code class="text-rose-400 font-bold">delete</code> mutations streamed via SSE.
+              </p>
+              <p class="text-[11px] text-slate-500 font-sans mt-2">
+                Make any changes in the Tables view or via REST API to watch live events stream here in real-time.
+              </p>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      // Filter events
+      const filtered = realtimeEvents.filter(evt => {
+        if (realtimeActionFilter !== 'all' && evt.action !== realtimeActionFilter) return false;
+        if (realtimeTableFilterVal !== 'all' && evt.table !== realtimeTableFilterVal) return false;
+        if (realtimeSearchText) {
+          const matchId = evt.recordId && evt.recordId.toLowerCase().includes(realtimeSearchText);
+          const matchTable = evt.table && evt.table.toLowerCase().includes(realtimeSearchText);
+          const matchPayload = JSON.stringify(evt.record).toLowerCase().includes(realtimeSearchText);
+          if (!matchId && !matchTable && !matchPayload) return false;
+        }
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        container.innerHTML = `
+          <div class="h-64 flex flex-col items-center justify-center text-center p-8 text-slate-500 space-y-2">
+            <i class="fa-solid fa-filter-circle-xmark text-2xl text-slate-600 mb-1"></i>
+            <div class="text-xs font-bold text-slate-400">No events match your current filter</div>
+            <button onclick="resetRealtimeFilters()" class="text-xs font-semibold text-emerald-400 hover:text-emerald-300 underline mt-1">
+              Reset Filters
+            </button>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = filtered.map(evt => {
+        let badgeCls = 'text-emerald-400 bg-emerald-950/80 border-emerald-800/70';
+        if (evt.action === 'update') badgeCls = 'text-amber-400 bg-amber-950/80 border-amber-800/70';
+        if (evt.action === 'delete') badgeCls = 'text-rose-400 bg-rose-950/80 border-rose-800/70';
+
+        const jsonStr = realtimeFormatPretty ? JSON.stringify(evt.record, null, 2) : JSON.stringify(evt.record);
+        const highlighted = syntaxHighlightJson(jsonStr);
+        const encodedRecord = encodeURIComponent(JSON.stringify(evt.record || {}));
+
+        return `
+          <div class="border border-slate-800/90 bg-slate-900/75 hover:bg-slate-900/95 rounded-xl p-3 sm:p-4 space-y-2.5 hover:border-slate-700 transition shadow-xs">
+            <div class="flex items-center justify-between gap-2 flex-wrap">
+              <div class="flex items-center space-x-2 shrink-0 flex-wrap gap-y-1">
+                <span class="text-slate-500 font-mono text-xs whitespace-nowrap shrink-0">[${evt.timestamp}]</span>
+                <span class="font-extrabold uppercase px-2.5 py-0.5 rounded-md text-[11px] border ${badgeCls} shrink-0">${evt.action.toUpperCase()}</span>
+                <button type="button" onclick="openRecordFromRealtime('${escapeHtml(evt.table)}', '')" class="text-teal-300 hover:text-teal-200 bg-teal-950/60 hover:bg-teal-900/60 border border-teal-800/60 px-2 py-0.5 rounded-md font-bold text-xs font-mono shrink-0 transition flex items-center space-x-1" title="Jump to table '${escapeHtml(evt.table)}'">
+                  <i class="fa-solid fa-table-cells text-[10px]"></i>
+                  <span>${escapeHtml(evt.table)}</span>
+                </button>
+                ${evt.recordId ? `
+                  <span class="text-slate-300 text-xs font-mono bg-slate-800/90 border border-slate-700/70 px-2 py-0.5 rounded-md shrink-0 flex items-center space-x-1">
+                    <span class="text-slate-500">#</span><span>${escapeHtml(evt.recordId)}</span>
+                  </span>
+                ` : ''}
+              </div>
+              <div class="flex items-center space-x-2 shrink-0">
+                ${evt.recordId ? `
+                  <button type="button" onclick="openRecordFromRealtime('${escapeHtml(evt.table)}', '${escapeHtml(evt.recordId)}')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-emerald-950/80 hover:text-emerald-300 text-slate-300 text-xs font-bold transition flex items-center space-x-1.5 border border-slate-700/80 hover:border-emerald-700/60" title="Open record #${escapeHtml(evt.recordId)} in table">
+                    <i class="fa-solid fa-arrow-up-right-from-square text-[11px]"></i>
+                    <span>View in Table</span>
+                  </button>
+                ` : ''}
+                <button type="button" onclick="copyRealtimePayload(this)" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-bold transition flex items-center space-x-1.5 border border-slate-700/80">
+                  <i class="fa-regular fa-copy text-[11px]"></i>
+                  <span>Copy JSON</span>
+                </button>
+              </div>
+            </div>
+            <div class="bg-slate-950/95 rounded-lg p-3 border border-slate-900/90 overflow-x-auto">
+              <pre class="text-slate-200 text-xs font-mono leading-relaxed whitespace-pre-wrap break-all select-all" data-realtime-record="${encodedRecord}">${highlighted}</pre>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function resetRealtimeFilters() {
+      realtimeActionFilter = 'all';
+      realtimeTableFilterVal = 'all';
+      realtimeSearchText = '';
+      const searchInput = document.getElementById('realtimeSearchInput');
+      if (searchInput) searchInput.value = '';
+      const tableSelect = document.getElementById('realtimeTableFilter');
+      if (tableSelect) tableSelect.value = 'all';
+      setRealtimeActionFilter('all');
     }
 
     function closeDrawer(id) {
