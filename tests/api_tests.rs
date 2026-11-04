@@ -309,7 +309,7 @@ async fn test_per_collection_realtime_rule() {
     let msg = rx
         .try_recv()
         .expect("Expected realtime broadcast when collection realtime is true");
-    assert_eq!(msg.collection, "audit_logs");
+    assert_eq!(msg.collection.as_deref(), Some("audit_logs"));
     assert_eq!(msg.action, "create");
 
     let _ = std::fs::remove_dir_all(&test_dir);
@@ -1375,6 +1375,28 @@ async fn test_auth_flow_and_transactions() {
     let items = ep_val.get("item").or(ep_val.get("items")).and_then(|v| v.as_array()).unwrap();
     assert_eq!(items.len(), 2);
 
+    // Create a 3rd wallet ("Charlie", balance 2000) via direct clean route `POST /api/wallets`
+    let charlie_body = serde_json::to_vec(&json!({
+        "id": "wallet_c",
+        "owner": "Charlie",
+        "balance": 2000
+    }))
+    .unwrap();
+    let res_charlie = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/wallets")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::from(charlie_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_charlie.status(), StatusCode::CREATED);
+
     // 10. Test Dynamic Custom SQL Endpoint with LIMIT 1 automatically returning single row object
     let create_ep_limit1_body = serde_json::to_vec(&json!({
         "name": "Top Wallet",
@@ -1411,11 +1433,344 @@ async fn test_auth_flow_and_transactions() {
         .await
         .unwrap();
     assert_eq!(res_exec_limit1.status(), StatusCode::OK);
+    // Verify Padi Security Headers are attached
+    assert_eq!(
+        res_exec_limit1.headers().get("x-content-type-options").unwrap(),
+        "nosniff"
+    );
+    assert_eq!(
+        res_exec_limit1.headers().get("x-powered-by").unwrap(),
+        "PadiBase"
+    );
     let limit1_bytes = axum::body::to_bytes(res_exec_limit1.into_body(), 1024 * 1024).await.unwrap();
     let limit1_val: serde_json::Value = serde_json::from_slice(&limit1_bytes).unwrap();
-    // Since it's single row via LIMIT 1 in SQL, it returns the object directly { "owner": ..., "balance": ... }
-    assert!(limit1_val.is_object());
-    assert_eq!(limit1_val["owner"], "Charlie");
+    let limit1_item = if limit1_val.get("item").is_some() {
+        &limit1_val["item"]
+    } else {
+        &limit1_val
+    };
+    assert!(limit1_item.is_object());
+    assert_eq!(limit1_item["owner"], "Charlie");
+
+    // Verify Direct Clean Routes without "records" or "collections": GET /api/wallets, GET /api/wallets/all, GET /api/wallets/:id
+    let res_clean_list = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/wallets?page=1&perPage=10")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_clean_list.status(), StatusCode::OK);
+    let clean_bytes = axum::body::to_bytes(res_clean_list.into_body(), 1024 * 1024).await.unwrap();
+    let clean_val: serde_json::Value = serde_json::from_slice(&clean_bytes).unwrap();
+    assert!(clean_val["item"].is_array());
+    assert_eq!(clean_val["item"].as_array().unwrap().len(), 3);
+
+    let res_clean_all = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/wallets/all")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_clean_all.status(), StatusCode::OK);
+
+    let res_clean_single = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/wallets/wallet_a")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_clean_single.status(), StatusCode::OK);
+    let single_bytes = axum::body::to_bytes(res_clean_single.into_body(), 1024 * 1024).await.unwrap();
+    let single_val: serde_json::Value = serde_json::from_slice(&single_bytes).unwrap();
+    let single_item = if single_val.get("item").is_some() { &single_val["item"] } else { &single_val };
+    assert_eq!(single_item["id"], "wallet_a");
+
+    // Also verify backward-compatible route: GET /api/wallets/records?page=1&perPage=10
+    let res_direct = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/wallets/records?page=1&perPage=10")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_direct.status(), StatusCode::OK);
+    let direct_bytes = axum::body::to_bytes(res_direct.into_body(), 1024 * 1024).await.unwrap();
+    let direct_val: serde_json::Value = serde_json::from_slice(&direct_bytes).unwrap();
+    assert!(direct_val["item"].is_array());
+    assert_eq!(direct_val["item"].as_array().unwrap().len(), 3);
+
+    // 11. Test Padi Framework Features: PUT update, /count, /first, /create-batch, /delete-batch, SQLi guard, Profile update & Logout
+    let put_body = serde_json::to_vec(&json!({ "balance": 2500 })).unwrap();
+    let res_put = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/wallets/wallet_c")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::from(put_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_put.status(), StatusCode::OK);
+    let put_bytes = axum::body::to_bytes(res_put.into_body(), 1024 * 1024).await.unwrap();
+    let put_val: serde_json::Value = serde_json::from_slice(&put_bytes).unwrap();
+    assert_eq!(put_val["item"]["balance"].as_f64(), Some(2500.0));
+
+    // Test GET /api/wallets/count & GET /api/wallets/first?sort_by=balance&order=desc&fields=id,owner,balance
+    let res_count = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/wallets/count")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_count.status(), StatusCode::OK);
+    let count_bytes = axum::body::to_bytes(res_count.into_body(), 1024 * 1024).await.unwrap();
+    let count_val: serde_json::Value = serde_json::from_slice(&count_bytes).unwrap();
+    assert_eq!(count_val["item"]["count"], 3);
+
+    let res_first = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/wallets/first?sort_by=balance&order=desc&fields=id,owner")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_first.status(), StatusCode::OK);
+    let first_bytes = axum::body::to_bytes(res_first.into_body(), 1024 * 1024).await.unwrap();
+    let first_val: serde_json::Value = serde_json::from_slice(&first_bytes).unwrap();
+    assert_eq!(first_val["item"]["owner"], "Charlie");
+    assert!(first_val["item"].get("balance").is_none());
+
+    // Test SQL injection filter guard (must safely return 0 items without error or data leak)
+    let res_sqli = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/wallets?filter=1=1%20UNION%20SELECT%20*%20FROM%20_admins")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_sqli.status(), StatusCode::OK);
+    let sqli_bytes = axum::body::to_bytes(res_sqli.into_body(), 1024 * 1024).await.unwrap();
+    let sqli_val: serde_json::Value = serde_json::from_slice(&sqli_bytes).unwrap();
+    assert_eq!(sqli_val["item"].as_array().unwrap().len(), 0);
+
+    // Test create-batch & delete-batch
+    let batch_create_body = serde_json::to_vec(&json!([
+        { "id": "wallet_d", "owner": "David", "balance": 100 },
+        { "id": "wallet_e", "owner": "Eve", "balance": 200 }
+    ]))
+    .unwrap();
+    let res_batch_create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/wallets/create-batch")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::from(batch_create_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_batch_create.status(), StatusCode::CREATED);
+
+    let batch_del_body = serde_json::to_vec(&json!({ "ids": ["wallet_d", "wallet_e"] })).unwrap();
+    let res_batch_del = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/wallets/delete-batch")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::from(batch_del_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_batch_del.status(), StatusCode::OK);
+    let del_bytes = axum::body::to_bytes(res_batch_del.into_body(), 1024 * 1024).await.unwrap();
+    let del_val: serde_json::Value = serde_json::from_slice(&del_bytes).unwrap();
+    assert_eq!(del_val["item"]["deleted"], 2);
+
+    // Test PATCH /api/auth/me (update own profile, cannot escalate role) & POST /api/auth/logout
+    let prof_body = serde_json::to_vec(&json!({
+        "name": "Budi Updated",
+        "role": "admin"
+    }))
+    .unwrap();
+    let res_prof = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PATCH")
+                .uri("/api/auth/me")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::from(prof_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_prof.status(), StatusCode::OK);
+    let prof_bytes = axum::body::to_bytes(res_prof.into_body(), 1024 * 1024).await.unwrap();
+    let prof_val: serde_json::Value = serde_json::from_slice(&prof_bytes).unwrap();
+    assert_eq!(prof_val["item"]["record"]["name"], "Budi Updated");
+    assert_eq!(prof_val["item"]["record"]["role"], "user");
+
+    let res_logout = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/auth/logout")
+                .header("Authorization", format!("Bearer {}", user_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_logout.status(), StatusCode::OK);
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
+
+#[tokio::test]
+async fn test_unified_backup_and_restore_zip() {
+    let test_dir = std::path::PathBuf::from(format!("./target/test_backup_{}", uuid::Uuid::new_v4().simple()));
+    let _ = std::fs::remove_dir_all(&test_dir);
+    let storage_dir = test_dir.join("storage");
+    std::fs::create_dir_all(&storage_dir).unwrap();
+
+    let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
+        .await
+        .expect("setup test state");
+
+    // Create a table and insert a record
+    state
+        .db
+        .execute("CREATE TABLE notes (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT);", &[])
+        .await
+        .unwrap();
+    state
+        .db
+        .execute("INSERT INTO notes (title) VALUES ('Original Note');", &[])
+        .await
+        .unwrap();
+
+    // Create a physical file in storage/
+    let note_file_dir = storage_dir.join("notes").join("rec_101");
+    std::fs::create_dir_all(&note_file_dir).unwrap();
+    let note_file_path = note_file_dir.join("attachment.txt");
+    std::fs::write(&note_file_path, "Hello PadiBase Unified Backup!").unwrap();
+
+    let app = create_router(state.clone());
+
+    // 1. Create unified backup
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/backups")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let bytes = axum::body::to_bytes(res.into_body(), 1024 * 1024).await.unwrap();
+    let val: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let backup_key = val["item"]["key"].as_str().unwrap().to_string();
+    assert!(backup_key.ends_with(".zip"), "Backup file must be a .zip archive");
+    assert_eq!(val["item"]["is_zip"], true);
+    assert_eq!(val["item"]["has_storage"], true);
+    assert_eq!(val["item"]["storage_files"], 1);
+
+    // 2. Download backup and verify MIME header
+    let res_dl = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/backups/{}", backup_key))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_dl.status(), StatusCode::OK);
+    assert_eq!(res_dl.headers().get("content-type").unwrap(), "application/zip");
+
+    // 3. Delete the file from storage and modify database
+    std::fs::remove_file(&note_file_path).unwrap();
+    assert!(!note_file_path.exists());
+    state
+        .db
+        .execute("INSERT INTO notes (title) VALUES ('Changed After Backup');", &[])
+        .await
+        .unwrap();
+
+    // 4. Restore the backup
+    let res_restore = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/backups/{}/restore", backup_key))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_restore.status(), StatusCode::OK);
+    let r_bytes = axum::body::to_bytes(res_restore.into_body(), 1024 * 1024).await.unwrap();
+    let r_val: serde_json::Value = serde_json::from_slice(&r_bytes).unwrap();
+    assert_eq!(r_val["item"]["success"], true);
+    assert_eq!(r_val["item"]["storage_files_restored"], 1);
+
+    // Verify storage file was restored
+    assert!(note_file_path.exists(), "Storage file must be restored");
+    let content = std::fs::read_to_string(&note_file_path).unwrap();
+    assert_eq!(content, "Hello PadiBase Unified Backup!");
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }

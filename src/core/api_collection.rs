@@ -172,9 +172,9 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
                     "raw": "{\n  \"email\": \"user@example.com\",\n  \"username\": \"user123\",\n  \"name\": \"Sample User\",\n  \"password\": \"Password123!@#\",\n  \"passwordConfirm\": \"Password123!@#\"\n}"
                 },
                 "url": {
-                    "raw": format!("{{{{base_url}}}}/api/collections/{}/register", c_name)
+                    "raw": format!("{{{{base_url}}}}/api/{}/register", c_name)
                 },
-                "description": format!("Register a new account in auth collection '{}' and immediately receive a JWT auth_token.", c_name)
+                "description": format!("Register a new account in auth table '{}' and immediately receive a JWT auth_token.", c_name)
             }
         }));
 
@@ -199,9 +199,9 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
                     "raw": "{\n  \"identity\": \"user@example.com\",\n  \"password\": \"Password123!@#\"\n}"
                 },
                 "url": {
-                    "raw": format!("{{{{base_url}}}}/api/collections/{}/auth-with-password", c_name)
+                    "raw": format!("{{{{base_url}}}}/api/{}/auth-with-password", c_name)
                 },
-                "description": format!("Authenticate an auth record in collection '{}' with identity (email or username) and password. Automatically stores auth_token and ID variables.", c_name)
+                "description": format!("Authenticate an auth record in table '{}' with identity (email or username) and password. Automatically stores auth_token and ID variables.", c_name)
             }
         }));
 
@@ -217,7 +217,7 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
                     "raw": "{\n  \"email\": \"user@example.com\"\n}"
                 },
                 "url": {
-                    "raw": format!("{{{{base_url}}}}/api/collections/{}/forgot-password", c_name)
+                    "raw": format!("{{{{base_url}}}}/api/{}/forgot-password", c_name)
                 },
                 "description": format!("Request a password reset token for an account in '{}'.", c_name)
             }
@@ -235,7 +235,7 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
                     "raw": "{\n  \"token\": \"PASTE_RESET_TOKEN_HERE\",\n  \"password\": \"NewPassword123!@#\",\n  \"passwordConfirm\": \"NewPassword123!@#\"\n}"
                 },
                 "url": {
-                    "raw": format!("{{{{base_url}}}}/api/collections/{}/reset-password", c_name)
+                    "raw": format!("{{{{base_url}}}}/api/{}/reset-password", c_name)
                 },
                 "description": format!("Confirm password reset using the reset token for '{}'.", c_name)
             }
@@ -253,7 +253,7 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
                     "raw": "{\n  \"oldPassword\": \"Password123!@#\",\n  \"newPassword\": \"UpdatedPass123!@#\",\n  \"passwordConfirm\": \"UpdatedPass123!@#\"\n}"
                 },
                 "url": {
-                    "raw": format!("{{{{base_url}}}}/api/collections/{}/change-password", c_name)
+                    "raw": format!("{{{{base_url}}}}/api/{}/change-password", c_name)
                 },
                 "description": format!("Change password for the currently logged-in user in '{}'.", c_name)
             }
@@ -265,7 +265,7 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
                 "method": "GET",
                 "header": [],
                 "url": {
-                    "raw": format!("{{{{base_url}}}}/api/collections/{}/me", c_name)
+                    "raw": format!("{{{{base_url}}}}/api/{}/me", c_name)
                 },
                 "description": format!("Get the currently authenticated user profile and refreshed JWT token in '{}'.", c_name)
             }
@@ -279,52 +279,39 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
             "method": "GET",
             "header": [],
             "url": {
-                "raw": format!("{{{{base_url}}}}/api/collections/{}/records?page=1&perPage=30&sort=-created", c_name)
+                "raw": format!("{{{{base_url}}}}/api/{}?page=1&perPage=30&sort=-created", c_name)
             },
             "description": format!("Fetch paginated records for '{}' with sorting, filtering, and standard Padi Rust envelope.", c_name)
         }
     }));
 
-    // 3. List All Records (Padi Rust convention 1: /records/all)
+    // 3. List All Records (Direct Clean Route: /api/{collection}/all)
     items.push(json!({
-        "name": format!("List All {} (Padi Rust records/all)", title_name),
-        "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-                "raw": format!("{{{{base_url}}}}/api/collections/{}/records/all?sort_by=id&order=desc", c_name)
-            },
-            "description": format!("Retrieve all records for '{}' without pagination (Padi Rust standard).", c_name)
-        }
-    }));
-
-    // 4. List All Records (Padi Rust convention 2: /api/{collection}/all)
-    items.push(json!({
-        "name": format!("List All {} (Direct /api/{}/all)", title_name, c_name),
+        "name": format!("List All {}", title_name),
         "request": {
             "method": "GET",
             "header": [],
             "url": {
                 "raw": format!("{{{{base_url}}}}/api/{}/all?sort_by=id&order=desc", c_name)
             },
-            "description": format!("Clean direct route matching Padi Rust standard (GET /api/{}/all).", c_name)
+            "description": format!("Clean direct route to retrieve all records for '{}' without pagination (GET /api/{}/all).", c_name, c_name)
         }
     }));
 
-    // 5. Get Record by ID
+    // 4. Get Record by ID
     items.push(json!({
         "name": format!("Get {} By ID", title_name),
         "request": {
             "method": "GET",
             "header": [],
             "url": {
-                "raw": format!("{{{{base_url}}}}/api/collections/{}/records/{{{{{}}}}}", c_name, id_var_key)
+                "raw": format!("{{{{base_url}}}}/api/{}/{{{{{}}}}}", c_name, id_var_key)
             },
-            "description": format!("Get a single record from '{}' by its 15-character unique ID.", c_name)
+            "description": format!("Get a single record from '{}' by its unique ID (GET /api/{}/:id).", c_name, c_name)
         }
     }));
 
-    // 6. Create Record
+    // 5. Create Record
     items.push(json!({
         "name": format!("Create {}", title_name),
         "event": [
@@ -346,13 +333,13 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
                 "raw": create_body_raw
             },
             "url": {
-                "raw": format!("{{{{base_url}}}}/api/collections/{}/records", c_name)
+                "raw": format!("{{{{base_url}}}}/api/{}", c_name)
             },
-            "description": format!("Insert a new record into '{}'. Automatically saves the created ID into variable '{{{}}}'.", c_name, id_var_key)
+            "description": format!("Insert a new record into '{}' (POST /api/{}). Automatically saves the created ID into variable '{{{}}}'.", c_name, c_name, id_var_key)
         }
     }));
 
-    // 7. Update Record
+    // 6. Update Record
     items.push(json!({
         "name": format!("Update {}", title_name),
         "request": {
@@ -365,22 +352,22 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
                 "raw": update_body_raw
             },
             "url": {
-                "raw": format!("{{{{base_url}}}}/api/collections/{}/records/{{{{{}}}}}", c_name, id_var_key)
+                "raw": format!("{{{{base_url}}}}/api/{}/{{{{{}}}}}", c_name, id_var_key)
             },
-            "description": format!("Partially update an existing record in '{}'.", c_name)
+            "description": format!("Partially update an existing record in '{}' by ID (PATCH /api/{}/:id).", c_name, c_name)
         }
     }));
 
-    // 8. Delete Record
+    // 7. Delete Record
     items.push(json!({
         "name": format!("Delete {}", title_name),
         "request": {
             "method": "DELETE",
             "header": [],
             "url": {
-                "raw": format!("{{{{base_url}}}}/api/collections/{}/records/{{{{{}}}}}", c_name, id_var_key)
+                "raw": format!("{{{{base_url}}}}/api/{}/{{{{{}}}}}", c_name, id_var_key)
             },
-            "description": format!("Delete an existing record in '{}' by ID.", c_name)
+            "description": format!("Delete an existing record in '{}' by ID (DELETE /api/{}/:id).", c_name, c_name)
         }
     }));
 
@@ -391,9 +378,9 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
             "method": "GET",
             "header": [],
             "url": {
-                "raw": format!("{{{{base_url}}}}/api/collections/{}/export", c_name)
+                "raw": format!("{{{{base_url}}}}/api/{}/export", c_name)
             },
-            "description": format!("Export all records from collection '{}' as raw JSON.", c_name)
+            "description": format!("Export all records from table '{}' as raw JSON.", c_name)
         }
     }));
 
@@ -410,46 +397,48 @@ pub fn build_collection_items(col: &Collection) -> Vec<Value> {
                 "raw": format!("[\n  {}\n]", create_body_raw)
             },
             "url": {
-                "raw": format!("{{{{base_url}}}}/api/collections/{}/import", c_name)
+                "raw": format!("{{{{base_url}}}}/api/{}/import", c_name)
             },
             "description": format!("Bulk import an array of record objects into '{}'.", c_name)
         }
     }));
 
-    // 11. Upload File Attachment
-    items.push(json!({
-        "name": format!("Upload File Attachment ({})", title_name),
-        "request": {
-            "method": "POST",
-            "body": {
-                "mode": "formdata",
-                "formdata": [
-                    {
-                        "key": "file",
-                        "type": "file",
-                        "description": "Attachment file to upload"
-                    }
-                ]
-            },
-            "url": {
-                "raw": format!("{{{{base_url}}}}/api/files/{}/{{{{{}}}}}", c_name, id_var_key)
-            },
-            "description": format!("Upload an attachment file to an existing '{}' record via multipart/form-data.", c_name)
-        }
-    }));
+    // 11. Upload & Download File Attachment (only if table has at least one column of type File)
+    if let Some(ff) = col.schema.iter().find(|f| f.field_type == FieldType::File) {
+        let ff_name = &ff.name;
+        items.push(json!({
+            "name": format!("Upload File Attachment ({})", title_name),
+            "request": {
+                "method": "POST",
+                "body": {
+                    "mode": "formdata",
+                    "formdata": [
+                        {
+                            "key": ff_name,
+                            "type": "file",
+                            "description": format!("Attachment file to upload into column '{}'", ff_name)
+                        }
+                    ]
+                },
+                "url": {
+                    "raw": format!("{{{{base_url}}}}/api/files/{}/{{{{{}}}}}", c_name, id_var_key)
+                },
+                "description": format!("Upload an attachment file to an existing '{}' record via multipart/form-data into column '{}'.", c_name, ff_name)
+            }
+        }));
 
-    // 12. Download File Attachment
-    items.push(json!({
-        "name": format!("Download File Attachment ({})", title_name),
-        "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-                "raw": format!("{{{{base_url}}}}/api/files/{}/{{{{{}}}}}/FILENAME", c_name, id_var_key)
-            },
-            "description": format!("Download or view a stored file attachment from '{}'.", c_name)
-        }
-    }));
+        items.push(json!({
+            "name": format!("Download File Attachment ({})", title_name),
+            "request": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                    "raw": format!("{{{{base_url}}}}/api/files/{}/{{{{{}}}}}/FILENAME", c_name, id_var_key)
+                },
+                "description": format!("Download or view a stored file attachment from '{}'.", c_name)
+            }
+        }));
+    }
 
     items
 }
@@ -614,30 +603,30 @@ fn build_system_and_admin_folders() -> Vec<Value> {
                 }
             ]
         }),
-        // Folder: Collections Schema Management
+        // Folder: Tables Schema Management
         json!({
-            "name": "📦 Collections Schema Management",
+            "name": "📦 Tables Schema Management",
             "item": [
                 {
-                    "name": "List All Collections",
+                    "name": "List All Tables",
                     "request": {
                         "method": "GET",
                         "header": [],
-                        "url": { "raw": "{{base_url}}/api/collections" },
-                        "description": "List all collections and their schema definitions."
+                        "url": { "raw": "{{base_url}}/api/tables" },
+                        "description": "List all tables and their schema definitions."
                     }
                 },
                 {
-                    "name": "Sync Collections With Database Tables",
+                    "name": "Sync Tables With Database",
                     "request": {
                         "method": "POST",
                         "header": [],
-                        "url": { "raw": "{{base_url}}/api/collections/sync" },
+                        "url": { "raw": "{{base_url}}/api/tables/sync" },
                         "description": "Introspect database tables and automatically synchronize schema definitions."
                     }
                 },
                 {
-                    "name": "Create Collection",
+                    "name": "Create Table",
                     "request": {
                         "method": "POST",
                         "header": [
@@ -647,17 +636,17 @@ fn build_system_and_admin_folders() -> Vec<Value> {
                             "mode": "raw",
                             "raw": "{\n  \"name\": \"posts\",\n  \"type\": \"base\",\n  \"realtime\": true,\n  \"schema\": [\n    {\n      \"name\": \"title\",\n      \"type\": \"text\",\n      \"required\": true\n    },\n    {\n      \"name\": \"content\",\n      \"type\": \"text\",\n      \"required\": false\n    },\n    {\n      \"name\": \"published\",\n      \"type\": \"bool\",\n      \"required\": false\n    }\n  ]\n}"
                         },
-                        "url": { "raw": "{{base_url}}/api/collections" },
-                        "description": "Create a new Base or Auth collection and automatically generate SQL table."
+                        "url": { "raw": "{{base_url}}/api/tables" },
+                        "description": "Create a new Base or Auth table and automatically generate SQL table."
                     }
                 },
                 {
-                    "name": "Get Collection Schema By Name",
+                    "name": "Get Table Schema By Name",
                     "request": {
                         "method": "GET",
                         "header": [],
-                        "url": { "raw": "{{base_url}}/api/collections/users" },
-                        "description": "Get detailed schema and rule definitions for a collection."
+                        "url": { "raw": "{{base_url}}/api/tables/users" },
+                        "description": "Get detailed schema and rule definitions for a table."
                     }
                 }
             ]

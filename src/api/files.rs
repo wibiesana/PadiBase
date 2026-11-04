@@ -242,11 +242,11 @@ pub async fn upload_file(
             })?;
 
         if col.realtime {
-            state.realtime.broadcast(RealtimeMessage {
-                action: "update".to_string(),
-                collection: col.name.clone(),
-                record: serde_json::to_value(&rec).unwrap_or_default(),
-            });
+            state.realtime.broadcast(RealtimeMessage::new(
+                "update",
+                &col.name,
+                serde_json::to_value(&rec).unwrap_or_default(),
+            ));
         }
 
         rec

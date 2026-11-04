@@ -225,7 +225,7 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/sync"
+              "raw": "{{base_url}}/api/sync"
             },
             "description": "Introspect database tables and automatically synchronize schema definitions."
           }
@@ -256,7 +256,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/users"
+              "raw": "{{base_url}}/api/users"
             },
             "description": "Get detailed schema and rule definitions for a collection."
           }
@@ -300,7 +300,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/siswa/records?page=1&perPage=30&sort=-created"
+              "raw": "{{base_url}}/api/siswa?page=1&perPage=30&sort=-created"
             },
             "description": "Fetch paginated records for 'siswa' with sorting, filtering, and standard Padi Rust envelope."
           }
@@ -311,7 +311,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/siswa/records/all?sort_by=id&order=desc"
+              "raw": "{{base_url}}/api/siswa/all?sort_by=id&order=desc"
             },
             "description": "Retrieve all records for 'siswa' without pagination (Padi Rust standard)."
           }
@@ -333,7 +333,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/siswa/records/{{siswa_id}}"
+              "raw": "{{base_url}}/api/siswa/{{siswa_id}}"
             },
             "description": "Get a single record from 'siswa' by its 15-character unique ID."
           }
@@ -376,7 +376,7 @@
               "raw": "{\n  \"nama\": \"Sample Nama\",\n  \"alamat\": \"Jl. Sudirman No. 123, Jakarta\",\n  \"tanggal_lahir\": \"2026-01-01\"\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/collections/siswa/records"
+              "raw": "{{base_url}}/api/siswa"
             },
             "description": "Insert a new record into 'siswa'. Automatically saves the created ID into variable '{siswa_id}'."
           }
@@ -396,7 +396,7 @@
               "raw": "{\n  \"nama\": \"Sample Nama\",\n  \"alamat\": \"Jl. Sudirman No. 123, Jakarta\",\n  \"tanggal_lahir\": \"2026-01-01\"\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/collections/siswa/records/{{siswa_id}}"
+              "raw": "{{base_url}}/api/siswa/{{siswa_id}}"
             },
             "description": "Partially update an existing record in 'siswa'."
           }
@@ -407,7 +407,7 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/siswa/records/{{siswa_id}}"
+              "raw": "{{base_url}}/api/siswa/{{siswa_id}}"
             },
             "description": "Delete an existing record in 'siswa' by ID."
           }
@@ -418,7 +418,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/siswa/export"
+              "raw": "{{base_url}}/api/siswa/export"
             },
             "description": "Export all records from collection 'siswa' as raw JSON."
           }
@@ -438,7 +438,7 @@
               "raw": "[\n  {\n  \"nama\": \"Sample Nama\",\n  \"alamat\": \"Jl. Sudirman No. 123, Jakarta\",\n  \"tanggal_lahir\": \"2026-01-01\"\n}\n]"
             },
             "url": {
-              "raw": "{{base_url}}/api/collections/siswa/import"
+              "raw": "{{base_url}}/api/siswa/import"
             },
             "description": "Bulk import an array of record objects into 'siswa'."
           }
@@ -489,7 +489,7 @@
               "raw": "{\n  \"identity\": \"user@example.com\",\n  \"password\": \"Password123!@#\"\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/collections/users/auth-with-password"
+              "raw": "{{base_url}}/api/users/auth-with-password"
             },
             "description": "Authenticate an auth record in collection 'users' with identity (email or username) and password. Automatically stores auth_token and ID variables."
           }
@@ -500,7 +500,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/users/records?page=1&perPage=30&sort=-created"
+              "raw": "{{base_url}}/api/users?page=1&perPage=30&sort=-created"
             },
             "description": "Fetch paginated records for 'users' with sorting, filtering, and standard Padi Rust envelope."
           }
@@ -511,7 +511,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/users/records/all?sort_by=id&order=desc"
+              "raw": "{{base_url}}/api/users/all?sort_by=id&order=desc"
             },
             "description": "Retrieve all records for 'users' without pagination (Padi Rust standard)."
           }
@@ -533,7 +533,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/users/records/{{user_id}}"
+              "raw": "{{base_url}}/api/users/{{user_id}}"
             },
             "description": "Get a single record from 'users' by its 15-character unique ID."
           }
@@ -576,7 +576,7 @@
               "raw": "{\n  \"username\": \"user123\",\n  \"email\": \"sample@example.com\",\n  \"password\": \"Password123!@#\",\n  \"passwordConfirm\": \"Password123!@#\",\n  \"name\": \"Sample Name\",\n  \"avatar\": \"sample_attachment.jpg\",\n  \"emailVisibility\": 1,\n  \"verified\": 1,\n  \"passwordHash\": \"Secret123!@#\",\n  \"tokenKey\": \"Sample TokenKey\"\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/collections/users/records"
+              "raw": "{{base_url}}/api/users"
             },
             "description": "Insert a new record into 'users'. Automatically saves the created ID into variable '{user_id}'."
           }
@@ -596,7 +596,7 @@
               "raw": "{\n  \"username\": \"user123_updated\",\n  \"name\": \"Sample Name\",\n  \"avatar\": \"sample_attachment.jpg\"\n}"
             },
             "url": {
-              "raw": "{{base_url}}/api/collections/users/records/{{user_id}}"
+              "raw": "{{base_url}}/api/users/{{user_id}}"
             },
             "description": "Partially update an existing record in 'users'."
           }
@@ -607,7 +607,7 @@
             "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/users/records/{{user_id}}"
+              "raw": "{{base_url}}/api/users/{{user_id}}"
             },
             "description": "Delete an existing record in 'users' by ID."
           }
@@ -618,7 +618,7 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url}}/api/collections/users/export"
+              "raw": "{{base_url}}/api/users/export"
             },
             "description": "Export all records from collection 'users' as raw JSON."
           }
@@ -638,7 +638,7 @@
               "raw": "[\n  {\n  \"username\": \"user123\",\n  \"email\": \"sample@example.com\",\n  \"password\": \"Password123!@#\",\n  \"passwordConfirm\": \"Password123!@#\",\n  \"name\": \"Sample Name\",\n  \"avatar\": \"sample_attachment.jpg\",\n  \"emailVisibility\": 1,\n  \"verified\": 1,\n  \"passwordHash\": \"Secret123!@#\",\n  \"tokenKey\": \"Sample TokenKey\"\n}\n]"
             },
             "url": {
-              "raw": "{{base_url}}/api/collections/users/import"
+              "raw": "{{base_url}}/api/users/import"
             },
             "description": "Bulk import an array of record objects into 'users'."
           }

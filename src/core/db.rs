@@ -25,8 +25,20 @@ pub struct SchemaCache {
     pub table_metadata: RwLock<HashMap<String, TableMetadata>>,
     pub relations: RwLock<HashMap<String, Vec<DetectedRelation>>>,
     pub collections: RwLock<HashMap<String, Collection>>,
+    pub collections_list: RwLock<Option<Vec<Collection>>>,
     pub endpoints: RwLock<HashMap<String, CustomEndpoint>>,
     pub settings: RwLock<Option<serde_json::Value>>,
+}
+
+/// Validate that a SQL identifier (table or column name) only contains safe alphanumeric/underscore characters.
+#[inline]
+pub fn is_safe_identifier(name: &str) -> bool {
+    let trimmed = name.trim();
+    !trimmed.is_empty()
+        && trimmed.len() <= 128
+        && trimmed
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
 /// Standalone fallback invalidation helpers (no-op as cache is tenant/pool isolated).
@@ -270,6 +282,9 @@ impl DbPool {
         if let Ok(mut cache) = self.cache.collections.write() {
             cache.remove(table_or_col_name);
         }
+        if let Ok(mut list_cache) = self.cache.collections_list.write() {
+            *list_cache = None;
+        }
     }
 
     #[inline]
@@ -282,6 +297,15 @@ impl DbPool {
         }
         if let Ok(mut cache) = self.cache.collections.write() {
             cache.clear();
+        }
+        if let Ok(mut list_cache) = self.cache.collections_list.write() {
+            *list_cache = None;
+        }
+        if let Ok(mut cache) = self.cache.endpoints.write() {
+            cache.clear();
+        }
+        if let Ok(mut cache) = self.cache.settings.write() {
+            *cache = None;
         }
     }
 
@@ -296,6 +320,9 @@ impl DbPool {
         if let Ok(mut cache) = self.cache.collections.write() {
             cache.insert(col.id.clone(), col.clone());
             cache.insert(col.name.clone(), col.clone());
+        }
+        if let Ok(mut list_cache) = self.cache.collections_list.write() {
+            *list_cache = None;
         }
     }
 
@@ -1346,6 +1373,12 @@ pub async fn get_collection_by_name_or_id(
 }
 
 pub async fn list_collections(pool: &DbPool) -> Result<Vec<Collection>> {
+    if let Ok(list_guard) = pool.cache.collections_list.read() {
+        if let Some(ref cached_list) = *list_guard {
+            return Ok(cached_list.clone());
+        }
+    }
+
     let rows = pool
         .fetch_all(
             r#"
@@ -1359,8 +1392,14 @@ pub async fn list_collections(pool: &DbPool) -> Result<Vec<Collection>> {
 
     let list: Vec<Collection> = rows.iter().map(value_to_collection).collect();
     // Cache all collections in tenant memory
-    for col in &list {
-        pool.set_cached_collection(col);
+    if let Ok(mut cache) = pool.cache.collections.write() {
+        for col in &list {
+            cache.insert(col.id.clone(), col.clone());
+            cache.insert(col.name.clone(), col.clone());
+        }
+    }
+    if let Ok(mut list_guard) = pool.cache.collections_list.write() {
+        *list_guard = Some(list.clone());
     }
     Ok(list)
 }

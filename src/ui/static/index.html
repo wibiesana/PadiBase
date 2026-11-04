@@ -8,7 +8,7 @@
   <link rel="alternate icon" href="/favicon.ico">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="/dashboard/style.css">
+  <link rel="stylesheet" href="/dashboard/style.css?v=2">
 </head>
 <body class="bg-[#f8fafc] text-slate-800 h-screen overflow-hidden flex flex-col select-none">
 
@@ -146,10 +146,10 @@
             <span class="hidden md:inline">Tables &amp; Data</span>
           </button>
 
-          <!-- 2. Custom SQL API -->
-          <button id="railEndpointsBtn" onclick="switchMainView('endpoints')" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-900 transition relative" title="Custom SQL API Endpoints">
+          <!-- 2. Custom API -->
+          <button id="railEndpointsBtn" onclick="switchMainView('endpoints')" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-900 transition relative" title="Custom API Endpoints">
             <i class="fa-solid fa-code text-sm w-5 text-center text-amber-400"></i>
-            <span class="hidden md:inline">Custom SQL API</span>
+            <span class="hidden md:inline">Custom API</span>
           </button>
 
           <!-- 3. Realtime Logs -->
@@ -291,10 +291,7 @@
                   <span>Realtime: <strong>ON</strong></span>
                 </button>
 
-                <button type="button" onclick="openSchemaEditorPage('rules')" id="collectionRuleSummaryBadge" class="hidden sm:inline-flex text-[10px] px-2.5 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200 font-semibold items-center space-x-1.5 transition cursor-pointer" title="Click to configure API access rules &amp; auth permissions">
-                  <i class="fa-solid fa-shield-halved text-[9px] text-slate-500"></i>
-                  <span id="collectionRuleSummaryText">Rules</span>
-                </button>
+
               </div>
             </div>
 
@@ -422,30 +419,47 @@
       </div>
 
       <!-- ================= VIEW 2: DYNAMIC CUSTOM SQL ENDPOINTS BUILDER ================= -->
-      <div id="endpointsView" class="hidden flex-1 flex overflow-hidden p-3 sm:p-5 gap-3 sm:gap-4 relative bg-slate-100">
-        <!-- Left Sidebar: Saved Endpoints List -->
-        <aside class="w-68 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden shrink-0">
-          <div class="p-3.5 border-b border-slate-100 bg-slate-50">
+      <div id="endpointsView" class="hidden flex-1 flex overflow-hidden relative bg-white">
+        <!-- Left Sub-Sidebar: Endpoints List -->
+        <aside id="endpointsSidebar" class="w-64 bg-slate-50 border-r border-slate-200 flex flex-col shrink-0 select-none">
+          <!-- Sub-Sidebar Header -->
+          <div class="p-3.5 border-b border-slate-200/80 bg-white">
             <div class="flex items-center justify-between mb-2">
               <div class="flex items-center space-x-1.5">
-                <h3 class="text-xs font-extrabold uppercase tracking-wider text-slate-800">Custom Endpoints</h3>
-                <span id="customEpCountBadge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-amber-100 text-amber-800 rounded-full">0</span>
+                <span class="text-xs font-extrabold uppercase tracking-wider text-slate-700">Endpoints</span>
+                <span id="customEpCountBadge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full">0</span>
               </div>
-              <button type="button" onclick="startNewCustomEndpoint()" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1 shadow-2xs transition">
-                <i class="fa-solid fa-plus text-[10px]"></i>
-                <span>New</span>
-              </button>
+              <div class="flex items-center space-x-1">
+                <button type="button" onclick="startNewCustomEndpoint()" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1 transition shadow-2xs" title="Create New Custom API Endpoint">
+                  <i class="fa-solid fa-plus text-[10px]"></i>
+                  <span>New</span>
+                </button>
+              </div>
             </div>
+
+            <!-- Search Filter Endpoints -->
             <div class="relative">
-              <i class="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-slate-400 text-[11px]"></i>
-              <input type="text" id="customEpSearchInput" oninput="renderCustomEndpointsList()" placeholder="Search endpoint..." class="w-full bg-white border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs focus:outline-none focus:border-emerald-600">
+              <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs absolute left-2.5 top-2.5"></i>
+              <input type="text" id="customEpSearchInput" oninput="renderCustomEndpointsList()" placeholder="Search endpoints..." class="w-full bg-slate-100 border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
             </div>
           </div>
-          <div id="customEndpointsList" class="flex-1 overflow-y-auto p-2.5 space-y-1.5"></div>
+
+          <!-- Endpoints List -->
+          <nav id="customEndpointsList" class="flex-1 overflow-y-auto p-2 space-y-1.5">
+            <!-- Dynamic endpoints injected via JS -->
+          </nav>
+
+          <!-- Sub-Sidebar Footer -->
+          <div class="p-2.5 border-t border-slate-200 bg-white">
+            <button onclick="startNewCustomEndpoint()" class="w-full py-1.5 px-2.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-600 text-xs font-semibold flex items-center justify-center space-x-1.5 transition">
+              <i class="fa-solid fa-plus text-[11px] text-slate-400"></i>
+              <span>Add Custom API Endpoint</span>
+            </button>
+          </div>
         </aside>
 
         <!-- Main Area: SQL Endpoint Builder & Live Tester -->
-        <main class="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-y-auto p-4 sm:p-6">
+        <main class="flex-1 flex flex-col min-w-0 overflow-y-auto bg-white p-4 sm:p-6">
           <div class="max-w-5xl w-full mx-auto space-y-6">
             <!-- Header -->
             <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200">
@@ -454,7 +468,7 @@
                   <i class="fa-solid fa-code text-sm"></i>
                 </div>
                 <div>
-                  <h2 id="customEpFormTitle" class="text-base sm:text-lg font-extrabold text-slate-900">Create Custom SQL Endpoint</h2>
+                  <h2 id="customEpFormTitle" class="text-base sm:text-lg font-extrabold text-slate-900">Create Custom API Endpoint</h2>
                   <p class="text-xs text-slate-500">Define custom URL routes and SQL queries. Served instantly without recompiling.</p>
                 </div>
               </div>
@@ -489,17 +503,23 @@
                 </select>
               </div>
               <div class="md:col-span-3">
-                <label class="block text-xs font-bold text-slate-700 mb-1">Path Prefix</label>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="block text-xs font-bold text-slate-700">Path Prefix</label>
+                  <button type="button" id="deletePrefixBtn" onclick="deleteCurrentSelectedPrefix()" class="hidden text-[10px] text-rose-500 hover:text-rose-700 font-semibold transition cursor-pointer" title="Delete selected custom prefix">
+                    <i class="fa-solid fa-trash-can mr-1"></i>Delete prefix
+                  </button>
+                </div>
                 <select id="epPrefixSelect" onchange="onCustomEpPrefixChange(this.value)" class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-mono text-slate-900 focus:outline-none focus:border-emerald-600 shadow-2xs">
                   <option value="">(Default: /api/)</option>
-                  <option value="v1/">v1/ (/api/v1/)</option>
-                  <option value="custom/">custom/ (/api/custom/)</option>
-                  <option value="tables/">tables/ (/api/tables/)</option>
-                  <option value="collections/">collections/ (/api/collections/)</option>
                   <option value="/">/ (Root Direct: without /api/)</option>
                   <option value="__custom__">Custom prefix...</option>
                 </select>
-                <input type="text" id="epCustomPrefixInput" oninput="updateCustomEpUrlPreview()" placeholder="/api/v2/" class="hidden mt-1.5 w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-mono">
+                <div id="epCustomPrefixWrapper" class="hidden mt-1.5 flex items-center space-x-1.5">
+                  <input type="text" id="epCustomPrefixInput" oninput="updateCustomEpUrlPreview()" onkeydown="if(event.key==='Enter'){event.preventDefault();saveNewCustomPrefixFromInput();}" placeholder="e.g. v2/ or /webhook/" class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1 text-xs font-mono">
+                  <button type="button" onclick="saveNewCustomPrefixFromInput()" class="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shrink-0 transition cursor-pointer" title="Save prefix to list">
+                    Save
+                  </button>
+                </div>
               </div>
               <div class="md:col-span-3">
                 <label class="block text-xs font-bold text-slate-700 mb-1">Sub-Path</label>
@@ -514,12 +534,24 @@
                 <span id="epLiveUrlPreview" class="text-emerald-400 font-bold truncate">http://127.0.0.1:8085/api/endpoint</span>
               </div>
               <div class="flex items-center space-x-2 shrink-0">
-                <span id="epOverrideModeBadge" class="hidden text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-400/30">OVERRIDE</span>
+                <span id="epOverrideModeBadge" class="hidden text-[10px] px-2 py-0.5 rounded-md bg-amber-400 text-slate-950 font-extrabold shadow-sm flex items-center gap-1">
+                  <i class="fa-solid fa-bolt text-[9px]"></i>
+                  <span>OVERRIDE</span>
+                </span>
                 <button type="button" onclick="copyToClipboard(document.getElementById('epLiveUrlPreview')?.textContent)" class="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-slate-200 text-[11px] font-sans font-bold flex items-center space-x-1 transition cursor-pointer" title="Copy full endpoint URL">
                   <i class="fa-regular fa-copy text-[10px]"></i>
                   <span>Copy</span>
                 </button>
               </div>
+            </div>
+
+            <!-- Route Override Notice Banner -->
+            <div id="epOverrideNoticeBanner" class="hidden p-3 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-xs flex items-center justify-between">
+              <div class="flex items-center space-x-2.5">
+                <i class="fa-solid fa-triangle-exclamation text-amber-600 text-sm shrink-0"></i>
+                <span><strong>Route Override Active:</strong> This custom API overrides the built-in table route. Incoming requests will execute your custom SQL query instead of the standard CRUD handler.</span>
+              </div>
+              <span class="px-2 py-0.5 rounded-md bg-amber-200 text-amber-900 font-mono text-[10px] font-extrabold shrink-0 ml-2">OVERRIDE</span>
             </div>
 
             <div class="hidden">
@@ -530,13 +562,13 @@
             <div class="space-y-3">
               <div class="flex items-center justify-between flex-wrap gap-2.5">
                 <!-- Mode Switcher: Code Editor vs Visual Builder -->
-                <div class="inline-flex items-center p-1 rounded-xl bg-slate-100 border border-slate-200 shadow-2xs">
-                  <button id="epModeCodeBtn" type="button" onclick="switchEndpointEditorMode('code')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 bg-white shadow-2xs text-slate-800">
-                    <i class="fa-solid fa-code text-emerald-600"></i>
+                <div class="inline-flex items-center p-1 gap-1 rounded-xl bg-slate-200/80 border border-slate-300 shadow-inner">
+                  <button id="epModeCodeBtn" type="button" onclick="switchEndpointEditorMode('code')" class="mode-btn-active px-4 py-1.5 rounded-lg text-xs font-extrabold transition flex items-center space-x-1.5 bg-emerald-600 text-white shadow-sm cursor-pointer">
+                    <i id="epModeCodeIcon" class="fa-solid fa-code text-white"></i>
                     <span>SQL Editor</span>
                   </button>
-                  <button id="epModeVisualBtn" type="button" onclick="switchEndpointEditorMode('visual')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 text-slate-500 hover:text-slate-800">
-                    <i class="fa-solid fa-wand-magic-sparkles text-amber-500"></i>
+                  <button id="epModeVisualBtn" type="button" onclick="switchEndpointEditorMode('visual')" class="mode-btn-inactive px-4 py-1.5 rounded-lg text-xs font-semibold transition flex items-center space-x-1.5 text-slate-500 hover:text-slate-800 hover:bg-white/60 cursor-pointer">
+                    <i id="epModeVisualIcon" class="fa-solid fa-wand-magic-sparkles text-slate-400"></i>
                     <span>Visual Query Builder</span>
                   </button>
                 </div>
@@ -545,10 +577,14 @@
                 <div class="flex items-center space-x-1.5 text-xs flex-wrap gap-1">
                   <select onchange="applySqlEndpointTemplate(this.value); this.value='';" class="px-3 py-1.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-[11px] font-bold cursor-pointer transition shadow-2xs">
                     <option value="">⚡ Select Ready-to-Use SQL Template...</option>
-                    <optgroup label="Simple Messages & Scalar Output">
+                    <optgroup label="User Ownership &amp; Own Create">
+                      <option value="own_create">👤 Own Create: Show Only User's Created Records (@request.auth.id)</option>
+                    </optgroup>
+                    <optgroup label="Simple Messages &amp; Scalar Output">
                       <option value="simple_text">💬 Simple Text: Return 'hello' (Direct / No SQL)</option>
                     </optgroup>
                     <optgroup label="Multi-Table & Transactions">
+                      <option value="parent_child_last_id">🔗 Parent + Child: Order &amp; Items with :last_insert_id</option>
                       <option value="kasir_transaction">🛒 POS / Cashier: Insert Order + Detail + Deduct Stock</option>
                       <option value="multi_table_insert">📦 Multi-Table: Insert Table 1 + Table 2 (Atomic)</option>
                       <option value="upsert">🔄 Upsert: Insert or Update on Duplicate Key</option>
@@ -568,7 +604,7 @@
 
               <!-- SQL Code Editor Pane -->
               <div id="epSqlEditorPane" class="space-y-2">
-                <textarea id="epSqlInput" rows="8" class="w-full bg-slate-950 text-emerald-400 p-3.5 rounded-xl font-mono text-xs focus:outline-none" placeholder="-- Masukkan query SQL Anda di sini..."></textarea>
+                <textarea id="epSqlInput" rows="8" oninput="autoDetectTransactionCheckbox()" class="w-full bg-slate-950 text-emerald-400 p-3.5 rounded-xl font-mono text-xs focus:outline-none" placeholder="-- Enter your SQL query here..."></textarea>
               </div>
 
               <!-- Visual Query Builder Pane -->
@@ -623,17 +659,63 @@
                   </div>
                 </div>
 
+                <!-- Table Joins Section (SELECT only) -->
+                <div id="qbJoinSection" class="space-y-2.5 bg-white p-3.5 rounded-xl border border-slate-200">
+                  <div class="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <label class="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
+                        <i class="fa-solid fa-link text-indigo-600"></i>
+                        <span>Table JOINs (Combine with Other Tables)</span>
+                      </label>
+                      <p class="text-[10px] text-slate-400">Connect this table with data from other tables using matching keys (LEFT, INNER, or RIGHT JOIN).</p>
+                    </div>
+                    <button type="button" onclick="addQbJoinRow()" class="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] transition flex items-center space-x-1 cursor-pointer">
+                      <i class="fa-solid fa-plus text-[10px]"></i>
+                      <span>Add JOIN</span>
+                    </button>
+                  </div>
+                  <div id="qbJoinsContainer" class="space-y-2.5">
+                    <div id="qbEmptyJoinsNotice" class="text-xs text-slate-400 italic py-1">No JOIN configured. Query only fetches from the primary table.</div>
+                  </div>
+                </div>
+
+                <!-- Multi-Table Operations Section (INSERT, UPDATE, DELETE) -->
+                <div id="qbMultiTableSection" class="hidden space-y-2.5 bg-white p-3.5 rounded-xl border border-slate-200">
+                  <div class="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <label class="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
+                        <i class="fa-solid fa-layer-group text-teal-600"></i>
+                        <span id="qbMultiTableLabel">Multi-Table Operations (Atomic Transaction)</span>
+                      </label>
+                      <p class="text-[10px] text-slate-400">Execute mutations across multiple tables in a single database transaction.</p>
+                    </div>
+                    <button type="button" onclick="addQbExtraTableRow()" class="px-2.5 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-[11px] transition flex items-center space-x-1 cursor-pointer">
+                      <i class="fa-solid fa-plus text-[10px]"></i>
+                      <span>Add Another Table</span>
+                    </button>
+                  </div>
+                  <div id="qbExtraTablesContainer" class="space-y-2.5">
+                    <div id="qbEmptyExtraTablesNotice" class="text-xs text-slate-400 italic py-1">Single table operation. Click "+ Add Another Table" to chain mutations in this transaction.</div>
+                  </div>
+                </div>
+
                 <!-- WHERE Conditions Builder -->
                 <div id="qbWhereSection" class="space-y-2.5 bg-white p-3.5 rounded-xl border border-slate-200">
-                  <div class="flex items-center justify-between">
+                  <div class="flex items-center justify-between flex-wrap gap-2">
                     <label class="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
                       <i class="fa-solid fa-filter text-indigo-600"></i>
                       <span>Filter Conditions (WHERE Clause)</span>
                     </label>
-                    <button type="button" onclick="addQbFilterRow()" class="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] transition flex items-center space-x-1 cursor-pointer">
-                      <i class="fa-solid fa-plus text-[10px]"></i>
-                      <span>Add Condition</span>
-                    </button>
+                    <div class="flex items-center space-x-1.5">
+                      <button type="button" onclick="applyQbOwnCreateFilter()" class="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-[11px] transition flex items-center space-x-1 cursor-pointer" title="Only display data created by current user (@request.auth.id)">
+                        <i class="fa-solid fa-user-shield text-emerald-600 text-[10px]"></i>
+                        <span>👤 Own Create Only</span>
+                      </button>
+                      <button type="button" onclick="addQbFilterRow()" class="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-[11px] transition flex items-center space-x-1 cursor-pointer">
+                        <i class="fa-solid fa-plus text-[10px]"></i>
+                        <span>Add Condition</span>
+                      </button>
+                    </div>
                   </div>
                   <div id="qbFiltersContainer" class="space-y-2">
                     <div id="qbEmptyFiltersNotice" class="text-xs text-slate-400 italic py-1">No filter conditions. All matching rows will be affected.</div>
@@ -743,9 +825,12 @@
                 </div>
                 <div class="bg-white p-3 rounded-xl border border-slate-200">
                   <label class="inline-flex items-start space-x-2.5 cursor-pointer">
-                    <input type="checkbox" id="epTransactionInput" class="rounded border-slate-300 text-emerald-600 mt-0.5">
+                    <input type="checkbox" id="epTransactionInput" onchange="onUserToggleTransaction(this.checked)" class="rounded border-slate-300 text-emerald-600 mt-0.5">
                     <div>
-                      <span class="font-bold text-slate-800 block">Wrap in Transaction</span>
+                      <div class="flex items-center space-x-2">
+                        <span class="font-bold text-slate-800 block">Wrap in Transaction</span>
+                        <span id="epTransactionBadge" class="hidden text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800" title="Automatically set based on multiple SQL statements">Auto: multi-query</span>
+                      </div>
                       <span class="text-[10px] text-slate-400 block leading-tight">Executes atomically with auto-rollback if any query fails.</span>
                     </div>
                   </label>
@@ -767,7 +852,7 @@
               </div>
               <div>
                 <label class="block text-[11px] font-mono text-slate-500 mb-1">Test Parameters (JSON Object)</label>
-                <textarea id="epTestParamsInput" rows="2" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2 font-mono text-xs" placeholder='{ "status": "active", "limit": 10 }'></textarea>
+                <textarea id="epTestParamsInput" rows="6" class="w-full bg-slate-50 border border-slate-300 rounded-lg p-2.5 font-mono text-xs leading-relaxed resize-y" placeholder='{ "status": "active", "limit": 10 }'></textarea>
               </div>
               <div>
                 <label class="block text-[11px] font-mono text-slate-500 mb-1">Response</label>
@@ -812,49 +897,127 @@
       </div>
 
       <!-- ================= VIEW 4: SETTINGS & SYSTEM HUB ================= -->
-      <div id="settingsView" class="hidden flex-1 flex flex-col overflow-hidden p-3 sm:p-5 bg-slate-100">
-        <div class="max-w-6xl w-full mx-auto flex-1 flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          
-          <!-- Settings Header -->
-          <div class="px-5 py-3.5 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
-            <div>
-              <h2 class="text-base font-extrabold text-slate-900 flex items-center">
-                <i class="fa-solid fa-sliders text-indigo-600 mr-2"></i>
-                PadiBase System &amp; Application Settings
-              </h2>
-              <p class="text-xs text-slate-500 mt-0.5">Manage global table matrix, database backups, admin accounts, and schema import/export.</p>
+      <div id="settingsView" class="hidden flex-1 flex overflow-hidden relative bg-white">
+        <!-- Sub-Sidebar: Settings & System Tabs -->
+        <aside id="settingsSidebar" class="w-64 bg-slate-50 border-r border-slate-200 flex flex-col shrink-0 select-none">
+          <!-- Sub-Sidebar Header -->
+          <div class="p-3.5 border-b border-slate-200/80 bg-white">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center space-x-1.5">
+                <span class="text-xs font-extrabold uppercase tracking-wider text-slate-700">Settings</span>
+                <span id="settingsCountBadge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full">7</span>
+              </div>
+              <div class="flex items-center space-x-1">
+                <button onclick="syncDatabaseTables()" class="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 text-xs transition" title="Sync database tables">
+                  <i class="fa-solid fa-arrows-rotate text-[11px]"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Search Filter Settings -->
+            <div class="relative">
+              <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs absolute left-2.5 top-2.5"></i>
+              <input type="text" id="settingsSearchInput" oninput="filterSettingsTabs()" placeholder="Search settings..." class="w-full bg-slate-100 border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
             </div>
           </div>
 
-          <!-- Settings Body: Left Sidebar Tabs + Right Content -->
-          <div class="flex-1 flex min-h-0 overflow-hidden">
-            <!-- Left Sidebar Navigation -->
-            <aside class="w-52 sm:w-60 bg-slate-50 border-r border-slate-200 flex flex-col p-2.5 space-y-1 overflow-y-auto shrink-0 select-none">
-              <button id="setTab_quickmatrix" onclick="switchSettingsTab('quickmatrix')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-2.5 transition shrink-0">
-                <i class="fa-solid fa-table-cells w-4 text-center"></i> <span>All Tables Matrix</span>
+          <!-- Settings Tabs List -->
+          <nav id="settingsTabsNav" class="flex-1 overflow-y-auto p-2 space-y-1.5">
+            <!-- 1. All Tables Matrix -->
+            <div id="setTabContainer_quickmatrix" class="group relative flex items-center rounded-2xl transition border bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold">
+              <button type="button" onclick="switchSettingsTab('quickmatrix')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+                <div class="flex items-center space-x-2.5 truncate">
+                  <span id="setTabIcon_quickmatrix" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-white/20 text-white">
+                    <i class="fa-solid fa-table-cells text-[11px]"></i>
+                  </span>
+                  <div class="text-left truncate">
+                    <div id="setTabTitle_quickmatrix" class="truncate font-mono">Tables Matrix</div>
+                    <div id="setTabSub_quickmatrix" class="text-[10px] text-emerald-100">schema &bull; rules</div>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-1 shrink-0 ml-1">
+                  <span id="setTabBadge_quickmatrix" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-white/20 text-white">matrix</span>
+                </div>
               </button>
-              <button id="setTab_app" onclick="switchSettingsTab('app')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
-                <i class="fa-solid fa-server w-4 text-center"></i> <span>Application &amp; DB</span>
-              </button>
-              <button id="setTab_roles" onclick="switchSettingsTab('roles')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
-                <i class="fa-solid fa-shield-halved w-4 text-center"></i> <span>Roles (RBAC)</span>
-              </button>
-              <button id="setTab_admins" onclick="switchSettingsTab('admins')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
-                <i class="fa-solid fa-user-shield w-4 text-center"></i> <span>Admin Accounts</span>
-              </button>
-              <button id="setTab_backups" onclick="switchSettingsTab('backups')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
-                <i class="fa-solid fa-box-archive w-4 text-center"></i> <span>Backups</span>
-              </button>
-              <button id="setTab_export" onclick="switchSettingsTab('export')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
-                <i class="fa-solid fa-file-export w-4 text-center"></i> <span>Export Schema</span>
-              </button>
-              <button id="setTab_import" onclick="switchSettingsTab('import')" class="w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
-                <i class="fa-solid fa-file-import w-4 text-center"></i> <span>Import Schema</span>
-              </button>
-            </aside>
+            </div>
 
-            <!-- Settings Tab Content Area -->
-            <main class="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-50/50">
+            <!-- 2. Application & DB -->
+            <div id="setTabContainer_app" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('app')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+                <div class="flex items-center space-x-2.5 truncate">
+                  <span id="setTabIcon_app" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                    <i class="fa-solid fa-server text-[11px]"></i>
+                  </span>
+                  <div class="text-left truncate">
+                    <div id="setTabTitle_app" class="truncate font-mono">Application &amp; DB</div>
+                    <div id="setTabSub_app" class="text-[10px] text-slate-400">engine &bull; tokens</div>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-1 shrink-0 ml-1">
+                  <span id="setTabBadge_app" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">system</span>
+                </div>
+              </button>
+            </div>
+
+            <!-- 3. Roles (RBAC) -->
+            <div id="setTabContainer_roles" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('roles')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+                <div class="flex items-center space-x-2.5 truncate">
+                  <span id="setTabIcon_roles" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                    <i class="fa-solid fa-shield-halved text-[11px]"></i>
+                  </span>
+                  <div class="text-left truncate">
+                    <div id="setTabTitle_roles" class="truncate font-mono">Roles (RBAC)</div>
+                    <div id="setTabSub_roles" class="text-[10px] text-slate-400">permissions &bull; access</div>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-1 shrink-0 ml-1">
+                  <span id="setTabBadge_roles" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">security</span>
+                </div>
+              </button>
+            </div>
+
+            <!-- 4. Admin Accounts -->
+            <div id="setTabContainer_admins" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('admins')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+                <div class="flex items-center space-x-2.5 truncate">
+                  <span id="setTabIcon_admins" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                    <i class="fa-solid fa-user-shield text-[11px]"></i>
+                  </span>
+                  <div class="text-left truncate">
+                    <div id="setTabTitle_admins" class="truncate font-mono">Admin Accounts</div>
+                    <div id="setTabSub_admins" class="text-[10px] text-slate-400">manage &bull; credentials</div>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-1 shrink-0 ml-1">
+                  <span id="setTabBadge_admins" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">admins</span>
+                </div>
+              </button>
+            </div>
+
+            <!-- 5. Backups & Restore -->
+            <div id="setTabContainer_backups" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('backups')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+                <div class="flex items-center space-x-2.5 truncate">
+                  <span id="setTabIcon_backups" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                    <i class="fa-solid fa-box-archive text-[11px]"></i>
+                  </span>
+                  <div class="text-left truncate">
+                    <div id="setTabTitle_backups" class="truncate font-mono">Backups &amp; Restore</div>
+                    <div id="setTabSub_backups" class="text-[10px] text-slate-400">database &bull; storage &bull; .zip</div>
+                  </div>
+                </div>
+                <div class="flex items-center space-x-1 shrink-0 ml-1">
+                  <span id="setTabBadge_backups" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">unified</span>
+                </div>
+              </button>
+            </div>
+          </nav>
+        </aside>
+
+        <!-- Settings Main Content Area -->
+        <main class="flex-1 flex flex-col min-w-0 overflow-y-auto bg-white p-4 sm:p-6">
+          <div class="max-w-5xl w-full mx-auto space-y-6">
             
             <!-- 1. All Tables Quick Matrix -->
             <div id="settingsPane_quickmatrix" class="space-y-4">
@@ -913,11 +1076,24 @@
               </div>
 
               <!-- Database Engine Info -->
-              <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-2xs">
-                <h3 class="text-sm font-extrabold text-slate-900 border-b pb-3">Active Database Engine</h3>
-                <div class="flex items-center space-x-3">
+              <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-2xs">
+                <div class="flex items-center justify-between border-b pb-3">
+                  <div>
+                    <h3 class="text-sm font-extrabold text-slate-900">Active Database Engine</h3>
+                    <p class="text-xs text-slate-500">Configured via environment variables (<code class="text-slate-700 font-mono">PADI_DATABASE_URL</code>).</p>
+                  </div>
                   <span id="settingsDbBadge" class="px-3 py-1 rounded-md bg-slate-900 text-emerald-400 font-mono font-bold text-xs uppercase">SQLITE</span>
-                  <p class="text-xs text-slate-500">Configured via environment variables (<code class="text-slate-700 font-mono">PADI_DATABASE_URL</code>).</p>
+                </div>
+                
+                <div class="flex items-center justify-between pt-1">
+                  <div>
+                    <div class="text-xs font-bold text-slate-700">Schema Blueprint</div>
+                    <div class="text-[11px] text-slate-400">Export collection structures and field blueprints as JSON.</div>
+                  </div>
+                  <button type="button" onclick="downloadExportedSchema()" class="px-3.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center space-x-1.5 shadow-2xs">
+                    <i class="fa-solid fa-download text-[11px] text-emerald-600"></i>
+                    <span>Export schema.json</span>
+                  </button>
                 </div>
               </div>
             </div>
@@ -933,7 +1109,7 @@
                       </span>
                       <h3 class="text-sm font-extrabold text-slate-900">User Roles &amp; RBAC Management</h3>
                     </div>
-                    <p class="text-xs text-slate-500 mt-1">Daftar role yang diakui oleh PadiBase untuk otorisasi API Rules (<code class="font-mono text-slate-700">@request.auth.role</code>) dan akun pengguna (<code class="font-mono text-slate-700">users.role</code>). Insert atau update record dengan role selain daftar ini akan ditolak (400 Bad Request).</p>
+                    <p class="text-xs text-slate-500 mt-1">List of roles recognized by PadiBase for API Rules authorization (<code class="font-mono text-slate-700">@request.auth.role</code>) and user accounts (<code class="font-mono text-slate-700">users.role</code>). Inserting or updating records with roles outside this list will be rejected (400 Bad Request).</p>
                   </div>
                   <span id="settingsRolesCountBadge" class="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 shrink-0">
                     7 active roles
@@ -944,7 +1120,7 @@
                 <div class="space-y-2">
                   <div class="flex items-center justify-between">
                     <label class="block text-xs font-bold text-slate-700">Active Roles</label>
-                    <span class="text-[11px] text-slate-400">Klik tanda silang (x) untuk menghapus role kustom</span>
+                    <span class="text-[11px] text-slate-400">Click the cross (x) to remove custom roles</span>
                   </div>
                   <div id="settingsRolesContainer" class="flex flex-wrap gap-2 min-h-[46px] p-3 rounded-xl bg-slate-50 border border-slate-200">
                     <!-- Populated dynamically via app.js -->
@@ -966,7 +1142,7 @@
                       <span>Add Role</span>
                     </button>
                   </div>
-                  <p class="text-[11px] text-slate-400">Gunakan huruf kecil, angka, garis bawah (_), atau strip (-). Contoh: <code class="font-mono text-slate-600">supervisor</code>, <code class="font-mono text-slate-600">support_agent</code>.</p>
+                  <p class="text-[11px] text-slate-400">Use lowercase letters, numbers, underscores (_), or hyphens (-). Examples: <code class="font-mono text-slate-600">supervisor</code>, <code class="font-mono text-slate-600">support_agent</code>.</p>
                 </div>
               </div>
             </div>
@@ -1008,26 +1184,52 @@
               </div>
             </div>
 
-            <!-- 4. Backups -->
-            <div id="settingsPane_backups" class="hidden space-y-4">
-              <div class="flex items-center justify-between">
+            <!-- 4. Unified Backups & Restore -->
+            <div id="settingsPane_backups" class="hidden space-y-5">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
-                  <h3 class="text-sm font-extrabold text-slate-900">Database Backups</h3>
-                  <p class="text-xs text-slate-500">Create point-in-time snapshots or download existing backups.</p>
+                  <div class="flex items-center space-x-2">
+                    <span class="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xs border border-emerald-100">
+                      <i class="fa-solid fa-box-archive"></i>
+                    </span>
+                    <h3 class="text-sm font-extrabold text-slate-900">Unified Backups &amp; Restore</h3>
+                  </div>
+                  <p class="text-xs text-slate-500 mt-1">Point-in-time portable archives bundling database snapshot (<code class="font-mono text-slate-700">data.db</code>) and physical file uploads (<code class="font-mono text-slate-700">storage/</code>).</p>
                 </div>
-                <button onclick="createDatabaseBackup()" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center space-x-1.5">
-                  <i class="fa-solid fa-plus text-[10px]"></i>
-                  <span>Create Backup</span>
-                </button>
+                <div class="flex items-center space-x-2 shrink-0">
+                  <input type="file" id="backupUploadInput" accept=".zip,.db,.json" class="hidden" onchange="handleUploadBackupFile(event)">
+                  <button type="button" onclick="triggerUploadBackup()" class="px-3.5 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition flex items-center space-x-1.5 shadow-2xs cursor-pointer">
+                    <i class="fa-solid fa-cloud-arrow-up text-xs text-emerald-600"></i>
+                    <span>Upload Backup</span>
+                  </button>
+                  <button type="button" id="createBackupBtn" onclick="handleCreateBackup()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-2xs cursor-pointer">
+                    <i class="fa-solid fa-plus text-xs" id="createBackupIcon"></i>
+                    <span id="createBackupBtnText">Create Backup Now</span>
+                  </button>
+                </div>
               </div>
 
+              <!-- Best Practice Info Banner -->
+              <div class="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200 text-xs text-emerald-900 flex items-start space-x-3">
+                <i class="fa-solid fa-shield-halved text-emerald-600 mt-0.5 text-sm shrink-0"></i>
+                <div class="space-y-1">
+                  <div class="font-bold">Production Best Practice: Atomic WAL Flush &amp; Physical File Bundling</div>
+                  <div class="text-[11px] text-emerald-800 leading-relaxed">
+                    Backups execute an atomic <code class="bg-white/80 px-1 py-0.5 rounded font-mono text-[10px]">PRAGMA wal_checkpoint(TRUNCATE)</code> snapshot before compressing database data together with user attachments in <code class="bg-white/80 px-1 py-0.5 rounded font-mono text-[10px]">padi_data/storage</code> into a single portable <code class="bg-white/80 px-1 py-0.5 rounded font-mono text-[10px]">.zip</code> archive.
+                  </div>
+                </div>
+              </div>
+
+              <!-- Backups Table -->
               <div class="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
                 <table class="w-full text-left text-xs">
                   <thead class="bg-slate-50 border-b border-slate-200 font-mono text-[11px] text-slate-500">
                     <tr>
-                      <th class="p-3">File Name</th>
+                      <th class="p-3">Archive Name</th>
+                      <th class="p-3">Type</th>
                       <th class="p-3">Size</th>
-                      <th class="p-3">Created</th>
+                      <th class="p-3">Files Included</th>
+                      <th class="p-3">Created At</th>
                       <th class="p-3 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -1036,39 +1238,10 @@
               </div>
             </div>
 
-            <!-- 5. Export Schema -->
-            <div id="settingsPane_export" class="hidden space-y-3">
-              <div class="flex items-center justify-between">
-                <h3 class="text-sm font-extrabold text-slate-900">Full Project Schema Definition (JSON)</h3>
-                <button onclick="downloadCollectionsJson()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center space-x-1.5">
-                  <i class="fa-solid fa-download text-xs"></i>
-                  <span>Download schema.json</span>
-                </button>
-              </div>
-              <pre id="exportCollectionsPre" class="w-full max-h-96 overflow-auto bg-slate-950 text-emerald-400 p-4 rounded-xl font-mono text-xs"></pre>
             </div>
-
-            <!-- 6. Import Schema -->
-            <div id="settingsPane_import" class="hidden max-w-3xl space-y-4">
-              <div class="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-2xs">
-                <h3 class="text-sm font-extrabold text-slate-900">Import Schema Definition</h3>
-                <p class="text-xs text-slate-500">Paste schema JSON array to import tables and column configurations.</p>
-                <textarea id="importSchemaTextarea" rows="10" class="w-full bg-slate-950 text-emerald-400 p-3 rounded-xl font-mono text-xs" placeholder='[ { "name": "posts", "type": "base", "schema": [...] } ]'></textarea>
-                <div class="flex justify-end">
-                  <button onclick="submitImportSchema()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg transition">
-                    Apply Schema Import
-                  </button>
-                </div>
-              </div>
-            </div>
-
-          </main>
-        </div>
+          </div>
+        </main>
       </div>
-    </div>
-
-    </div>
-  </div>
 
   <!-- ========================================================================= -->
   <!-- MODALS & DRAWERS (PocketBase & Supabase UX: Slide-overs & Focused Modals) -->
@@ -1200,13 +1373,13 @@
                   <i class="fa-solid fa-lock text-[10px] mr-1 text-slate-400"></i> Managed by PadiBase
                 </div>
               </div>
-              <p class="text-[11px] text-slate-500">Field default ini dikelola otomatis oleh engine database PadiBase untuk integritas data, timestamp, dan otentikasi.</p>
+              <p class="text-[11px] text-slate-500">These default system fields are automatically managed by the PadiBase database engine for data integrity, timestamps, and authentication.</p>
               <div id="inlineDefaultFieldsContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1"></div>
             </div>
 
             <div class="flex items-center justify-between pt-1">
               <span class="text-xs font-extrabold uppercase text-slate-700">Custom Columns</span>
-              <span class="text-[11px] text-slate-400">Kolom data kustom tabel Anda</span>
+              <span class="text-[11px] text-slate-400">Your table's custom data columns</span>
             </div>
 
             <!-- List of Columns -->
@@ -1298,7 +1471,7 @@
                 <input type="checkbox" id="inlineBlameableToggle" onchange="onInlineBlameableToggleChange(this.checked)" class="w-4 h-4 rounded text-emerald-600 border-slate-300">
               </div>
               <p class="text-[11px] text-slate-500 leading-relaxed">
-                Melacak otomatis pembuat (<code class="text-slate-700 font-mono">created_by</code>) dan pengubah (<code class="text-slate-700 font-mono">updated_by</code>) record. Jika request dibuat tanpa login (unauthenticated), blameable akan dilewati secara aman tanpa error.
+                Automatically tracks record creator (<code class="text-slate-700 font-mono">created_by</code>) and editor (<code class="text-slate-700 font-mono">updated_by</code>). If a request is unauthenticated, blameable tracking is safely skipped without errors.
               </p>
               <div id="inlineBlameableNotice"></div>
             </div>
@@ -1311,7 +1484,7 @@
                 </span>
               </div>
               <p class="text-[11px] text-slate-500 leading-relaxed">
-                PadiBase secara otomatis mengisi timestamp waktu pembuatan dan pengeditan jika field ini tersedia di tabel.
+                PadiBase automatically populates creation and update timestamps if these fields exist in the table.
               </p>
               <div id="inlineTimestampsNotice"></div>
             </div>
@@ -1409,7 +1582,7 @@
               <i class="fa-solid fa-lock text-[10px] mr-1 text-slate-400"></i> Managed by PadiBase
             </div>
           </div>
-          <p class="text-[11px] text-slate-500">Kolom di bawah ini otomatis dibuat dan dikelola oleh engine PadiBase. Anda tidak perlu menambahkannya secara manual.</p>
+          <p class="text-[11px] text-slate-500">The columns below are automatically created and managed by the PadiBase engine. You do not need to add them manually.</p>
           <div id="newColSystemFieldsContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1"></div>
         </div>
 
@@ -1417,7 +1590,7 @@
         <div class="space-y-3 pt-1">
           <div class="flex items-center justify-between">
             <span class="text-xs font-extrabold uppercase text-slate-700 block">Custom Columns</span>
-            <span class="text-[11px] text-slate-400">Tambahkan kolom data spesifik aplikasi Anda</span>
+            <span class="text-[11px] text-slate-400">Add application-specific data columns</span>
           </div>
           <div id="newColFieldsList" class="space-y-2"></div>
 
@@ -1532,7 +1705,7 @@
               <i class="fa-solid fa-trash text-[11px] w-4 opacity-80"></i>
               <span>DELETE Remove</span>
             </button>
-            <button data-api-tab="file" onclick="renderApiPreview('file')" class="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+            <button id="apiTabFile" data-api-tab="file" onclick="renderApiPreview('file')" class="hidden w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
               <i class="fa-solid fa-file-arrow-up text-[11px] w-4 opacity-80"></i>
               <span>Upload File</span>
             </button>
@@ -1568,16 +1741,7 @@
               <span>Profile (/me)</span>
             </button>
 
-            <!-- Advanced / System Group -->
-            <div class="px-2 pt-2.5 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-amber-600 border-t border-slate-200/60 mt-1">Transactions &amp; SQL</div>
-            <button data-api-tab="transactions" onclick="renderApiPreview('transactions')" class="w-full text-left px-3 py-2 rounded-xl text-amber-800 hover:bg-amber-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
-              <i class="fa-solid fa-layer-group text-[11px] w-4 opacity-80"></i>
-              <span>Transactions</span>
-            </button>
-            <button data-api-tab="sql" onclick="renderApiPreview('sql')" class="w-full text-left px-3 py-2 rounded-xl text-amber-800 hover:bg-amber-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
-              <i class="fa-solid fa-terminal text-[11px] w-4 opacity-80"></i>
-              <span>Custom SQL</span>
-            </button>
+
           </div>
 
           <!-- API Details & Code Snippets -->
@@ -1652,9 +1816,9 @@
         <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
           <div class="font-extrabold text-slate-900 text-sm flex items-center">
             <span class="w-5 h-5 rounded-md bg-amber-500 text-slate-950 text-[11px] flex items-center justify-center mr-2">3</span>
-            3. API Preview &amp; Custom SQL
+            3. API Preview &amp; Custom API
           </div>
-          <p class="pl-7">Click <strong>API Preview</strong> to see curl and JS SDK snippets for the active table. Or use <strong>Custom SQL API</strong> in the left rail to create custom dynamic queries.</p>
+          <p class="pl-7">Click <strong>API Preview</strong> to see curl and JS SDK snippets for the active table. Or use <strong>Custom API</strong> in the left rail to create custom dynamic queries.</p>
         </div>
       </div>
       <div class="px-5 py-3 border-t border-slate-200 bg-slate-50 flex justify-end">
@@ -1696,6 +1860,6 @@
     </div>
   </div>
 
-  <script src="/dashboard/app.js"></script>
+  <script src="/dashboard/app.js?v=13"></script>
 </body>
 </html>

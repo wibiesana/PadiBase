@@ -4,8 +4,22 @@ use tokio::sync::broadcast;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RealtimeMessage {
     pub action: String, // "create", "update", "delete"
-    pub collection: String,
+    pub table: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub collection: Option<String>,
     pub record: serde_json::Value,
+}
+
+impl RealtimeMessage {
+    pub fn new(action: impl Into<String>, table: impl Into<String>, record: serde_json::Value) -> Self {
+        let t = table.into();
+        Self {
+            action: action.into(),
+            table: t.clone(),
+            collection: Some(t),
+            record,
+        }
+    }
 }
 
 #[derive(Clone)]

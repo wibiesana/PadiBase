@@ -17,10 +17,22 @@ use super::{
 };
 
 pub fn create_router(state: AppState) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    let cors_origins = crate::core::env::Env::get_or("CORS_ALLOWED_ORIGINS", "*");
+    let cors = if cors_origins.trim() == "*" || cors_origins.trim().is_empty() {
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any)
+    } else {
+        let origins: Vec<axum::http::HeaderValue> = cors_origins
+            .split(',')
+            .filter_map(|s| axum::http::HeaderValue::from_str(s.trim()).ok())
+            .collect();
+        CorsLayer::new()
+            .allow_origin(origins)
+            .allow_methods(Any)
+            .allow_headers(Any)
+    };
 
     Router::new()
         // API Root & Health check
@@ -31,6 +43,14 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/api-collection", get(api_collection::export_all))
         .route("/api/api-collection.json", get(api_collection::export_all))
         .route("/api/export/api-collection", get(api_collection::export_all))
+        .route(
+            "/api/{collection}/api-collection",
+            get(api_collection::export_single),
+        )
+        .route(
+            "/api/{collection}/export-api-collection",
+            get(api_collection::export_single),
+        )
         .route(
             "/api/collections/{collection}/api-collection",
             get(api_collection::export_single),
@@ -72,7 +92,138 @@ pub fn create_router(state: AppState) -> Router {
                 .patch(collections::update)
                 .delete(collections::delete),
         )
-        // Records
+        // Direct REST Routes (Cleanest & Padi Framework Standard): /api/{collection}, /api/{collection}/{id}, etc.
+        .route(
+            "/api/{collection}",
+            get(records::list).post(records::create),
+        )
+        .route(
+            "/api/{collection}/records",
+            get(records::list).post(records::create),
+        )
+        .route(
+            "/api/{collection}/all",
+            get(records::all),
+        )
+        .route(
+            "/api/{collection}/records/all",
+            get(records::all),
+        )
+        .route(
+            "/api/{collection}/count",
+            get(records::count),
+        )
+        .route(
+            "/api/{collection}/records/count",
+            get(records::count),
+        )
+        .route(
+            "/api/{collection}/first",
+            get(records::first),
+        )
+        .route(
+            "/api/{collection}/records/first",
+            get(records::first),
+        )
+        .route(
+            "/api/{collection}/delete-batch",
+            post(records::delete_batch),
+        )
+        .route(
+            "/api/{collection}/batch-delete",
+            post(records::delete_batch),
+        )
+        .route(
+            "/api/{collection}/records/delete-batch",
+            post(records::delete_batch),
+        )
+        .route(
+            "/api/{collection}/create-batch",
+            post(records::create_batch),
+        )
+        .route(
+            "/api/{collection}/batch-create",
+            post(records::create_batch),
+        )
+        .route(
+            "/api/{collection}/records/create-batch",
+            post(records::create_batch),
+        )
+        .route(
+            "/api/{collection}/{id}",
+            get(records::get_one)
+                .patch(records::update)
+                .put(records::update)
+                .delete(records::delete),
+        )
+        .route(
+            "/api/{collection}/records/{id}",
+            get(records::get_one)
+                .patch(records::update)
+                .put(records::update)
+                .delete(records::delete),
+        )
+        .route(
+            "/api/{collection}/export",
+            get(records::export_records),
+        )
+        .route(
+            "/api/{collection}/import",
+            post(records::import_records),
+        )
+        .route(
+            "/api/{collection}/auth-with-password",
+            post(auth_records::auth_with_password),
+        )
+        .route(
+            "/api/{collection}/login",
+            post(auth_records::auth_with_password),
+        )
+        .route(
+            "/api/{collection}/logout",
+            post(auth_records::logout),
+        )
+        .route(
+            "/api/{collection}/register",
+            post(auth_records::register),
+        )
+        .route(
+            "/api/{collection}/forgot-password",
+            post(auth_records::forgot_password),
+        )
+        .route(
+            "/api/{collection}/request-password-reset",
+            post(auth_records::forgot_password),
+        )
+        .route(
+            "/api/{collection}/reset-password",
+            post(auth_records::reset_password),
+        )
+        .route(
+            "/api/{collection}/confirm-password-reset",
+            post(auth_records::reset_password),
+        )
+        .route(
+            "/api/{collection}/change-password",
+            post(auth_records::change_password),
+        )
+        .route(
+            "/api/{collection}/auth-refresh",
+            post(auth_records::auth_refresh).get(auth_records::auth_refresh),
+        )
+        .route(
+            "/api/{collection}/me",
+            get(auth_records::auth_refresh)
+                .patch(auth_records::update_profile)
+                .put(auth_records::update_profile),
+        )
+        .route(
+            "/api/{collection}/profile",
+            get(auth_records::auth_refresh)
+                .patch(auth_records::update_profile)
+                .put(auth_records::update_profile),
+        )
+        // Records (with /api/collections/ and /api/tables/ backwards-compatibility prefixes)
         .route(
             "/api/collections/{collection}/records",
             get(records::list).post(records::create),
@@ -84,6 +235,38 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/collections/{collection}/all",
             get(records::all),
+        )
+        .route(
+            "/api/collections/{collection}/records/count",
+            get(records::count),
+        )
+        .route(
+            "/api/collections/{collection}/count",
+            get(records::count),
+        )
+        .route(
+            "/api/collections/{collection}/records/first",
+            get(records::first),
+        )
+        .route(
+            "/api/collections/{collection}/first",
+            get(records::first),
+        )
+        .route(
+            "/api/collections/{collection}/records/delete-batch",
+            post(records::delete_batch),
+        )
+        .route(
+            "/api/collections/{collection}/delete-batch",
+            post(records::delete_batch),
+        )
+        .route(
+            "/api/collections/{collection}/records/create-batch",
+            post(records::create_batch),
+        )
+        .route(
+            "/api/collections/{collection}/create-batch",
+            post(records::create_batch),
         )
         .route(
             "/api/tables/{collection}/records",
@@ -98,8 +281,20 @@ pub fn create_router(state: AppState) -> Router {
             get(records::all),
         )
         .route(
-            "/api/{collection}/all",
-            get(records::all),
+            "/api/tables/{collection}/records/count",
+            get(records::count),
+        )
+        .route(
+            "/api/tables/{collection}/records/first",
+            get(records::first),
+        )
+        .route(
+            "/api/tables/{collection}/records/delete-batch",
+            post(records::delete_batch),
+        )
+        .route(
+            "/api/tables/{collection}/records/create-batch",
+            post(records::create_batch),
         )
         .route(
             "/{collection}/all",
@@ -109,6 +304,7 @@ pub fn create_router(state: AppState) -> Router {
             "/api/collections/{collection}/records/{id}",
             get(records::get_one)
                 .patch(records::update)
+                .put(records::update)
                 .delete(records::delete),
         )
         .route(
@@ -123,6 +319,7 @@ pub fn create_router(state: AppState) -> Router {
             "/api/tables/{collection}/records/{id}",
             get(records::get_one)
                 .patch(records::update)
+                .put(records::update)
                 .delete(records::delete),
         )
         .route(
@@ -141,6 +338,10 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/collections/{collection}/login",
             post(auth_records::auth_with_password),
+        )
+        .route(
+            "/api/collections/{collection}/logout",
+            post(auth_records::logout),
         )
         .route(
             "/api/collections/{collection}/register",
@@ -172,7 +373,9 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/api/collections/{collection}/me",
-            get(auth_records::auth_refresh),
+            get(auth_records::auth_refresh)
+                .patch(auth_records::update_profile)
+                .put(auth_records::update_profile),
         )
         // Aliases for /api/tables/{table}/...
         .route(
@@ -182,6 +385,10 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/tables/{collection}/login",
             post(auth_records::auth_with_password),
+        )
+        .route(
+            "/api/tables/{collection}/logout",
+            post(auth_records::logout),
         )
         .route(
             "/api/tables/{collection}/register",
@@ -213,17 +420,29 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/api/tables/{collection}/me",
-            get(auth_records::auth_refresh),
+            get(auth_records::auth_refresh)
+                .patch(auth_records::update_profile)
+                .put(auth_records::update_profile),
         )
         // Direct Auth Shortcuts (defaults to `users` collection)
         .route("/api/auth/login", post(auth_records::auth_with_password_default))
+        .route("/api/auth/logout", post(auth_records::logout_default))
         .route("/api/auth/register", post(auth_records::register_default))
         .route("/api/auth/forgot-password", post(auth_records::forgot_password_default))
         .route("/api/auth/reset-password", post(auth_records::reset_password_default))
         .route("/api/auth/change-password", post(auth_records::change_password_default))
         .route(
             "/api/auth/me",
-            get(auth_records::auth_refresh_default).post(auth_records::auth_refresh_default),
+            get(auth_records::auth_refresh_default)
+                .post(auth_records::auth_refresh_default)
+                .patch(auth_records::update_profile_default)
+                .put(auth_records::update_profile_default),
+        )
+        .route(
+            "/api/auth/profile",
+            get(auth_records::auth_refresh_default)
+                .patch(auth_records::update_profile_default)
+                .put(auth_records::update_profile_default),
         )
         .route(
             "/api/auth/refresh",
@@ -264,6 +483,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         // System Backups
         .route("/api/backups", get(backups::list_backups).post(backups::create_backup))
+        .route("/api/backups/upload", post(backups::upload_backup))
         .route(
             "/api/backups/{filename}",
             get(backups::download_backup).delete(backups::delete_backup),

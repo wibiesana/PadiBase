@@ -79,6 +79,22 @@ fn resolve_timestamp_val(meta: &TableMetadata, col_name: &str, rfc_now: &str) ->
     Value::String(rfc_now.to_string())
 }
 
+fn apply_schema_defaults(col: &Collection, payload: &mut Map<String, Value>) {
+    for field in &col.schema {
+        let missing_or_null = match payload.get(&field.name) {
+            None | Some(Value::Null) => true,
+            _ => false,
+        };
+        if missing_or_null {
+            if let Some(default_val) = field.options.get("default") {
+                if !default_val.is_null() {
+                    payload.insert(field.name.clone(), default_val.clone());
+                }
+            }
+        }
+    }
+}
+
 pub async fn create_record(
     pool: &DbPool,
     col: &Collection,
@@ -86,6 +102,8 @@ pub async fn create_record(
 ) -> Result<Record> {
     let meta = super::db::get_table_metadata(pool, &col.name).await?;
     let now = Utc::now().to_rfc3339();
+
+    apply_schema_defaults(col, &mut payload);
 
     // Primary key detection
     let custom_id = payload
@@ -357,6 +375,8 @@ pub async fn create_record_tx(
     let meta = super::db::get_table_metadata(pool, &col.name).await?;
     let now = Utc::now().to_rfc3339();
 
+    apply_schema_defaults(col, &mut payload);
+
     let custom_id = payload
         .get(&meta.pk_column)
         .or_else(|| payload.get("id"))
@@ -573,10 +593,45 @@ pub async fn delete_record_tx(
     Ok(rows_affected > 0)
 }
 
+fn is_unsafe_filter_sql(f: &str) -> bool {
+    if f.contains(';') || f.contains("--") || f.contains("/*") || f.contains("*/") || f.contains('\0') {
+        return true;
+    }
+    let upper = f.to_ascii_uppercase();
+    const FORBIDDEN_PATTERNS: &[&str] = &[
+        " UNION ",
+        " DROP ",
+        " DELETE ",
+        " UPDATE ",
+        " INSERT ",
+        " ALTER ",
+        " ATTACH ",
+        " DETACH ",
+        " PRAGMA ",
+        "_ADMINS",
+        "_SETTINGS",
+        "_COLLECTIONS",
+        "_ENDPOINTS",
+        "SQLITE_MASTER",
+        "INFORMATION_SCHEMA",
+        "PG_CATALOG",
+        "SLEEP(",
+        "BENCHMARK(",
+        "LOAD_EXTENSION",
+    ];
+    let padded = format!(" {} ", upper);
+    FORBIDDEN_PATTERNS.iter().any(|pat| padded.contains(pat))
+}
+
 fn parse_pocketbase_filter(raw: &str, col: &Collection) -> String {
     let f = raw.trim();
     if f.is_empty() {
         return String::new();
+    }
+
+    // Block SQL injection payloads immediately
+    if is_unsafe_filter_sql(f) {
+        return "WHERE 1 = 0".to_string();
     }
 
     let has_operator = f.contains('=')
@@ -584,11 +639,12 @@ fn parse_pocketbase_filter(raw: &str, col: &Collection) -> String {
         || f.contains('>')
         || f.contains('<')
         || f.to_uppercase().contains(" LIKE ")
-        || f.to_uppercase().contains(" IS ");
+        || f.to_uppercase().contains(" IS ")
+        || f.to_uppercase().contains(" IN ");
 
     if !has_operator {
         // Quick keyword search across id and text columns
-        let safe_kw = f.replace('\'', "''");
+        let safe_kw = f.replace('\'', "''").replace('%', "\\%").replace('_', "\\_");
         let mut clauses = vec![format!("`id` LIKE '%{}%'", safe_kw)];
         if col.collection_type == CollectionType::Auth {
             clauses.push(format!("`email` LIKE '%{}%'", safe_kw));
@@ -598,7 +654,8 @@ fn parse_pocketbase_filter(raw: &str, col: &Collection) -> String {
             if matches!(
                 field.field_type,
                 FieldType::Text | FieldType::Email | FieldType::Url | FieldType::Select
-            ) {
+            ) && super::db::is_safe_identifier(&field.name)
+            {
                 clauses.push(format!("`{}` LIKE '%{}%'", field.name, safe_kw));
             }
         }
@@ -699,11 +756,10 @@ pub async fn eager_load_relations(
             return Ok(());
         }
     } else {
-        // Cek global option dari .env (AUTO_LOAD_RELATIONS).
+        // Cek global option dari .env (AUTO_LOAD_RELATIONS) secara lock-free.
         // Jika true: semua relasi di-load secara eager loading.
         // Jika false: fallback ke pengaturan per-tabel di dashboard (auto_load_default).
-        let global_auto_load = crate::core::env::Env::get_or("AUTO_LOAD_RELATIONS", "false")
-            .eq_ignore_ascii_case("true");
+        let global_auto_load = crate::core::env::Env::auto_load_relations();
 
         if !global_auto_load && !auto_load_default {
             return Ok(());
@@ -1040,4 +1096,54 @@ fn json_row_to_record(row: &Value, col: &Collection, meta: &TableMetadata) -> Re
         id: id_str,
         data,
     })
+}
+
+/// Count records matching an optional filter (compatible with Padi Framework `count` query).
+pub async fn count_records(
+    pool: &DbPool,
+    col: &Collection,
+    filter: Option<&str>,
+) -> Result<i64> {
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
+    let (filter_sql, _) = build_filter_and_sort_sql(&meta, col, None, filter);
+    let count_sql = format!(
+        "SELECT COUNT(*) as `total` FROM `{}` {};",
+        col.name, filter_sql
+    );
+    let total_row = pool.fetch_one(&count_sql, &[]).await?;
+    Ok(json_get_i64(&total_row, "total"))
+}
+
+/// Delete multiple records in a single batch query using `WHERE pk IN (?, ...)` (ported from Padi Framework).
+pub async fn delete_records_batch(
+    pool: &DbPool,
+    col: &Collection,
+    ids: &[String],
+) -> Result<u64> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let meta = super::db::get_table_metadata(pool, &col.name).await?;
+    let placeholders = vec!["?"; ids.len()].join(", ");
+    let params: Vec<Val> = ids.iter().map(|id| pk_to_val(id, &meta)).collect();
+    let sql = format!(
+        "DELETE FROM `{}` WHERE `{}` IN ({});",
+        col.name, meta.pk_column, placeholders
+    );
+    let (rows_affected, _) = pool.execute(&sql, &params).await?;
+    Ok(rows_affected)
+}
+
+/// Filter record fields in-place when `?fields=id,name` or `?select=id,name` is requested.
+pub fn project_record_fields(rec: &mut Record, fields: Option<&[&str]>) {
+    let Some(field_list) = fields else {
+        return;
+    };
+    if field_list.is_empty() || field_list.iter().any(|f| *f == "*") {
+        return;
+    }
+    rec.data.retain(|k, _| {
+        k.eq_ignore_ascii_case("id")
+            || field_list.iter().any(|f| f.eq_ignore_ascii_case(k))
+    });
 }

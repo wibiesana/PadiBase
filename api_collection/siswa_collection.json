@@ -40,7 +40,7 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{base_url}}/api/collections/siswa/records?page=1&perPage=30&sort=-created"
+          "raw": "{{base_url}}/api/siswa?page=1&perPage=30&sort=-created"
         },
         "description": "Fetch paginated records for 'siswa' with sorting, filtering, and standard Padi Rust envelope."
       }
@@ -51,7 +51,7 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{base_url}}/api/collections/siswa/records/all?sort_by=id&order=desc"
+          "raw": "{{base_url}}/api/siswa/all?sort_by=id&order=desc"
         },
         "description": "Retrieve all records for 'siswa' without pagination (Padi Rust standard)."
       }
@@ -73,7 +73,7 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{base_url}}/api/collections/siswa/records/{{siswa_id}}"
+          "raw": "{{base_url}}/api/siswa/{{siswa_id}}"
         },
         "description": "Get a single record from 'siswa' by its 15-character unique ID."
       }
@@ -116,7 +116,7 @@
           "raw": "{\n  \"nama\": \"Sample Nama\",\n  \"alamat\": \"Jl. Sudirman No. 123, Jakarta\",\n  \"tanggal_lahir\": \"2026-01-01\"\n}"
         },
         "url": {
-          "raw": "{{base_url}}/api/collections/siswa/records"
+          "raw": "{{base_url}}/api/siswa"
         },
         "description": "Insert a new record into 'siswa'. Automatically saves the created ID into variable '{siswa_id}'."
       }
@@ -136,7 +136,7 @@
           "raw": "{\n  \"nama\": \"Sample Nama\",\n  \"alamat\": \"Jl. Sudirman No. 123, Jakarta\",\n  \"tanggal_lahir\": \"2026-01-01\"\n}"
         },
         "url": {
-          "raw": "{{base_url}}/api/collections/siswa/records/{{siswa_id}}"
+          "raw": "{{base_url}}/api/siswa/{{siswa_id}}"
         },
         "description": "Partially update an existing record in 'siswa'."
       }
@@ -147,7 +147,7 @@
         "method": "DELETE",
         "header": [],
         "url": {
-          "raw": "{{base_url}}/api/collections/siswa/records/{{siswa_id}}"
+          "raw": "{{base_url}}/api/siswa/{{siswa_id}}"
         },
         "description": "Delete an existing record in 'siswa' by ID."
       }
@@ -158,7 +158,7 @@
         "method": "GET",
         "header": [],
         "url": {
-          "raw": "{{base_url}}/api/collections/siswa/export"
+          "raw": "{{base_url}}/api/siswa/export"
         },
         "description": "Export all records from collection 'siswa' as raw JSON."
       }
@@ -178,7 +178,7 @@
           "raw": "[\n  {\n  \"nama\": \"Sample Nama\",\n  \"alamat\": \"Jl. Sudirman No. 123, Jakarta\",\n  \"tanggal_lahir\": \"2026-01-01\"\n}\n]"
         },
         "url": {
-          "raw": "{{base_url}}/api/collections/siswa/import"
+          "raw": "{{base_url}}/api/siswa/import"
         },
         "description": "Bulk import an array of record objects into 'siswa'."
       }

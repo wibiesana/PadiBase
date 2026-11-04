@@ -420,6 +420,16 @@ fn compile_custom_sql(
                     binds.push(resolve_named("request.auth.role"));
                     i += "@request.auth.role".len();
                     continue;
+                } else if lower_rest.starts_with("@last_insert_id") {
+                    out_sql.push('?');
+                    binds.push(resolve_named("last_insert_id"));
+                    i += "@last_insert_id".len();
+                    continue;
+                } else if lower_rest.starts_with("@last_id") {
+                    out_sql.push('?');
+                    binds.push(resolve_named("last_id"));
+                    i += "@last_id".len();
+                    continue;
                 }
             }
 
@@ -740,10 +750,16 @@ async fn execute_custom_endpoint_inner(
         let mut last_rows: Option<Vec<Value>> = None;
         let mut total_affected = 0u64;
         let mut last_insert_id: Option<i64> = None;
+        let mut dynamic_params = named_params.clone();
 
         for (idx, stmt) in statements.iter().enumerate() {
+            if let Some(lid) = last_insert_id {
+                dynamic_params.insert("last_insert_id".to_string(), json!(lid));
+                dynamic_params.insert("last_id".to_string(), json!(lid));
+            }
+
             let (compiled_sql, binds) =
-                compile_custom_sql(stmt, &named_params, &positional_params, auth.as_ref());
+                compile_custom_sql(stmt, &dynamic_params, &positional_params, auth.as_ref());
 
             if is_select_statement(&compiled_sql) {
                 match tx.fetch_all(&state.db, &compiled_sql, &binds).await {
@@ -879,6 +895,16 @@ async fn handle_atomic_transfer(
         return Err((
             StatusCode::BAD_REQUEST,
             Json(json!({ "code": 400, "message": "Transfer amount must be greater than zero." })),
+        ));
+    }
+
+    if !crate::core::db::is_safe_identifier(&payload.collection)
+        || !crate::core::db::is_safe_identifier(&payload.field)
+        || payload.collection.starts_with('_')
+    {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": "Invalid collection or field identifier." })),
         ));
     }
 

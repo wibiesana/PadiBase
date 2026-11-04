@@ -13,8 +13,9 @@ use crate::core::auth::{authenticate_headers, check_permission, RecordAction};
 use crate::core::db::get_collection_by_name_or_id;
 use crate::core::realtime::RealtimeMessage;
 use crate::core::record::{
-    create_record, delete_record, get_all_records, get_all_records_with_limit, get_record,
-    get_record_with, list_records_with, update_record,
+    count_records, create_record, delete_record, delete_records_batch, get_all_records,
+    get_all_records_with_limit, get_record, get_record_with, list_records_with,
+    project_record_fields, update_record,
 };
 
 #[derive(Deserialize, Default)]
@@ -23,6 +24,12 @@ pub struct SingleParams {
     pub expand: Option<String>,
     pub auto_load: Option<bool>,
     pub limit: Option<usize>,
+    pub fields: Option<String>,
+    pub select: Option<String>,
+    pub filter: Option<String>,
+    pub search: Option<String>,
+    pub q: Option<String>,
+    pub sort: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -30,13 +37,28 @@ pub struct ListParams {
     pub page: Option<i64>,
     #[serde(rename = "perPage")]
     pub per_page: Option<i64>,
+    #[serde(rename = "per_page")]
+    pub per_page_snake: Option<i64>,
     pub sort: Option<String>,
+    #[serde(rename = "sortBy")]
+    pub sort_by: Option<String>,
+    #[serde(rename = "sort_by")]
+    pub sort_by_snake: Option<String>,
+    #[serde(rename = "orderBy")]
+    pub order_by: Option<String>,
+    #[serde(rename = "order_by")]
+    pub order_by_snake: Option<String>,
+    pub order: Option<String>,
     pub filter: Option<String>,
+    pub search: Option<String>,
+    pub q: Option<String>,
     pub all: Option<bool>,
     pub with: Option<String>,
     pub expand: Option<String>,
     pub auto_load: Option<bool>,
     pub limit: Option<usize>,
+    pub fields: Option<String>,
+    pub select: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -64,6 +86,25 @@ pub struct AllParams {
     pub per_page: Option<usize>,
     pub offset: Option<usize>,
     pub skip: Option<usize>,
+    pub fields: Option<String>,
+    pub select: Option<String>,
+}
+
+pub fn parse_fields_param(fields: Option<&str>, select: Option<&str>) -> Option<Vec<String>> {
+    let raw = fields.or(select)?;
+    if raw.trim().is_empty() {
+        return None;
+    }
+    let list: Vec<String> = raw
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if list.is_empty() {
+        None
+    } else {
+        Some(list)
+    }
 }
 
 pub fn parse_with_param(
@@ -167,6 +208,53 @@ pub fn resolve_all_sort_and_filter(params: &AllParams) -> (Option<String>, Optio
     (sort_clause, filter_clause)
 }
 
+pub fn resolve_list_sort_and_filter(params: &ListParams) -> (Option<String>, Option<String>) {
+    let sort_clause = if let Some(ref s) = params.sort {
+        Some(s.clone())
+    } else {
+        let sort_col = params
+            .sort_by
+            .as_deref()
+            .or(params.sort_by_snake.as_deref())
+            .or(params.order_by.as_deref())
+            .or(params.order_by_snake.as_deref());
+        if let Some(col_name) = sort_col {
+            let is_desc = params
+                .order
+                .as_deref()
+                .map(|o| o.eq_ignore_ascii_case("desc"))
+                .unwrap_or(false);
+            if is_desc {
+                Some(format!("-{}", col_name))
+            } else {
+                Some(format!("+{}", col_name))
+            }
+        } else {
+            None
+        }
+    };
+
+    let filter_clause = if let Some(ref f) = params.filter {
+        Some(f.clone())
+    } else if let Some(ref s) = params.search {
+        if !s.trim().is_empty() {
+            Some(s.clone())
+        } else {
+            None
+        }
+    } else if let Some(ref q) = params.q {
+        if !q.trim().is_empty() {
+            Some(q.clone())
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    (sort_clause, filter_clause)
+}
+
 pub async fn list(
     State(state): State<AppState>,
     Path(collection_name): Path<String>,
@@ -191,21 +279,29 @@ pub async fn list(
     let auth = authenticate_headers(&headers)?;
     check_permission(RecordAction::List, &col, auth.as_ref(), None)?;
 
+    let (sort_clause, filter_clause) = resolve_list_sort_and_filter(&params);
     let with_vec = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
+    let fields_vec = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let fields_refs: Option<Vec<&str>> = fields_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
 
-    if params.all.unwrap_or(false) || params.per_page == Some(-1) || params.per_page == Some(0) {
+    let effective_per_page = params
+        .per_page
+        .or(params.per_page_snake)
+        .or(params.limit.map(|l| l as i64));
+
+    if params.all.unwrap_or(false) || effective_per_page == Some(-1) || effective_per_page == Some(0) {
         let requested_limit = params.limit;
         let effective_limit = match requested_limit {
             Some(l) if l > 0 => std::cmp::min(l, 5000),
             _ => 5000,
         };
 
-        let records = get_all_records_with_limit(
+        let mut records = get_all_records_with_limit(
             &state.db,
             &col,
-            params.sort.as_deref(),
-            params.filter.as_deref(),
+            sort_clause.as_deref(),
+            filter_clause.as_deref(),
             with_refs.as_deref(),
             Some(effective_limit),
             None,
@@ -218,6 +314,12 @@ pub async fn list(
             )
         })?;
 
+        if let Some(ref f_refs) = fields_refs {
+            for rec in &mut records {
+                project_record_fields(rec, Some(f_refs));
+            }
+        }
+
         let total = records.len() as i64;
         return Ok(Json(json!({
             "page": 1,
@@ -228,13 +330,13 @@ pub async fn list(
         })));
     }
 
-    let res = list_records_with(
+    let mut res = list_records_with(
         &state.db,
         &col,
         params.page.unwrap_or(1),
-        params.per_page.unwrap_or(30),
-        params.sort.as_deref(),
-        params.filter.as_deref(),
+        effective_per_page.unwrap_or(30),
+        sort_clause.as_deref(),
+        filter_clause.as_deref(),
         with_refs.as_deref(),
     )
     .await
@@ -244,6 +346,12 @@ pub async fn list(
             Json(json!({ "code": 400, "message": format!("Query error: {}", e) })),
         )
     })?;
+
+    if let Some(ref f_refs) = fields_refs {
+        for rec in &mut res.items {
+            project_record_fields(rec, Some(f_refs));
+        }
+    }
 
     Ok(Json(json!(res)))
 }
@@ -275,6 +383,8 @@ pub async fn all(
     let (sort_clause, filter_clause) = resolve_all_sort_and_filter(&params);
     let with_vec = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
+    let fields_vec = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let fields_refs: Option<Vec<&str>> = fields_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
 
     // Capped at maximum 5000 records to prevent excessive data fetching, while allowing user to specify a custom limit <= 5000
     let requested_limit = params.limit.or(params.per_page).or(params.per_page_camel);
@@ -284,7 +394,7 @@ pub async fn all(
     };
     let offset = params.offset.or(params.skip);
 
-    let records = get_all_records_with_limit(
+    let mut records = get_all_records_with_limit(
         &state.db,
         &col,
         sort_clause.as_deref(),
@@ -301,7 +411,114 @@ pub async fn all(
         )
     })?;
 
+    if let Some(ref f_refs) = fields_refs {
+        for rec in &mut records {
+            project_record_fields(rec, Some(f_refs));
+        }
+    }
+
     Ok(Json(json!(records)))
+}
+
+pub async fn count(
+    State(state): State<AppState>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<AllParams>,
+    headers: axum::http::HeaderMap,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    let col = get_collection_by_name_or_id(&state.db, &collection_name)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "Collection not found." })),
+            )
+        })?;
+
+    let auth = authenticate_headers(&headers)?;
+    check_permission(RecordAction::List, &col, auth.as_ref(), None)?;
+
+    let (_, filter_clause) = resolve_all_sort_and_filter(&params);
+    let total = count_records(&state.db, &col, filter_clause.as_deref())
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "code": 400, "message": format!("Query error: {}", e) })),
+            )
+        })?;
+
+    Ok(Json(json!({
+        "collection": col.name,
+        "count": total,
+        "total": total
+    })))
+}
+
+pub async fn first(
+    State(state): State<AppState>,
+    Path(collection_name): Path<String>,
+    Query(params): Query<AllParams>,
+    headers: axum::http::HeaderMap,
+) -> Result<Response, (StatusCode, Json<Value>)> {
+    let col = get_collection_by_name_or_id(&state.db, &collection_name)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "Collection not found." })),
+            )
+        })?;
+
+    let auth = authenticate_headers(&headers)?;
+    check_permission(RecordAction::View, &col, auth.as_ref(), None)?;
+
+    let (sort_clause, filter_clause) = resolve_all_sort_and_filter(&params);
+    let with_vec = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
+    let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
+    let fields_vec = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let fields_refs: Option<Vec<&str>> = fields_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
+
+    let mut records = get_all_records_with_limit(
+        &state.db,
+        &col,
+        sort_clause.as_deref(),
+        filter_clause.as_deref(),
+        with_refs.as_deref(),
+        Some(1),
+        None,
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": format!("Query error: {}", e) })),
+        )
+    })?;
+
+    if let Some(mut record) = records.pop() {
+        if let Some(ref f_refs) = fields_refs {
+            project_record_fields(&mut record, Some(f_refs));
+        }
+        Ok(Json(record).into_response())
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            Json(json!({ "code": 404, "message": "Record not found." })),
+        ))
+    }
 }
 
 pub async fn get_one(
@@ -319,6 +536,12 @@ pub async fn get_one(
                 expand: params.expand,
                 auto_load: params.auto_load,
                 limit: params.limit,
+                fields: params.fields,
+                select: params.select,
+                filter: params.filter,
+                search: params.search,
+                q: params.q,
+                sort: params.sort,
                 ..Default::default()
             }),
             headers,
@@ -326,6 +549,42 @@ pub async fn get_one(
         .await
         .map(|r| r.into_response());
     }
+    if id.eq_ignore_ascii_case("count") {
+        return count(
+            State(state),
+            Path(collection_name),
+            Query(AllParams {
+                filter: params.filter,
+                search: params.search,
+                q: params.q,
+                ..Default::default()
+            }),
+            headers,
+        )
+        .await
+        .map(|r| r.into_response());
+    }
+    if id.eq_ignore_ascii_case("first") {
+        return first(
+            State(state),
+            Path(collection_name),
+            Query(AllParams {
+                with: params.with,
+                expand: params.expand,
+                auto_load: params.auto_load,
+                fields: params.fields,
+                select: params.select,
+                filter: params.filter,
+                search: params.search,
+                q: params.q,
+                sort: params.sort,
+                ..Default::default()
+            }),
+            headers,
+        )
+        .await;
+    }
+
     let col = get_collection_by_name_or_id(&state.db, &collection_name)
         .await
         .map_err(|e| {
@@ -346,8 +605,10 @@ pub async fn get_one(
 
     let with_vec = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
+    let fields_vec = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let fields_refs: Option<Vec<&str>> = fields_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
 
-    let record = get_record_with(&state.db, &col, &id, with_refs.as_deref())
+    let mut record = get_record_with(&state.db, &col, &id, with_refs.as_deref())
         .await
         .map_err(|e| {
             (
@@ -361,6 +622,10 @@ pub async fn get_one(
                 Json(json!({ "code": 404, "message": "Record not found." })),
             )
         })?;
+
+    if let Some(ref f_refs) = fields_refs {
+        project_record_fields(&mut record, Some(f_refs));
+    }
 
     Ok(Json(record).into_response())
 }
@@ -520,11 +785,11 @@ pub async fn create(
 
     // Realtime broadcast event (only if enabled on this collection)
     if col.realtime {
-        state.realtime.broadcast(RealtimeMessage {
-            action: "create".to_string(),
-            collection: col.name.clone(),
-            record: serde_json::to_value(&record).unwrap_or_default(),
-        });
+        state.realtime.broadcast(RealtimeMessage::new(
+            "create",
+            &col.name,
+            serde_json::to_value(&record).unwrap_or_default(),
+        ));
     }
 
     Ok((StatusCode::CREATED, Json(record)))
@@ -640,11 +905,11 @@ pub async fn update(
 
     // Realtime broadcast event (only if enabled on this collection)
     if col.realtime {
-        state.realtime.broadcast(RealtimeMessage {
-            action: "update".to_string(),
-            collection: col.name.clone(),
-            record: serde_json::to_value(&record).unwrap_or_default(),
-        });
+        state.realtime.broadcast(RealtimeMessage::new(
+            "update",
+            &col.name,
+            serde_json::to_value(&record).unwrap_or_default(),
+        ));
     }
 
     Ok(Json(record))
@@ -714,11 +979,11 @@ pub async fn delete(
 
         // Realtime broadcast event (only if enabled on this collection)
         if col.realtime {
-            state.realtime.broadcast(RealtimeMessage {
-                action: "delete".to_string(),
-                collection: col.name.clone(),
-                record: serde_json::to_value(&existing).unwrap_or_default(),
-            });
+            state.realtime.broadcast(RealtimeMessage::new(
+                "delete",
+                &col.name,
+                serde_json::to_value(&existing).unwrap_or_default(),
+            ));
         }
 
         Ok(StatusCode::NO_CONTENT)
@@ -817,11 +1082,11 @@ pub async fn import_records(
             Ok(rec) => {
                 imported_count += 1;
                 if col.realtime {
-                    state.realtime.broadcast(RealtimeMessage {
-                        action: "create".to_string(),
-                        collection: col.name.clone(),
-                        record: serde_json::to_value(&rec).unwrap_or_default(),
-                    });
+                    state.realtime.broadcast(RealtimeMessage::new(
+                        "create",
+                        &col.name,
+                        serde_json::to_value(&rec).unwrap_or_default(),
+                    ));
                 }
             }
             Err(e) => {
@@ -836,4 +1101,190 @@ pub async fn import_records(
         "errors": errors,
         "message": format!("Successfully imported {} records", imported_count)
     })))
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum BatchIdsPayload {
+    Object { ids: Vec< Value > },
+    Array(Vec<Value>),
+}
+
+/// Delete multiple records in a single batch (`POST /api/{collection}/delete-batch` or `POST /api/{collection}/batch-delete`).
+pub async fn delete_batch(
+    State(state): State<AppState>,
+    Path(collection_name): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<BatchIdsPayload>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    let col = get_collection_by_name_or_id(&state.db, &collection_name)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "Collection not found." })),
+            )
+        })?;
+
+    let auth = authenticate_headers(&headers)?;
+    let raw_ids = match payload {
+        BatchIdsPayload::Object { ids } => ids,
+        BatchIdsPayload::Array(ids) => ids,
+    };
+
+    let ids: Vec<String> = raw_ids
+        .into_iter()
+        .filter_map(|v| match v {
+            Value::String(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
+            Value::Number(n) => Some(n.to_string()),
+            _ => None,
+        })
+        .collect();
+
+    if ids.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": "No record IDs provided for batch deletion." })),
+        ));
+    }
+
+    // Check delete permission on each record when ownership rule is active
+    let mut authorized_ids = Vec::with_capacity(ids.len());
+    for id in &ids {
+        if let Ok(Some(existing)) = get_record(&state.db, &col, id).await {
+            let existing_map = serde_json::to_value(&existing)
+                .ok()
+                .and_then(|v| v.as_object().cloned());
+            check_permission(
+                RecordAction::Delete,
+                &col,
+                auth.as_ref(),
+                existing_map.as_ref(),
+            )?;
+            authorized_ids.push((id.clone(), existing));
+        } else {
+            // Also verify general collection-level delete permission if record doesn't exist
+            check_permission(RecordAction::Delete, &col, auth.as_ref(), None)?;
+        }
+    }
+
+    let id_strings: Vec<String> = authorized_ids.iter().map(|(id, _)| id.clone()).collect();
+    let deleted_count = delete_records_batch(&state.db, &col, &id_strings)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?;
+
+    for (id, existing) in authorized_ids {
+        let rec_dir = state.storage_dir.join(&col.name).join(&id);
+        if rec_dir.exists() {
+            let _ = tokio::fs::remove_dir_all(&rec_dir).await;
+        }
+        if col.realtime {
+            state.realtime.broadcast(RealtimeMessage::new(
+                "delete",
+                &col.name,
+                serde_json::to_value(&existing).unwrap_or_default(),
+            ));
+        }
+    }
+
+    Ok(Json(json!({
+        "deleted": deleted_count,
+        "ids": id_strings,
+        "message": format!("Successfully deleted {} records", deleted_count)
+    })))
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub enum BatchCreatePayload {
+    Object { items: Vec<Map<String, Value>> },
+    Array(Vec<Map<String, Value>>),
+}
+
+/// Create multiple records in a single batch (`POST /api/{collection}/create-batch` or `POST /api/{collection}/batch-create`).
+pub async fn create_batch(
+    State(state): State<AppState>,
+    Path(collection_name): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<BatchCreatePayload>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    let col = get_collection_by_name_or_id(&state.db, &collection_name)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "Collection not found." })),
+            )
+        })?;
+
+    let auth = authenticate_headers(&headers)?;
+    check_permission(RecordAction::Create, &col, auth.as_ref(), None)?;
+
+    let items = match payload {
+        BatchCreatePayload::Object { items } => items,
+        BatchCreatePayload::Array(items) => items,
+    };
+
+    if items.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": "No records provided for batch creation." })),
+        ));
+    }
+
+    let auth_user_id = auth.as_ref().map(|c| c.sub.clone());
+    let mut created_records = Vec::with_capacity(items.len());
+
+    for mut item in items {
+        validate_role_if_present(&state.db, &item).await?;
+        if col.blameable || col.collection_type == crate::core::schema::CollectionType::Auth {
+            if let Some(ref uid) = auth_user_id {
+                if !item.contains_key("created_by") {
+                    item.insert("created_by".to_string(), Value::String(uid.clone()));
+                }
+                if !item.contains_key("updated_by") {
+                    item.insert("updated_by".to_string(), Value::String(uid.clone()));
+                }
+            }
+        }
+        let rec = create_record(&state.db, &col, item).await.map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "code": 400, "message": format!("Failed to create record in batch: {}", e) })),
+            )
+        })?;
+        if col.realtime {
+            state.realtime.broadcast(RealtimeMessage::new(
+                "create",
+                &col.name,
+                serde_json::to_value(&rec).unwrap_or_default(),
+            ));
+        }
+        created_records.push(rec);
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "created": created_records.len(),
+            "items": created_records
+        })),
+    ))
 }

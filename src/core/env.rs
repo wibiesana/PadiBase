@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
 use std::sync::{LazyLock, RwLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -86,6 +86,8 @@ static FAST_IS_PRODUCTION: AtomicBool = AtomicBool::new(false);
 static FAST_IS_DEVELOPMENT: AtomicBool = AtomicBool::new(true);
 static FAST_IS_DEBUG: AtomicBool = AtomicBool::new(true);
 static FAST_AUTO_LOAD_RELATIONS: AtomicBool = AtomicBool::new(false);
+static FAST_SECURITY_HEADERS: AtomicBool = AtomicBool::new(true);
+static FAST_RATE_LIMIT_PER_MINUTE: AtomicU32 = AtomicU32::new(0);
 static FAST_RESPONSE_FORMAT: AtomicU8 = AtomicU8::new(ResponseFormat::Full as u8);
 
 fn parse_bool_str(v: &str) -> bool {
@@ -115,6 +117,13 @@ fn refresh_derived_config(cache: &HashMap<String, String>) {
     let auto_load = map_get_non_empty(cache, "AUTO_LOAD_RELATIONS")
         .map(parse_bool_str)
         .unwrap_or(false);
+    let sec_headers = map_get_non_empty(cache, "SECURITY_HEADERS_ENABLED")
+        .map(parse_bool_str)
+        .unwrap_or(true);
+    let rate_limit = map_get_non_empty(cache, "RATE_LIMIT_PER_MINUTE")
+        .or_else(|| map_get_non_empty(cache, "RATE_LIMIT_MAX_REQUESTS"))
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(0);
 
     let resp_fmt = match map_get_non_empty(cache, "RESPONSE_FORMAT") {
         Some(f) if f.trim().eq_ignore_ascii_case("simple") => ResponseFormat::Simple,
@@ -126,6 +135,8 @@ fn refresh_derived_config(cache: &HashMap<String, String>) {
     FAST_IS_DEVELOPMENT.store(is_dev, Ordering::Release);
     FAST_IS_DEBUG.store(is_debug, Ordering::Release);
     FAST_AUTO_LOAD_RELATIONS.store(auto_load, Ordering::Release);
+    FAST_SECURITY_HEADERS.store(sec_headers, Ordering::Release);
+    FAST_RATE_LIMIT_PER_MINUTE.store(rate_limit, Ordering::Release);
     FAST_RESPONSE_FORMAT.store(resp_fmt as u8, Ordering::Release);
 
     let app_name = map_get_non_empty(cache, "APP_NAME")
@@ -337,6 +348,20 @@ impl Env {
     pub fn auto_load_relations() -> bool {
         Self::ensure_loaded();
         FAST_AUTO_LOAD_RELATIONS.load(Ordering::Relaxed)
+    }
+
+    /// Lock-free O(1) check: True when `SECURITY_HEADERS_ENABLED=true` (default true).
+    #[inline]
+    pub fn security_headers_enabled() -> bool {
+        Self::ensure_loaded();
+        FAST_SECURITY_HEADERS.load(Ordering::Relaxed)
+    }
+
+    /// Lock-free O(1) getter for `RATE_LIMIT_PER_MINUTE` (0 = disabled).
+    #[inline]
+    pub fn rate_limit_per_minute() -> u32 {
+        Self::ensure_loaded();
+        FAST_RATE_LIMIT_PER_MINUTE.load(Ordering::Relaxed)
     }
 
     /// Lock-free O(1) getter for `RESPONSE_FORMAT` (`Full`, `Simple`, `Raw`).

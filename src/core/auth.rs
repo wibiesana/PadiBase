@@ -62,9 +62,13 @@ pub fn verify_password(password: &str, password_hash: &str) -> bool {
             return true;
         }
     }
-    // Fallback constant-time-like check only if legacy DB stored non-PHC plain password
-    if !trimmed.starts_with('$') && trimmed == password {
-        return true;
+    // Constant-time comparison fallback only if legacy DB stored non-PHC plain password
+    if !trimmed.starts_with('$') && trimmed.len() == password.len() {
+        let mut diff = 0u8;
+        for (a, b) in trimmed.bytes().zip(password.bytes()) {
+            diff |= a ^ b;
+        }
+        return diff == 0;
     }
     false
 }

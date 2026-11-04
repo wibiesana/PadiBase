@@ -458,7 +458,6 @@ let currentCollection = "users";
         loadAppSettings();
         loadBackups();
         loadAdminAccounts();
-        document.getElementById('exportCollectionsPre').textContent = JSON.stringify(collections, null, 2);
       }
     }
 
@@ -471,48 +470,35 @@ let currentCollection = "users";
       const clean = rawPath.trim().replace(/^\/+/, '').toLowerCase();
 
       // Core built-in system routes
-      if (clean === 'api/health' || clean === 'api/tables' || clean === 'api/collections' || clean === 'api/realtime') {
+      if (
+        clean === 'api/health' ||
+        clean === 'api/tables' ||
+        clean === 'api/collections' ||
+        clean === 'api/realtime' ||
+        clean === 'api/endpoints' ||
+        clean === 'api/settings' ||
+        clean === 'api/backups'
+      ) {
         return true;
       }
 
-      // Built-in table default routes (e.g. api/tables/banks/records or api/collections/banks/records)
+      // Built-in table default routes (e.g. api/banks, api/banks/:id, banks)
       for (const c of (collections || [])) {
         const colName = (c.name || '').toLowerCase();
         if (!colName) continue;
 
-        const prefixTables = `api/tables/${colName}/`;
-        const prefixCollections = `api/collections/${colName}/`;
-        if (clean.startsWith(prefixTables) || clean.startsWith(prefixCollections)) {
-          const action = clean.startsWith(prefixTables) 
-            ? clean.substring(prefixTables.length) 
-            : clean.substring(prefixCollections.length);
-          if (
-            action === 'records' ||
-            action === 'records/all' ||
-            action.startsWith('records/') ||
-            action === 'delete-all' ||
-            action === 'truncate' ||
-            action === 'import' ||
-            action === 'export' ||
-            action === 'auth-with-password' ||
-            action === 'login' ||
-            action === 'register' ||
-            action === 'forgot-password' ||
-            action === 'request-password-reset' ||
-            action === 'reset-password' ||
-            action === 'confirm-password-reset' ||
-            action === 'change-password' ||
-            action === 'auth-refresh' ||
-            action === 'me' ||
-            action === 'request-verification' ||
-            action === 'confirm-verification'
-          ) {
-            return true;
-          }
+        // Exact matches with or without /api
+        if (clean === `api/${colName}` || clean === colName) {
+          return true;
         }
 
-        // Legacy / framework full dump route: api/{collection}/all
-        if (clean === `api/${colName}/all`) {
+        // Sub-routes with or without /api
+        if (
+          clean.startsWith(`api/${colName}/`) ||
+          clean.startsWith(`${colName}/`) ||
+          clean.startsWith(`api/tables/${colName}/`) ||
+          clean.startsWith(`api/collections/${colName}/`)
+        ) {
           return true;
         }
       }
@@ -520,16 +506,270 @@ let currentCollection = "users";
       return false;
     }
 
-    function onCustomEpPrefixChange(val) {
-      const customInput = document.getElementById('epCustomPrefixInput');
-      if (customInput) {
-        if (val === 'custom' || val === '__custom__') {
-          customInput.classList.remove('hidden');
-          customInput.focus();
-        } else {
-          customInput.classList.add('hidden');
+    let lastSelectedPrefix = '';
+    let originalEndpointPath = '';
+
+    function getSavedCustomPrefixes() {
+      try {
+        const raw = localStorage.getItem('padibase_custom_prefixes');
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr)) {
+            return arr.filter(p => typeof p === 'string' && p.trim() && !['v1/', 'custom/', 'tables/', 'collections/'].includes(p.trim()));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load saved prefixes:', e);
+      }
+      return [];
+    }
+
+    function saveCustomPrefix(newPrefix) {
+      if (!newPrefix) return null;
+      let p = newPrefix.trim();
+      if (!p) return null;
+
+      if (p.startsWith('/api/')) {
+        p = p.substring('/api/'.length);
+      } else if (p.startsWith('api/')) {
+        p = p.substring('api/'.length);
+      }
+
+      if (!p.endsWith('/')) {
+        p += '/';
+      }
+
+      if (p === '/' || p === '' || p === '__custom__') return null;
+
+      const list = getSavedCustomPrefixes();
+      if (!list.includes(p)) {
+        list.push(p);
+        try {
+          localStorage.setItem('padibase_custom_prefixes', JSON.stringify(list));
+        } catch (e) {
+          console.error('Failed to save custom prefix:', e);
         }
       }
+      renderPrefixDropdownOptions(p);
+      return p;
+    }
+
+    function deleteCustomPrefix(prefixToDelete) {
+      if (!prefixToDelete) return;
+      let list = getSavedCustomPrefixes();
+      list = list.filter(p => p !== prefixToDelete);
+      try {
+        localStorage.setItem('padibase_custom_prefixes', JSON.stringify(list));
+      } catch (e) {
+        console.error('Failed to update saved prefixes:', e);
+      }
+      renderPrefixDropdownOptions('');
+      updateCustomEpUrlPreview();
+    }
+
+    function deleteCurrentSelectedPrefix() {
+      const sel = document.getElementById('epPrefixSelect');
+      if (!sel) return;
+      const val = sel.value;
+      if (!val || val === '/' || val === '__custom__') return;
+      if (!confirm(`Delete saved prefix "${val}"?`)) return;
+      deleteCustomPrefix(val);
+      if (typeof showToast === 'function') {
+        showToast(`Prefix "${val}" deleted.`);
+      }
+    }
+
+    function saveNewCustomPrefixFromInput() {
+      const input = document.getElementById('epCustomPrefixInput');
+      if (!input) return;
+      const raw = input.value.trim();
+      if (!raw) {
+        if (typeof showToast === 'function') {
+          showToast('Please enter a prefix first', 'error');
+        }
+        return;
+      }
+      const saved = saveCustomPrefix(raw);
+      if (saved) {
+        input.value = '';
+        lastSelectedPrefix = saved;
+        if (typeof showToast === 'function') {
+          showToast(`Prefix "${saved}" saved to dropdown!`);
+        }
+      }
+    }
+
+    function getEndpointPathMeta(epId) {
+      if (!epId) return null;
+      try {
+        const raw = localStorage.getItem('padibase_endpoint_paths_meta');
+        if (raw) {
+          const map = JSON.parse(raw);
+          return map[epId] || null;
+        }
+      } catch (e) {
+        console.error('Failed to read endpoint path meta:', e);
+      }
+      return null;
+    }
+
+    function saveEndpointPathMeta(epId, prefix, subPath) {
+      if (!epId) return;
+      try {
+        const raw = localStorage.getItem('padibase_endpoint_paths_meta');
+        const map = raw ? JSON.parse(raw) : {};
+        map[epId] = { prefix: prefix || '', subPath: subPath || '' };
+        localStorage.setItem('padibase_endpoint_paths_meta', JSON.stringify(map));
+      } catch (e) {
+        console.error('Failed to save endpoint path meta:', e);
+      }
+    }
+
+    function deleteEndpointPathMeta(epId) {
+      if (!epId) return;
+      try {
+        const raw = localStorage.getItem('padibase_endpoint_paths_meta');
+        if (raw) {
+          const map = JSON.parse(raw);
+          delete map[epId];
+          localStorage.setItem('padibase_endpoint_paths_meta', JSON.stringify(map));
+        }
+      } catch (e) {
+        console.error('Failed to delete endpoint path meta:', e);
+      }
+    }
+
+    function parseEndpointPathAndPrefix(ep) {
+      const fullPath = (ep.path || '').trim().replace(/^\/+/, '');
+      if (!fullPath) {
+        return { prefix: '', subPath: '' };
+      }
+
+      // 1. Check saved meta first
+      const meta = getEndpointPathMeta(ep.id);
+      if (meta && (meta.prefix !== undefined || meta.subPath !== undefined)) {
+        const cleanSub = (meta.subPath || '').trim().replace(/^\/+/, '');
+        const pfx = meta.prefix || '';
+        let testCombined = '';
+        if (pfx === '/') {
+          testCombined = cleanSub;
+        } else if (pfx.startsWith('/') && !pfx.startsWith('/api')) {
+          testCombined = `${pfx.replace(/^\/+/, '')}${cleanSub}`;
+        } else {
+          const subPfx = pfx.replace(/^\/?api\/?/, '').replace(/^\/+/, '');
+          testCombined = subPfx ? `api/${subPfx}${cleanSub}` : `api/${cleanSub}`;
+        }
+        if (testCombined === fullPath) {
+          return { prefix: meta.prefix, subPath: cleanSub };
+        }
+      }
+
+      // 2. Check if it matches any saved custom prefixes from localStorage
+      const savedList = getSavedCustomPrefixes();
+      for (const sp of savedList) {
+        const cleanSp = sp.replace(/^\/+/, '');
+        if (sp.startsWith('/') && !sp.startsWith('/api')) {
+          if (fullPath.startsWith(cleanSp)) {
+            return { prefix: sp, subPath: fullPath.substring(cleanSp.length) };
+          }
+        } else {
+          const apiSp = `api/${cleanSp}`;
+          if (fullPath.startsWith(apiSp)) {
+            return { prefix: sp, subPath: fullPath.substring(apiSp.length) };
+          }
+        }
+      }
+
+      // 3. Fallback: intelligent segment parsing
+      if (fullPath.startsWith('api/')) {
+        const afterApi = fullPath.substring('api/'.length);
+        if (afterApi.includes('/')) {
+          const slashIdx = afterApi.indexOf('/');
+          const detectedPrefix = afterApi.substring(0, slashIdx + 1); // e.g. "banks/"
+          const detectedSubPath = afterApi.substring(slashIdx + 1);    // e.g. "my-banks"
+          saveCustomPrefix(detectedPrefix);
+          return { prefix: detectedPrefix, subPath: detectedSubPath };
+        } else {
+          return { prefix: '', subPath: afterApi };
+        }
+      } else {
+        // Root direct
+        if (fullPath.includes('/')) {
+          const slashIdx = fullPath.indexOf('/');
+          const detectedPrefix = '/' + fullPath.substring(0, slashIdx + 1); // e.g. "/webhook/"
+          const detectedSubPath = fullPath.substring(slashIdx + 1);
+          saveCustomPrefix(detectedPrefix);
+          return { prefix: detectedPrefix, subPath: detectedSubPath };
+        } else {
+          return { prefix: '/', subPath: fullPath };
+        }
+      }
+    }
+
+    function renderPrefixDropdownOptions(selectedVal) {
+      const sel = document.getElementById('epPrefixSelect');
+      if (!sel) return;
+
+      const current = selectedVal !== undefined ? selectedVal : (sel.value || '');
+      const savedList = getSavedCustomPrefixes();
+
+      let html = `<option value="">(Default: /api/)</option>`;
+      savedList.forEach(p => {
+        let label;
+        if (p.startsWith('/') && !p.startsWith('/api')) {
+          label = `${p} (Root Direct: without /api/)`;
+        } else {
+          const cleanP = p.replace(/^\/?api\/?/, '');
+          label = `${cleanP} (/api/${cleanP})`;
+        }
+        html += `<option value="${p}">${label}</option>`;
+      });
+      html += `<option value="/">/ (Root Direct: without /api/)</option>`;
+      html += `<option value="__custom__">Custom prefix...</option>`;
+
+      sel.innerHTML = html;
+      sel.value = current;
+
+      if (current && sel.value !== current) {
+        sel.value = '__custom__';
+        const customInput = document.getElementById('epCustomPrefixInput');
+        if (customInput) customInput.value = current;
+      }
+
+      onCustomEpPrefixChange(sel.value);
+    }
+
+    function onCustomEpPrefixChange(val) {
+      const wrapper = document.getElementById('epCustomPrefixWrapper');
+      const customInput = document.getElementById('epCustomPrefixInput');
+      const delBtn = document.getElementById('deletePrefixBtn');
+      const pathEl = document.getElementById('epPathInput');
+
+      if (val === 'custom' || val === '__custom__') {
+        if (wrapper) wrapper.classList.remove('hidden');
+        if (customInput) customInput.focus();
+      } else {
+        if (wrapper) wrapper.classList.add('hidden');
+      }
+
+      // If switching prefix and pathEl starts with the previous prefix, strip it!
+      if (pathEl && lastSelectedPrefix && lastSelectedPrefix !== '/' && lastSelectedPrefix !== '__custom__') {
+        const cleanOld = lastSelectedPrefix.replace(/^\/?api\/?/, '').replace(/^\/+/, '');
+        if (cleanOld && pathEl.value.startsWith(cleanOld)) {
+          pathEl.value = pathEl.value.substring(cleanOld.length).replace(/^\/+/, '');
+        }
+      }
+
+      const newSelected = getSelectedPrefix();
+      if (newSelected !== '__custom__') {
+        lastSelectedPrefix = newSelected;
+      }
+
+      if (delBtn) {
+        const saved = getSavedCustomPrefixes();
+        delBtn.classList.toggle('hidden', !saved.includes(val));
+      }
+
       updateCustomEpUrlPreview();
     }
 
@@ -549,7 +789,7 @@ let currentCollection = "users";
       if (!rawSlug) return '';
       rawSlug = rawSlug.replace(/^\/+/, '');
 
-      const prefix = getSelectedPrefix(); // e.g. "", "v1/", "custom/", "collections/", "/", or custom
+      const prefix = getSelectedPrefix(); // e.g. "", saved custom prefix, "/", or custom
 
       // If user selected root "/" (outside /api)
       if (prefix === '/') {
@@ -570,9 +810,17 @@ let currentCollection = "users";
       const subPrefix = prefix.replace(/^\/?api\/?/, '').replace(/^\/+/, '');
       const cleanSub = subPrefix ? (subPrefix.endsWith('/') ? subPrefix : subPrefix + '/') : '';
 
-      // Don't duplicate if user already typed the sub-prefix (e.g. typed "collections/banks" with prefix "collections/")
+      // Don't duplicate if user already typed the sub-prefix (e.g. "banks/" when prefix is "banks/")
       if (cleanSub && rawSlug.startsWith(cleanSub)) {
-        return `api/${rawSlug}`;
+        rawSlug = rawSlug.substring(cleanSub.length);
+      }
+
+      // If user had an old prefix that is being replaced, don't keep the old prefix in rawSlug
+      if (lastSelectedPrefix && lastSelectedPrefix !== prefix) {
+        const cleanOld = lastSelectedPrefix.replace(/^\/?api\/?/, '').replace(/^\/+/, '');
+        if (cleanOld && rawSlug.startsWith(cleanOld)) {
+          rawSlug = rawSlug.substring(cleanOld.length);
+        }
       }
 
       return `api/${cleanSub}${rawSlug}`;
@@ -595,6 +843,8 @@ let currentCollection = "users";
         // Placeholder when path input is empty
         if (prefix === '/') {
           fullPath = '/endpoint';
+        } else if (prefix.startsWith('/') && !prefix.startsWith('/api')) {
+          fullPath = `/${prefix.replace(/^\/+/, '')}endpoint`.replace(/\/+/g, '/');
         } else if (prefix) {
           fullPath = `/api/${prefix.replace(/^\/?api\/?/, '')}endpoint`.replace(/\/+/g, '/');
         } else {
@@ -610,6 +860,10 @@ let currentCollection = "users";
       const overrideBadge = document.getElementById('epOverrideModeBadge');
       if (overrideBadge) {
         overrideBadge.classList.toggle('hidden', !isOverride);
+      }
+      const overrideBanner = document.getElementById('epOverrideNoticeBanner');
+      if (overrideBanner) {
+        overrideBanner.classList.toggle('hidden', !isOverride);
       }
     }
 
@@ -631,7 +885,7 @@ let currentCollection = "users";
       if (preset === 'list_records') {
         nameEl.value = `Override List ${col}`;
         methodEl.value = 'GET';
-        pathEl.value = `api/collections/${col}/records`;
+        pathEl.value = `api/${col}`;
         txEl.checked = false;
         sqlEl.value = `SELECT * FROM \`${col}\` ORDER BY \`id\` DESC LIMIT 50;`;
         if (paramsEl) paramsEl.value = '{}';
@@ -645,26 +899,26 @@ let currentCollection = "users";
       } else if (preset === 'get_record') {
         nameEl.value = `Override Detail ${col}`;
         methodEl.value = 'GET';
-        pathEl.value = `api/collections/${col}/records/{id}`;
+        pathEl.value = `api/${col}/{id}`;
         txEl.checked = false;
         sqlEl.value = `SELECT * FROM \`${col}\` WHERE \`id\` = :id LIMIT 1;`;
         if (paramsEl) paramsEl.value = '{\n  "id": "1"\n}';
       } else if (preset === 'create_record') {
         nameEl.value = `Override Create ${col}`;
         methodEl.value = 'POST';
-        pathEl.value = `api/collections/${col}/records`;
+        pathEl.value = `api/${col}`;
         txEl.checked = true;
         sqlEl.value = `SELECT * FROM \`${col}\` ORDER BY \`id\` DESC LIMIT 1;`;
       } else if (preset === 'update_record') {
         nameEl.value = `Override Update ${col}`;
         methodEl.value = 'PATCH';
-        pathEl.value = `api/collections/${col}/records/{id}`;
+        pathEl.value = `api/${col}/{id}`;
         txEl.checked = true;
         sqlEl.value = `UPDATE \`${col}\` SET \`updated\` = CURRENT_TIMESTAMP WHERE \`id\` = :id;\nSELECT * FROM \`${col}\` WHERE \`id\` = :id LIMIT 1;`;
       } else if (preset === 'delete_record') {
         nameEl.value = `Override Delete ${col}`;
         methodEl.value = 'DELETE';
-        pathEl.value = `api/collections/${col}/records/{id}`;
+        pathEl.value = `api/${col}/{id}`;
         txEl.checked = true;
         sqlEl.value = `DELETE FROM \`${col}\` WHERE \`id\` = :id;`;
       }
@@ -674,6 +928,7 @@ let currentCollection = "users";
     }
 
     async function loadCustomEndpoints(selectIdOrPath) {
+      renderPrefixDropdownOptions();
       try {
         const res = await fetch('/api/endpoints');
         const data = await res.json();
@@ -723,57 +978,156 @@ let currentCollection = "users";
 
       container.innerHTML = filtered.map(ep => {
         const isActive = ep.id === currentCustomEpId;
-        const mColor = methodColors[ep.method] || 'bg-slate-100 text-slate-700';
         const fullDisplayPath = resolveEndpointFullPath(ep.path);
         const isOverride = isOverrideEndpointPath(ep.path);
+        const method = ep.method || 'GET';
         return `
-          <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="w-full text-left p-2.5 rounded-xl border transition flex items-center justify-between ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold'}">
-            <div class="min-w-0 pr-2">
-              <div class="text-xs truncate flex items-center gap-1.5">
-                <span class="truncate">${ep.name || ep.path}</span>
-                ${isOverride ? `<span class="px-1.5 py-0.2 rounded text-[8px] font-extrabold ${isActive ? 'bg-amber-300 text-amber-950' : 'bg-amber-100 text-amber-800'}">OVERRIDE</span>` : ''}
+          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold'}">
+            <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+              <div class="flex items-center space-x-2.5 truncate">
+                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">
+                  <i class="fa-solid fa-code text-[11px]"></i>
+                </span>
+                <div class="text-left truncate">
+                  <div class="truncate font-mono">${ep.name || ep.path}</div>
+                  <div class="text-[10px] ${isActive ? 'text-emerald-100' : 'text-slate-400'}">${fullDisplayPath}</div>
+                </div>
               </div>
-              <div class="text-[10px] font-mono truncate ${isActive ? 'text-emerald-100' : 'text-slate-400'}">${fullDisplayPath}</div>
-            </div>
-            <span class="px-2 py-0.5 rounded-md text-[9px] font-mono font-extrabold shrink-0 ${isActive ? 'bg-white/20 text-white' : mColor}">${ep.method || 'GET'}</span>
-          </button>
+              <div class="flex items-center space-x-1 shrink-0 ml-1">
+                ${isOverride ? `<span class="px-1.5 py-0.5 rounded text-[8px] font-mono font-extrabold tracking-wider ${isActive ? 'bg-amber-300 text-amber-950 shadow-2xs' : 'bg-amber-100 text-amber-900 border border-amber-300'}" title="Overrides Built-in Route">OVERRIDE</span>` : ''}
+                <span class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-extrabold ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">${method}</span>
+              </div>
+            </button>
+            <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="p-2 mr-1 rounded-lg ${isActive ? 'text-emerald-100 hover:bg-white/15 hover:text-white' : 'text-slate-400 hover:bg-emerald-100 hover:text-emerald-800'} transition" title="Edit Endpoint">
+              <i class="fa-solid fa-sliders text-[11px]"></i>
+            </button>
+          </div>
         `;
       }).join('');
     }
 
+    // ================= TRANSACTION AUTO-DETECTION =================
+    let txUserManuallySet = false;
+
+    function countSqlStatements(sql) {
+      if (!sql) return 0;
+      const noComments = sql
+        .replace(/--.*$/gm, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '');
+
+      let count = 0;
+      let current = '';
+      let inSingle = false;
+      let inDouble = false;
+      let inBacktick = false;
+
+      for (let i = 0; i < noComments.length; i++) {
+        const c = noComments[i];
+        if (c === "'" && !inDouble && !inBacktick) {
+          if (inSingle && noComments[i + 1] === "'") {
+            current += "''";
+            i++;
+            continue;
+          }
+          inSingle = !inSingle;
+        } else if (c === '"' && !inSingle && !inBacktick) {
+          inDouble = !inDouble;
+        } else if (c === '`' && !inSingle && !inDouble) {
+          inBacktick = !inBacktick;
+        } else if (c === ';' && !inSingle && !inDouble && !inBacktick) {
+          if (current.trim()) {
+            count++;
+          }
+          current = '';
+          continue;
+        }
+        current += c;
+      }
+      if (current.trim()) {
+        count++;
+      }
+      return count;
+    }
+
+    function onUserToggleTransaction(checked) {
+      txUserManuallySet = true;
+      const badgeEl = document.getElementById('epTransactionBadge');
+      if (badgeEl) {
+        badgeEl.textContent = 'Manual';
+        badgeEl.className = 'text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600';
+        badgeEl.classList.remove('hidden');
+      }
+    }
+
+    function autoDetectTransactionCheckbox() {
+      const txEl = document.getElementById('epTransactionInput');
+      const sqlEl = document.getElementById('epSqlInput');
+      if (!txEl || !sqlEl) return;
+
+      const count = countSqlStatements(sqlEl.value);
+      const badgeEl = document.getElementById('epTransactionBadge');
+
+      if (!txUserManuallySet) {
+        if (count > 1) {
+          txEl.checked = true;
+          if (badgeEl) {
+            badgeEl.textContent = 'Auto: multi-query';
+            badgeEl.className = 'text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800';
+            badgeEl.classList.remove('hidden');
+          }
+        } else {
+          txEl.checked = false;
+          if (badgeEl) {
+            badgeEl.classList.add('hidden');
+          }
+        }
+      }
+    }
+
     function startNewCustomEndpoint() {
       currentCustomEpId = null;
+      lastSelectedPrefix = '';
+      originalEndpointPath = '';
       renderCustomEndpointsList();
       const alertEl = document.getElementById('customEpAlert');
       if (alertEl) alertEl.classList.add('hidden');
 
-      document.getElementById('customEpFormTitle').textContent = 'Create Custom SQL Endpoint';
+      document.getElementById('customEpFormTitle').textContent = 'Create Custom API Endpoint';
       document.getElementById('saveCustomEpBtnText').textContent = 'Create Endpoint';
       document.getElementById('deleteCustomEpBtn').classList.add('hidden');
 
       document.getElementById('epNameInput').value = '';
       document.getElementById('epMethodInput').value = 'GET';
-      const prefixEl = document.getElementById('epPrefixSelect');
-      if (prefixEl) prefixEl.value = '';
+      renderPrefixDropdownOptions('');
       const customPrefixEl = document.getElementById('epCustomPrefixInput');
       if (customPrefixEl) {
         customPrefixEl.value = '';
-        customPrefixEl.classList.add('hidden');
       }
       document.getElementById('epPathInput').value = '';
       document.getElementById('epAuthRuleInput').value = 'public';
       updateRoleDropdownUI('epAuthRuleInput');
+      
+      txUserManuallySet = false;
       document.getElementById('epTransactionInput').checked = false;
+      const badgeEl = document.getElementById('epTransactionBadge');
+      if (badgeEl) badgeEl.classList.add('hidden');
+
       document.getElementById('epSqlInput').value = `SELECT * FROM \`${currentCollection || 'users'}\` LIMIT :limit;`;
       document.getElementById('epDescInput').value = '';
       document.getElementById('epTestParamsInput').value = '{\n  "limit": 10\n}';
+      qbJoins = [];
+      qbExtraTables = [];
+      renderQbJoins();
+      renderQbExtraTables();
       updateCustomEpUrlPreview();
+      autoDetectTransactionCheckbox();
     }
 
     function selectCustomEndpoint(id) {
       const ep = customEndpoints.find(e => e.id === id);
       if (!ep) return;
       currentCustomEpId = ep.id;
+      originalEndpointPath = ep.path || '';
       renderCustomEndpointsList();
       const alertEl = document.getElementById('customEpAlert');
       if (alertEl) alertEl.classList.add('hidden');
@@ -785,43 +1139,39 @@ let currentCollection = "users";
       document.getElementById('epNameInput').value = ep.name || '';
       document.getElementById('epMethodInput').value = ep.method || 'GET';
 
-      // Parse path to automatically select prefix vs slug
-      const p = (ep.path || '').trim().replace(/^\/+/, '');
-      const prefixEl = document.getElementById('epPrefixSelect');
-      const customPrefixEl = document.getElementById('epCustomPrefixInput');
-      const pathEl = document.getElementById('epPathInput');
+      // Parse path to automatically separate prefix vs slug
+      const parsed = parseEndpointPathAndPrefix(ep);
+      lastSelectedPrefix = parsed.prefix;
 
-      if (p.startsWith('api/tables/')) {
-        if (prefixEl) prefixEl.value = 'tables/';
-        if (customPrefixEl) customPrefixEl.classList.add('hidden');
-        if (pathEl) pathEl.value = p.substring('api/tables/'.length);
-      } else if (p.startsWith('api/collections/')) {
-        if (prefixEl) prefixEl.value = 'collections/';
-        if (customPrefixEl) customPrefixEl.classList.add('hidden');
-        if (pathEl) pathEl.value = p.substring('api/collections/'.length);
-      } else if (p.startsWith('api/custom/')) {
-        if (prefixEl) prefixEl.value = 'custom/';
-        if (customPrefixEl) customPrefixEl.classList.add('hidden');
-        if (pathEl) pathEl.value = p.substring('api/custom/'.length);
-      } else if (p.startsWith('api/v1/')) {
-        if (prefixEl) prefixEl.value = 'v1/';
-        if (customPrefixEl) customPrefixEl.classList.add('hidden');
-        if (pathEl) pathEl.value = p.substring('api/v1/'.length);
-      } else if (p.startsWith('api/')) {
-        if (prefixEl) prefixEl.value = '';
-        if (customPrefixEl) customPrefixEl.classList.add('hidden');
-        if (pathEl) pathEl.value = p.substring('api/'.length);
-      } else {
-        if (prefixEl) prefixEl.value = '/';
-        if (customPrefixEl) customPrefixEl.classList.add('hidden');
-        if (pathEl) pathEl.value = p;
+      renderPrefixDropdownOptions(parsed.prefix);
+      const customPrefixEl = document.getElementById('epCustomPrefixInput');
+      if (customPrefixEl) {
+        if (parsed.prefix && !['', '/'].includes(parsed.prefix)) {
+          customPrefixEl.value = parsed.prefix;
+        } else {
+          customPrefixEl.value = '';
+        }
+      }
+
+      const pathEl = document.getElementById('epPathInput');
+      if (pathEl) {
+        pathEl.value = parsed.subPath;
       }
 
       document.getElementById('epAuthRuleInput').value = ep.authRule || ep.auth_rule || 'public';
       updateRoleDropdownUI('epAuthRuleInput');
+      
+      txUserManuallySet = true;
       document.getElementById('epTransactionInput').checked = Boolean(ep.transaction);
+      const badgeEl = document.getElementById('epTransactionBadge');
+      if (badgeEl) badgeEl.classList.add('hidden');
+
       document.getElementById('epSqlInput').value = ep.sql || '';
       document.getElementById('epDescInput').value = ep.description || '';
+      qbJoins = [];
+      qbExtraTables = [];
+      renderQbJoins();
+      renderQbExtraTables();
       updateCustomEpUrlPreview();
     }
 
@@ -831,6 +1181,8 @@ let currentCollection = "users";
     let qbSelectedTable = '';
     let qbSelectedColumns = new Set();
     let qbFilterConditions = []; // Array of { logic: 'AND', col: '', op: '=', val: ':val' }
+    let qbJoins = []; // Array of { id, type: 'LEFT JOIN'|'INNER JOIN'|'RIGHT JOIN', table, mainCol, joinCol, selectedCols: Set() }
+    let qbExtraTables = []; // Array of { id, table, selectedCols: Set(), whereCol, whereVal }
 
     function qbEscapeAttr(str) {
       if (str === null || str === undefined) return '';
@@ -841,15 +1193,25 @@ let currentCollection = "users";
       qbEditorMode = mode;
       const codeBtn = document.getElementById('epModeCodeBtn');
       const visualBtn = document.getElementById('epModeVisualBtn');
+      const codeIcon = document.getElementById('epModeCodeIcon');
+      const visualIcon = document.getElementById('epModeVisualIcon');
       const codePane = document.getElementById('epSqlEditorPane');
       const visualPane = document.getElementById('epVisualBuilderPane');
 
+      const baseClasses = "px-4 py-1.5 rounded-lg text-xs transition flex items-center space-x-1.5 cursor-pointer";
+
       if (mode === 'visual') {
         if (codeBtn) {
-          codeBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 text-slate-500 hover:text-slate-800 cursor-pointer";
+          codeBtn.className = `${baseClasses} mode-btn-inactive text-slate-500 hover:text-slate-800 hover:bg-white/60 font-semibold`;
+        }
+        if (codeIcon) {
+          codeIcon.className = "fa-solid fa-code text-slate-400";
         }
         if (visualBtn) {
-          visualBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 bg-white shadow-2xs text-amber-600 font-extrabold cursor-pointer";
+          visualBtn.className = `${baseClasses} mode-btn-active bg-emerald-600 text-white font-extrabold shadow-sm`;
+        }
+        if (visualIcon) {
+          visualIcon.className = "fa-solid fa-wand-magic-sparkles text-white";
         }
         if (codePane) codePane.classList.add('hidden');
         if (visualPane) visualPane.classList.remove('hidden');
@@ -857,10 +1219,16 @@ let currentCollection = "users";
         initQueryBuilder();
       } else {
         if (codeBtn) {
-          codeBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 bg-white shadow-2xs text-emerald-600 font-extrabold cursor-pointer";
+          codeBtn.className = `${baseClasses} mode-btn-active bg-emerald-600 text-white font-extrabold shadow-sm`;
+        }
+        if (codeIcon) {
+          codeIcon.className = "fa-solid fa-code text-white";
         }
         if (visualBtn) {
-          visualBtn.className = "px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 text-slate-500 hover:text-slate-800 cursor-pointer";
+          visualBtn.className = `${baseClasses} mode-btn-inactive text-slate-500 hover:text-slate-800 hover:bg-white/60 font-semibold`;
+        }
+        if (visualIcon) {
+          visualIcon.className = "fa-solid fa-wand-magic-sparkles text-slate-400";
         }
         if (codePane) codePane.classList.remove('hidden');
         if (visualPane) visualPane.classList.add('hidden');
@@ -875,6 +1243,8 @@ let currentCollection = "users";
         if (sel) sel.value = qbSelectedTable;
         onQbTableChange(qbSelectedTable, false);
       }
+      renderQbJoins();
+      renderQbExtraTables();
     }
 
     function populateQbTables() {
@@ -924,6 +1294,12 @@ let currentCollection = "users";
       qbFilterConditions = [];
       renderQbFilters();
 
+      // Reset joins and extra tables on primary table switch
+      qbJoins = [];
+      renderQbJoins();
+      qbExtraTables = [];
+      renderQbExtraTables();
+
       if (shouldBuild) {
         buildSqlFromQb();
       }
@@ -944,6 +1320,10 @@ let currentCollection = "users";
       const colsSec = document.getElementById('qbColumnsSection');
       const orderSec = document.getElementById('qbOrderLimitSection');
       const colsLabel = document.getElementById('qbColumnsLabel');
+      const joinSec = document.getElementById('qbJoinSection');
+      const multiSec = document.getElementById('qbMultiTableSection');
+      const whereSec = document.getElementById('qbWhereSection');
+      const multiLabel = document.getElementById('qbMultiTableLabel');
 
       if (colsSec) {
         if (action === 'DELETE' || action === 'COUNT') {
@@ -957,6 +1337,35 @@ let currentCollection = "users";
           } else if (action === 'UPDATE') {
             if (colsLabel) colsLabel.textContent = 'Columns to Update (SET)';
           }
+        }
+      }
+
+      if (joinSec) {
+        if (action === 'SELECT' || action === 'COUNT') {
+          joinSec.classList.remove('hidden');
+        } else {
+          joinSec.classList.add('hidden');
+        }
+      }
+
+      if (multiSec) {
+        if (action === 'INSERT' || action === 'UPDATE' || action === 'DELETE') {
+          multiSec.classList.remove('hidden');
+          if (multiLabel) {
+            if (action === 'INSERT') multiLabel.textContent = 'Multi-Table Operations (Insert into multiple tables atomically)';
+            else if (action === 'UPDATE') multiLabel.textContent = 'Multi-Table Operations (Update multiple tables atomically)';
+            else if (action === 'DELETE') multiLabel.textContent = 'Multi-Table Operations (Cascade delete related tables atomically)';
+          }
+        } else {
+          multiSec.classList.add('hidden');
+        }
+      }
+
+      if (whereSec) {
+        if (action === 'INSERT') {
+          whereSec.classList.add('hidden');
+        } else {
+          whereSec.classList.remove('hidden');
         }
       }
 
@@ -977,6 +1386,7 @@ let currentCollection = "users";
         else if (action === 'DELETE') methodEl.value = 'DELETE';
       }
 
+      renderQbExtraTables();
       buildSqlFromQb();
     }
 
@@ -1034,6 +1444,44 @@ let currentCollection = "users";
       const fields = getTableFieldsList(qbSelectedTable);
       sel.innerHTML = '<option value="">(None - Natural)</option>' +
         fields.map(f => `<option value="${f.name}" ${f.name === current ? 'selected' : ''}>${f.name}</option>`).join('');
+    }
+
+    function applyQbOwnCreateFilter() {
+      const table = qbSelectedTable || currentCollection || 'banks';
+      const fields = getTableFieldsList(table);
+
+      let ownCol = 'created_by';
+      if (fields.some(f => f.name === 'created_by')) {
+        ownCol = 'created_by';
+      } else if (fields.some(f => f.name === 'user_id')) {
+        ownCol = 'user_id';
+      } else if (fields.some(f => f.name === 'author_id')) {
+        ownCol = 'author_id';
+      } else if (fields.some(f => f.name === 'owner_id')) {
+        ownCol = 'owner_id';
+      }
+
+      const existing = qbFilterConditions.find(c => c.col === ownCol && c.val === '@request.auth.id');
+      if (!existing) {
+        qbFilterConditions.push({
+          logic: qbFilterConditions.length === 0 ? 'WHERE' : 'AND',
+          col: ownCol,
+          op: '=',
+          val: '@request.auth.id'
+        });
+      }
+
+      const authRuleEl = document.getElementById('epAuthRuleInput');
+      if (authRuleEl && (!authRuleEl.value || authRuleEl.value === 'public')) {
+        authRuleEl.value = "@request.auth.id != ''";
+        updateRoleDropdownUI('epAuthRuleInput');
+      }
+
+      renderQbFilters();
+      buildSqlFromQb();
+      if (typeof showToast === 'function') {
+        showToast(`Added Own Create filter: WHERE \`${ownCol}\` = @request.auth.id`);
+      }
     }
 
     function addQbFilterRow() {
@@ -1122,6 +1570,388 @@ let currentCollection = "users";
       }).join('');
     }
 
+    // ================= TABLE JOINS (SELECT) =================
+    function addQbJoinRow() {
+      const otherCols = collections.filter(c => c.name !== qbSelectedTable);
+      if (otherCols.length === 0) {
+        showToast('No other table available to JOIN', 'warning');
+        return;
+      }
+      const candTable = otherCols[0].name;
+      const mainFields = getTableFieldsList(qbSelectedTable);
+      const candFields = getTableFieldsList(candTable);
+
+      const guessMain = mainFields.find(f => 
+        f.name === `${candTable}_id` || 
+        f.name === `${candTable}Id` ||
+        (candTable === 'users' && (f.name === 'user_id' || f.name === 'author_id' || f.name === 'customer_id'))
+      )?.name || 'id';
+
+      const guessJoin = candFields.find(f => f.name === 'id')?.name || (candFields[0]?.name || 'id');
+
+      const selectedCols = new Set();
+      candFields.filter(f => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'updated_at')
+        .slice(0, 2)
+        .forEach(f => selectedCols.add(f.name));
+
+      qbJoins.push({
+        id: 'join_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        type: 'LEFT JOIN',
+        table: candTable,
+        mainCol: guessMain,
+        joinCol: guessJoin,
+        selectedCols
+      });
+
+      renderQbJoins();
+      buildSqlFromQb();
+    }
+
+    function removeQbJoinRow(id) {
+      qbJoins = qbJoins.filter(j => j.id !== id);
+      renderQbJoins();
+      buildSqlFromQb();
+    }
+
+    function onQbJoinChange(id, key, val) {
+      const j = qbJoins.find(x => x.id === id);
+      if (!j) return;
+      j[key] = val;
+      if (key === 'table') {
+        const fields = getTableFieldsList(val);
+        j.selectedCols = new Set();
+        fields.filter(f => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'updated_at')
+          .slice(0, 2)
+          .forEach(f => j.selectedCols.add(f.name));
+        j.joinCol = fields.find(f => f.name === 'id')?.name || fields[0]?.name || 'id';
+      }
+      renderQbJoins();
+      buildSqlFromQb();
+    }
+
+    function toggleQbJoinCol(id, colName) {
+      const j = qbJoins.find(x => x.id === id);
+      if (!j) return;
+      if (j.selectedCols.has(colName)) {
+        j.selectedCols.delete(colName);
+      } else {
+        j.selectedCols.add(colName);
+      }
+      renderQbJoins();
+      buildSqlFromQb();
+    }
+
+    function toggleQbJoinAllCols(id, selectAll) {
+      const j = qbJoins.find(x => x.id === id);
+      if (!j) return;
+      j.selectedCols.clear();
+      if (selectAll) {
+        const fields = getTableFieldsList(j.table);
+        fields.forEach(f => j.selectedCols.add(f.name));
+      }
+      renderQbJoins();
+      buildSqlFromQb();
+    }
+
+    function renderQbJoins() {
+      const container = document.getElementById('qbJoinsContainer');
+      if (!container) return;
+
+      if (qbJoins.length === 0) {
+        container.innerHTML = '<div id="qbEmptyJoinsNotice" class="text-xs text-slate-400 italic py-1">No JOIN configured. Query only fetches from the primary table.</div>';
+        return;
+      }
+
+      const mainTable = qbSelectedTable || 'users';
+      const mainFields = getTableFieldsList(mainTable);
+
+      container.innerHTML = qbJoins.map((j, idx) => {
+        const joinFields = getTableFieldsList(j.table);
+        const joinColOptions = joinFields.map(f => `<option value="${f.name}" ${f.name === j.joinCol ? 'selected' : ''}>\`${f.name}\`</option>`).join('');
+        const mainColOptions = mainFields.map(f => `<option value="${f.name}" ${f.name === j.mainCol ? 'selected' : ''}>\`${f.name}\`</option>`).join('');
+
+        return `
+          <div class="bg-indigo-50/40 border border-indigo-200/80 rounded-xl p-3 space-y-2.5 text-xs shadow-2xs">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <div class="flex items-center space-x-2 flex-wrap">
+                <span class="px-2 py-0.5 rounded bg-indigo-600 text-white font-mono font-bold text-[10px]">
+                  JOIN #${idx + 1}
+                </span>
+                <select onchange="onQbJoinChange('${j.id}', 'type', this.value)" class="bg-white border border-indigo-300 rounded-lg px-2 py-1 font-bold text-indigo-700 text-xs font-mono">
+                  <option value="LEFT JOIN" ${j.type === 'LEFT JOIN' ? 'selected' : ''}>LEFT JOIN</option>
+                  <option value="INNER JOIN" ${j.type === 'INNER JOIN' ? 'selected' : ''}>INNER JOIN</option>
+                  <option value="RIGHT JOIN" ${j.type === 'RIGHT JOIN' ? 'selected' : ''}>RIGHT JOIN</option>
+                </select>
+                <span class="text-slate-500 font-bold">table</span>
+                <select onchange="onQbJoinChange('${j.id}', 'table', this.value)" class="bg-white border border-indigo-300 rounded-lg px-2.5 py-1 font-mono font-bold text-slate-800 text-xs">
+                  ${collections.map(c => `<option value="${c.name}" ${c.name === j.table ? 'selected' : ''}>${c.name}</option>`).join('')}
+                </select>
+              </div>
+
+              <button type="button" onclick="removeQbJoinRow('${j.id}')" class="p-1 text-slate-400 hover:text-rose-600 transition rounded-lg hover:bg-rose-50 cursor-pointer" title="Remove JOIN">
+                <i class="fa-solid fa-trash-can text-xs"></i>
+              </button>
+            </div>
+
+            <!-- ON Condition -->
+            <div class="flex items-center flex-wrap gap-2 bg-white/90 p-2 rounded-lg border border-indigo-100 text-xs font-mono">
+              <span class="font-bold text-indigo-700">ON</span>
+              <span class="text-slate-500 font-semibold">\`${mainTable}\`.</span>
+              <select onchange="onQbJoinChange('${j.id}', 'mainCol', this.value)" class="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs">
+                ${mainColOptions}
+              </select>
+              <span class="font-bold text-slate-600">=</span>
+              <span class="text-slate-500 font-semibold">\`${j.table}\`.</span>
+              <select onchange="onQbJoinChange('${j.id}', 'joinCol', this.value)" class="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs">
+                ${joinColOptions}
+              </select>
+            </div>
+
+            <!-- Column chips from joined table -->
+            <div>
+              <div class="flex items-center justify-between mb-1.5 text-[11px]">
+                <span class="font-bold text-slate-700">Columns to include from \`${j.table}\`:</span>
+                <div class="space-x-1.5">
+                  <button type="button" onclick="toggleQbJoinAllCols('${j.id}', true)" class="text-[10px] text-indigo-600 font-bold hover:underline cursor-pointer">Select All</button>
+                  <span class="text-slate-300">|</span>
+                  <button type="button" onclick="toggleQbJoinAllCols('${j.id}', false)" class="text-[10px] text-slate-500 hover:underline cursor-pointer">Clear</button>
+                </div>
+              </div>
+              <div class="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1 bg-white/60 rounded-lg border border-indigo-50">
+                ${joinFields.map(f => {
+                  const isSel = j.selectedCols.has(f.name);
+                  return `
+                    <button type="button" onclick="toggleQbJoinCol('${j.id}', '${f.name}')" class="px-2 py-0.5 rounded text-[11px] font-mono transition border cursor-pointer ${
+                      isSel ? 'bg-indigo-600 text-white border-indigo-700 font-bold shadow-2xs' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
+                    }">
+                      ${isSel ? '<i class="fa-solid fa-check text-[9px] mr-1"></i>' : ''}${f.name}
+                    </button>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ================= MULTI-TABLE OPERATIONS (INSERT, UPDATE, DELETE) =================
+    function addQbExtraTableRow() {
+      const otherCols = collections.filter(c => c.name !== qbSelectedTable);
+      const candTable = otherCols.length > 0 ? otherCols[0].name : (collections[0]?.name || 'items');
+      const candFields = getTableFieldsList(candTable);
+
+      const selectedCols = new Set();
+      candFields.filter(f => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'updated_at')
+        .slice(0, 3)
+        .forEach(f => selectedCols.add(f.name));
+
+      const guessWhere = candFields.find(f => 
+        f.name === `${qbSelectedTable}_id` || 
+        f.name === `${qbSelectedTable}Id` ||
+        f.name.includes(`${qbSelectedTable}`)
+      )?.name || 'id';
+
+      const colBindings = {};
+      const primaryTable = qbSelectedTable || 'orders';
+      const defaultFk = candFields.find(f => 
+        f.name === `${primaryTable}_id` || 
+        f.name === `${primaryTable.replace(/s$/, '')}_id` ||
+        (primaryTable === 'orders' && f.name === 'order_id') ||
+        (primaryTable === 'users' && f.name === 'user_id')
+      )?.name;
+
+      if (defaultFk) {
+        colBindings[defaultFk] = ':last_insert_id';
+        selectedCols.add(defaultFk);
+      }
+
+      qbExtraTables.push({
+        id: 'extra_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        table: candTable,
+        selectedCols,
+        colBindings,
+        whereCol: guessWhere,
+        whereVal: `:${guessWhere}`
+      });
+
+      renderQbExtraTables();
+      buildSqlFromQb();
+      showToast(`Table '${candTable}' added to multi-table transaction`);
+    }
+
+    function removeQbExtraTableRow(id) {
+      qbExtraTables = qbExtraTables.filter(x => x.id !== id);
+      renderQbExtraTables();
+      buildSqlFromQb();
+    }
+
+    function onQbExtraTableChange(id, key, val) {
+      const extra = qbExtraTables.find(x => x.id === id);
+      if (!extra) return;
+      extra[key] = val;
+      if (key === 'table') {
+        const fields = getTableFieldsList(val);
+        extra.selectedCols = new Set();
+        fields.filter(f => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'updated_at')
+          .slice(0, 3)
+          .forEach(f => extra.selectedCols.add(f.name));
+        extra.whereCol = fields.find(f => f.name === 'id')?.name || fields[0]?.name || 'id';
+        extra.whereVal = `:${extra.whereCol}`;
+
+        // Reset and guess foreign key
+        extra.colBindings = {};
+        const primaryTable = qbSelectedTable || 'orders';
+        const defaultFk = fields.find(f => 
+          f.name === `${primaryTable}_id` || 
+          f.name === `${primaryTable.replace(/s$/, '')}_id` ||
+          (primaryTable === 'orders' && f.name === 'order_id') ||
+          (primaryTable === 'users' && f.name === 'user_id')
+        )?.name;
+        if (defaultFk) {
+          extra.colBindings[defaultFk] = ':last_insert_id';
+          extra.selectedCols.add(defaultFk);
+        }
+      }
+      renderQbExtraTables();
+      buildSqlFromQb();
+    }
+
+    function setQbExtraForeignKey(extraId, colName) {
+      const extra = qbExtraTables.find(x => x.id === extraId);
+      if (!extra) return;
+      if (!extra.colBindings) extra.colBindings = {};
+      Object.keys(extra.colBindings).forEach(k => {
+        if (extra.colBindings[k] === ':last_insert_id') delete extra.colBindings[k];
+      });
+      if (colName) {
+        extra.colBindings[colName] = ':last_insert_id';
+        extra.selectedCols.add(colName);
+      }
+      renderQbExtraTables();
+      buildSqlFromQb();
+    }
+
+    function toggleQbExtraTableCol(id, colName) {
+      const extra = qbExtraTables.find(x => x.id === id);
+      if (!extra) return;
+      if (extra.selectedCols.has(colName)) {
+        extra.selectedCols.delete(colName);
+      } else {
+        extra.selectedCols.add(colName);
+      }
+      renderQbExtraTables();
+      buildSqlFromQb();
+    }
+
+    function toggleQbExtraTableAllCols(id, selectAll) {
+      const extra = qbExtraTables.find(x => x.id === id);
+      if (!extra) return;
+      extra.selectedCols.clear();
+      if (selectAll) {
+        const fields = getTableFieldsList(extra.table);
+        fields.filter(f => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'updated_at')
+          .forEach(f => extra.selectedCols.add(f.name));
+      }
+      renderQbExtraTables();
+      buildSqlFromQb();
+    }
+
+    function renderQbExtraTables() {
+      const container = document.getElementById('qbExtraTablesContainer');
+      if (!container) return;
+
+      if (qbExtraTables.length === 0) {
+        container.innerHTML = '<div id="qbEmptyExtraTablesNotice" class="text-xs text-slate-400 italic py-1">Single table operation. Click "+ Add Another Table" to chain mutations in this transaction.</div>';
+        return;
+      }
+
+      container.innerHTML = qbExtraTables.map((extra, idx) => {
+        const extraFields = getTableFieldsList(extra.table);
+        const whereColOptions = extraFields.map(f => `<option value="${f.name}" ${f.name === extra.whereCol ? 'selected' : ''}>\`${f.name}\`</option>`).join('');
+
+        return `
+          <div class="bg-teal-50/40 border border-teal-200/80 rounded-xl p-3 space-y-2.5 text-xs shadow-2xs">
+            <div class="flex items-center justify-between flex-wrap gap-2">
+              <div class="flex items-center space-x-2 flex-wrap">
+                <span class="px-2 py-0.5 rounded bg-teal-600 text-white font-mono font-bold text-[10px] uppercase">
+                  Additional Table #${idx + 1} (${qbCurrentAction})
+                </span>
+                <span class="text-slate-500 font-bold">table</span>
+                <select onchange="onQbExtraTableChange('${extra.id}', 'table', this.value)" class="bg-white border border-teal-300 rounded-lg px-2.5 py-1 font-mono font-bold text-slate-800 text-xs">
+                  ${collections.map(c => `<option value="${c.name}" ${c.name === extra.table ? 'selected' : ''}>${c.name}</option>`).join('')}
+                </select>
+              </div>
+
+              <button type="button" onclick="removeQbExtraTableRow('${extra.id}')" class="p-1 text-slate-400 hover:text-rose-600 transition rounded-lg hover:bg-rose-50 cursor-pointer" title="Remove Table">
+                <i class="fa-solid fa-trash-can text-xs"></i>
+              </button>
+            </div>
+
+            <!-- Columns for INSERT or UPDATE -->
+            ${(qbCurrentAction === 'INSERT' || qbCurrentAction === 'UPDATE') ? `
+              <div>
+                <div class="flex items-center justify-between mb-1.5 text-[11px]">
+                  <span class="font-bold text-slate-700">${qbCurrentAction === 'INSERT' ? 'Columns to INSERT (values):' : 'Columns to UPDATE (SET):'}</span>
+                  <div class="space-x-1.5">
+                    <button type="button" onclick="toggleQbExtraTableAllCols('${extra.id}', true)" class="text-[10px] text-teal-700 font-bold hover:underline cursor-pointer">Select All</button>
+                    <span class="text-slate-300">|</span>
+                    <button type="button" onclick="toggleQbExtraTableAllCols('${extra.id}', false)" class="text-[10px] text-slate-500 hover:underline cursor-pointer">Clear</button>
+                  </div>
+                </div>
+                <div class="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1 bg-white/60 rounded-lg border border-teal-50">
+                  ${extraFields.filter(f => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'updated_at').map(f => {
+                    const isSel = extra.selectedCols.has(f.name);
+                    const isBoundToLastId = extra.colBindings && extra.colBindings[f.name] === ':last_insert_id';
+                    return `
+                      <button type="button" onclick="toggleQbExtraTableCol('${extra.id}', '${f.name}')" class="px-2 py-0.5 rounded text-[11px] font-mono transition border cursor-pointer ${
+                        isBoundToLastId
+                          ? 'bg-amber-500 text-white border-amber-600 font-extrabold shadow-2xs'
+                          : (isSel ? 'bg-teal-600 text-white border-teal-700 font-bold shadow-2xs' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300')
+                      }">
+                        ${isBoundToLastId ? '<i class="fa-solid fa-link text-[9px] mr-1"></i>' : (isSel ? '<i class="fa-solid fa-check text-[9px] mr-1"></i>' : '')}${f.name}${isBoundToLastId ? ' (🔗 :last_insert_id)' : ''}
+                      </button>
+                    `;
+                  }).join('')}
+                </div>
+
+                ${qbCurrentAction === 'INSERT' ? `
+                  <!-- Auto-link :last_insert_id for Foreign Key -->
+                  <div class="mt-2 bg-amber-50/80 border border-amber-200/90 rounded-lg p-2.5 flex items-center justify-between flex-wrap gap-2 text-xs">
+                    <div class="flex items-center space-x-1.5 text-amber-900 font-semibold flex-wrap">
+                      <i class="fa-solid fa-link text-amber-600"></i>
+                      <span>Auto-link parent ID:</span>
+                      <select onchange="setQbExtraForeignKey('${extra.id}', this.value)" class="bg-white border border-amber-300 rounded-lg px-2 py-0.5 text-xs font-mono font-bold text-amber-900">
+                        <option value="">(None - manual param)</option>
+                        ${extraFields.filter(f => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'updated_at').map(f => {
+                          const isBound = extra.colBindings && extra.colBindings[f.name] === ':last_insert_id';
+                          return `<option value="${f.name}" ${isBound ? 'selected' : ''}>\`${f.name}\` → :last_insert_id</option>`;
+                        }).join('')}
+                      </select>
+                    </div>
+                    <span class="text-[10px] text-amber-700">Captures ID from statement 1 automatically</span>
+                  </div>
+                ` : ''}
+              </div>
+            ` : ''}
+
+            <!-- WHERE Condition for UPDATE or DELETE -->
+            ${(qbCurrentAction === 'UPDATE' || qbCurrentAction === 'DELETE') ? `
+              <div class="flex items-center flex-wrap gap-2 bg-white/90 p-2 rounded-lg border border-teal-100 text-xs font-mono">
+                <span class="font-bold text-teal-700">WHERE</span>
+                <span class="text-slate-500 font-semibold">\`${extra.table}\`.</span>
+                <select onchange="onQbExtraTableChange('${extra.id}', 'whereCol', this.value)" class="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs">
+                  ${whereColOptions}
+                </select>
+                <span class="font-bold text-slate-600">=</span>
+                <input type="text" oninput="onQbExtraTableChange('${extra.id}', 'whereVal', this.value)" value="${qbEscapeAttr(extra.whereVal || `:${extra.whereCol || 'id'}`)}" placeholder=":${extra.whereCol || 'id'}" class="bg-slate-50 border border-slate-300 rounded px-2 py-1 text-xs flex-1 min-w-[120px]">
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+    }
+
     function applyQbPlainText(message = 'hello') {
       const nameEl = document.getElementById('epNameInput');
       const pathEl = document.getElementById('epPathInput');
@@ -1155,35 +1985,55 @@ let currentCollection = "users";
       if (qbFilterConditions.length > 0) {
         const parts = qbFilterConditions.map((c, i) => {
           const prefix = i === 0 ? '' : ` ${c.logic} `;
+          const colPrefix = qbJoins.length > 0 ? `\`${table}\`.` : '';
           if (c.op === 'IS NULL' || c.op === 'IS NOT NULL') {
-            return `${prefix}\`${c.col}\` ${c.op}`;
+            return `${prefix}${colPrefix}\`${c.col}\` ${c.op}`;
           } else if (c.op === 'LIKE') {
             const paramName = (c.val || `:${c.col}`).replace(/^:/, '');
             paramsObj[paramName] = "test";
-            return `${prefix}\`${c.col}\` LIKE '%' || :${paramName} || '%'`;
+            return `${prefix}${colPrefix}\`${c.col}\` LIKE '%' || :${paramName} || '%'`;
           } else {
             const val = c.val || `:${c.col}`;
             if (val.startsWith(':')) {
               const pName = val.replace(/^:/, '');
               paramsObj[pName] = pName === 'id' ? "1" : (pName.includes('limit') ? 10 : "active");
             }
-            return `${prefix}\`${c.col}\` ${c.op} ${val}`;
+            return `${prefix}${colPrefix}\`${c.col}\` ${c.op} ${val}`;
           }
         });
         whereClause = `\nWHERE ${parts.join('')}`;
       }
 
       if (qbCurrentAction === 'SELECT') {
+        const hasJoins = qbJoins.length > 0;
         let colsList = '*';
-        if (qbSelectedColumns.size > 0 && qbSelectedColumns.size < allFields.length) {
-          colsList = Array.from(qbSelectedColumns).map(c => `\`${c}\``).join(', ');
+
+        if (hasJoins) {
+          const mainCols = (qbSelectedColumns.size > 0 && qbSelectedColumns.size < allFields.length)
+            ? Array.from(qbSelectedColumns).map(c => `\`${table}\`.\`${c}\``).join(', ')
+            : `\`${table}\`.*`;
+
+          const joinCols = [];
+          qbJoins.forEach(j => {
+            j.selectedCols.forEach(c => {
+              joinCols.push(`\`${j.table}\`.\`${c}\` AS \`${j.table}_${c}\``);
+            });
+          });
+
+          colsList = [mainCols, ...joinCols].join(',\n  ');
+        } else {
+          if (qbSelectedColumns.size > 0 && qbSelectedColumns.size < allFields.length) {
+            colsList = Array.from(qbSelectedColumns).map(c => `\`${c}\``).join(', ');
+          }
         }
 
         const orderByCol = document.getElementById('qbOrderByCol')?.value;
         const orderDir = document.getElementById('qbOrderDir')?.value || 'DESC';
         let orderClause = '';
         if (orderByCol) {
-          orderClause = `\nORDER BY \`${orderByCol}\` ${orderDir}`;
+          orderClause = hasJoins
+            ? `\nORDER BY \`${table}\`.\`${orderByCol}\` ${orderDir}`
+            : `\nORDER BY \`${orderByCol}\` ${orderDir}`;
         }
 
         const limitVal = document.getElementById('qbLimitInput')?.value?.trim();
@@ -1198,9 +2048,17 @@ let currentCollection = "users";
           if (offsetVal.startsWith(':')) paramsObj[offsetVal.replace(/^:/, '')] = 0;
         }
 
-        sql = `SELECT ${colsList}\nFROM \`${table}\`${whereClause}${orderClause}${limitClause};`;
+        let joinClauses = '';
+        if (hasJoins) {
+          joinClauses = qbJoins.map(j => {
+            return `\n${j.type} \`${j.table}\` ON \`${table}\`.\`${j.mainCol}\` = \`${j.table}\`.\`${j.joinCol}\``;
+          }).join('');
+        }
+
+        sql = `SELECT\n  ${colsList}\nFROM \`${table}\`${joinClauses}${whereClause}${orderClause}${limitClause};`;
 
       } else if (qbCurrentAction === 'INSERT') {
+        const hasExtra = qbExtraTables.length > 0;
         const targetCols = qbSelectedColumns.size > 0 
           ? Array.from(qbSelectedColumns).filter(c => c !== 'id' && c !== 'created_at' && c !== 'updated_at')
           : allFields.map(f => f.name).filter(c => c !== 'id' && c !== 'created_at' && c !== 'updated_at');
@@ -1213,9 +2071,47 @@ let currentCollection = "users";
           paramsObj[c] = f?.type === 'number' ? 100 : (f?.type === 'bool' ? true : `sample_${c}`);
         });
 
-        sql = `INSERT INTO \`${table}\` (${colNames})\nVALUES (${valNames});`;
+        if (!hasExtra) {
+          sql = `INSERT INTO \`${table}\` (${colNames})\nVALUES (${valNames});`;
+        } else {
+          let stmts = [];
+          stmts.push(`-- ================================================================\n-- 📦 Multi-Table Atomic Transaction: INSERT\n-- All operations below run inside a single database transaction.\n-- ================================================================\n\n-- 1. Insert into primary table: \`${table}\`\nINSERT INTO \`${table}\` (${colNames})\nVALUES (${valNames});`);
+
+          qbExtraTables.forEach((extra, idx) => {
+            const extraFields = getTableFieldsList(extra.table);
+            const extraCols = extra.selectedCols.size > 0
+              ? Array.from(extra.selectedCols)
+              : extraFields.map(f => f.name).filter(c => c !== 'id' && c !== 'created_at' && c !== 'updated_at');
+
+            const eColNames = extraCols.map(c => `\`${c}\``).join(', ');
+            let usesLastId = false;
+            const eValNames = extraCols.map(c => {
+              const isForeignKeyToPrimary = 
+                c === `${table}_id` || 
+                c === `${table.replace(/s$/, '')}_id` || 
+                (table === 'orders' && c === 'order_id') ||
+                (table === 'users' && c === 'user_id');
+
+              if (isForeignKeyToPrimary) {
+                usesLastId = true;
+                return ':last_insert_id';
+              }
+
+              const pName = targetCols.includes(c) ? `${extra.table}_${c}` : c;
+              const f = extraFields.find(x => x.name === c);
+              paramsObj[pName] = f?.type === 'number' ? 150 : (f?.type === 'bool' ? true : `sample_${pName}`);
+              return `:${pName}`;
+            }).join(', ');
+
+            const note = usesLastId ? '\n-- `:last_insert_id` is automatically populated from the insert above.' : '';
+            stmts.push(`\n-- ${idx + 2}. Insert into secondary table: \`${extra.table}\`${note}\nINSERT INTO \`${extra.table}\` (${eColNames})\nVALUES (${eValNames});`);
+          });
+
+          sql = stmts.join('\n');
+        }
 
       } else if (qbCurrentAction === 'UPDATE') {
+        const hasExtra = qbExtraTables.length > 0;
         const targetCols = qbSelectedColumns.size > 0 
           ? Array.from(qbSelectedColumns).filter(c => c !== 'id' && c !== 'created_at' && c !== 'updated_at')
           : allFields.map(f => f.name).filter(c => c !== 'id' && c !== 'created_at' && c !== 'updated_at');
@@ -1230,20 +2126,80 @@ let currentCollection = "users";
         const effectiveWhere = whereClause ? whereClause : '\nWHERE `id` = :id';
         if (!whereClause) paramsObj['id'] = "1";
 
-        sql = `UPDATE \`${table}\`\nSET ${setClauses}${effectiveWhere};`;
+        if (!hasExtra) {
+          sql = `UPDATE \`${table}\`\nSET ${setClauses}${effectiveWhere};`;
+        } else {
+          let stmts = [];
+          stmts.push(`-- ================================================================\n-- ✏️ Multi-Table Atomic Transaction: UPDATE\n-- ================================================================\n\n-- 1. Update primary table: \`${table}\`\nUPDATE \`${table}\`\nSET ${setClauses}${effectiveWhere};`);
+
+          qbExtraTables.forEach((extra, idx) => {
+            const extraFields = getTableFieldsList(extra.table);
+            const extraCols = extra.selectedCols.size > 0
+              ? Array.from(extra.selectedCols)
+              : extraFields.map(f => f.name).filter(c => c !== 'id' && c !== 'created_at' && c !== 'updated_at');
+
+            const eSetClauses = extraCols.map(c => {
+              const pName = targetCols.includes(c) ? `${extra.table}_${c}` : c;
+              const f = extraFields.find(x => x.name === c);
+              paramsObj[pName] = f?.type === 'number' ? 250 : (f?.type === 'bool' ? false : `updated_${pName}`);
+              return `\`${c}\` = :${pName}`;
+            }).join(', ');
+
+            const wCol = extra.whereCol || 'id';
+            const wVal = extra.whereVal || `:${wCol}`;
+            if (wVal.startsWith(':')) {
+              const pName = wVal.replace(/^:/, '');
+              paramsObj[pName] = "1";
+            }
+
+            stmts.push(`\n-- ${idx + 2}. Update secondary table: \`${extra.table}\`\nUPDATE \`${extra.table}\`\nSET ${eSetClauses}\nWHERE \`${wCol}\` = ${wVal};`);
+          });
+
+          sql = stmts.join('\n');
+        }
 
       } else if (qbCurrentAction === 'DELETE') {
+        const hasExtra = qbExtraTables.length > 0;
         const effectiveWhere = whereClause ? whereClause : '\nWHERE `id` = :id';
         if (!whereClause) paramsObj['id'] = "1";
 
-        sql = `DELETE FROM \`${table}\`${effectiveWhere};`;
+        if (!hasExtra) {
+          sql = `DELETE FROM \`${table}\`${effectiveWhere};`;
+        } else {
+          let stmts = [];
+          stmts.push(`-- ================================================================\n-- 🗑️ Multi-Table Atomic Transaction: DELETE\n-- Dependent child records are deleted before primary records.\n-- ================================================================`);
+
+          qbExtraTables.forEach((extra, idx) => {
+            const wCol = extra.whereCol || 'id';
+            const wVal = extra.whereVal || `:${wCol}`;
+            if (wVal.startsWith(':')) {
+              const pName = wVal.replace(/^:/, '');
+              paramsObj[pName] = "1";
+            }
+            stmts.push(`\n-- ${idx + 1}. Delete dependent records from: \`${extra.table}\`\nDELETE FROM \`${extra.table}\`\nWHERE \`${wCol}\` = ${wVal};`);
+          });
+
+          stmts.push(`\n-- ${qbExtraTables.length + 1}. Delete primary record from: \`${table}\`\nDELETE FROM \`${table}\`${effectiveWhere};`);
+
+          sql = stmts.join('\n');
+        }
 
       } else if (qbCurrentAction === 'COUNT') {
-        sql = `SELECT COUNT(*) AS total_count\nFROM \`${table}\`${whereClause} LIMIT 1;`;
+        const hasJoins = qbJoins.length > 0;
+        let joinClauses = '';
+        if (hasJoins) {
+          joinClauses = qbJoins.map(j => {
+            return `\n${j.type} \`${j.table}\` ON \`${table}\`.\`${j.mainCol}\` = \`${j.table}\`.\`${j.joinCol}\``;
+          }).join('');
+        }
+        sql = `SELECT COUNT(*) AS total_count\nFROM \`${table}\`${joinClauses}${whereClause} LIMIT 1;`;
       }
 
       const sqlEl = document.getElementById('epSqlInput');
-      if (sqlEl) sqlEl.value = sql;
+      if (sqlEl) {
+        sqlEl.value = sql;
+        autoDetectTransactionCheckbox();
+      }
 
       const paramsEl = document.getElementById('epTestParamsInput');
       if (paramsEl && Object.keys(paramsObj).length > 0) {
@@ -1264,6 +2220,38 @@ let currentCollection = "users";
       if (!sqlEl) return;
 
       switch (kind) {
+        case 'own_create':
+          const targetCol = currentCollection || 'banks';
+          if (nameEl && !nameEl.value) nameEl.value = `My Own ${targetCol} Records`;
+          if (pathEl && !pathEl.value) pathEl.value = `${targetCol}/my-records`;
+          if (methodEl) methodEl.value = 'GET';
+          if (txEl) txEl.checked = false;
+          const authRuleInput = document.getElementById('epAuthRuleInput');
+          if (authRuleInput) {
+            authRuleInput.value = "@request.auth.id != ''";
+            updateRoleDropdownUI('epAuthRuleInput');
+          }
+          sqlEl.value = `-- ================================================================\n-- 👤 Own Create / Record Ownership Filter\n-- Only returns records created by the currently logged-in user.\n-- Evaluates @request.auth.id from the caller's JWT token.\n-- ================================================================\nSELECT *\nFROM \`${targetCol}\`\nWHERE \`created_by\` = @request.auth.id\nORDER BY \`id\` DESC;`;
+          if (paramsEl) paramsEl.value = '{}';
+          break;
+
+        case 'parent_child_last_id':
+          if (nameEl && !nameEl.value) nameEl.value = 'Create Order with Items (Auto :last_insert_id)';
+          if (pathEl && !pathEl.value) pathEl.value = 'orders/create-with-items';
+          if (methodEl) methodEl.value = 'POST';
+          if (txEl) txEl.checked = true;
+          sqlEl.value = `-- ================================================================\n-- 🔗 Parent + Child Transaction with Auto :last_insert_id\n-- 1. Insert parent record (Order)\n-- 2. Insert child record (Order Items) using the auto-generated\n--    :last_insert_id from statement 1 above.\n-- All operations run inside an atomic database transaction.\n-- ================================================================\n\n-- 1. Insert into Header / Parent Table (orders)\nINSERT INTO \`orders\` (\`customer_name\`, \`total_amount\`, \`status\`)\nVALUES (:customer_name, :total_amount, 'completed');\n\n-- 2. Insert into Detail / Child Table (order_items) using :last_insert_id\nINSERT INTO \`order_items\` (\`order_id\`, \`product_name\`, \`quantity\`, \`price\`)\nVALUES (:last_insert_id, :product_name, :quantity, :price);`;
+          if (paramsEl) {
+            paramsEl.value = JSON.stringify({
+              customer_name: "Sarah Connor",
+              total_amount: 199.99,
+              product_name: "Cyberdyne Model 101 Manual",
+              quantity: 1,
+              price: 199.99
+            }, null, 2);
+          }
+          break;
+
         case 'simple_text':
           if (nameEl && !nameEl.value) nameEl.value = 'Hello World Direct Text';
           if (pathEl && !pathEl.value) pathEl.value = 'hello';
@@ -1281,10 +2269,9 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'pos/checkout';
           if (methodEl) methodEl.value = 'POST';
           if (txEl) txEl.checked = true;
-          sqlEl.value = `-- ================================================================\n-- 🛒 POS / Cashier Checkout (Multi-Table Atomic Transaction)\n-- All queries below run inside a single database transaction.\n-- If any error occurs or stock is insufficient, all changes are ROLLED BACK.\n-- ================================================================\n\n-- 1. Insert into Header Table (orders / sales)\nINSERT INTO \`orders\` (\`id\`, \`customer_name\`, \`total_amount\`, \`payment_method\`, \`cashier_id\`, \`status\`)\nVALUES (:order_id, :customer_name, :total_amount, :payment_method, :cashier_id, 'completed');\n\n-- 2. Insert into Detail Table (order_items / sale_details)\nINSERT INTO \`order_items\` (\`order_id\`, \`product_id\`, \`product_name\`, \`quantity\`, \`price\`, \`subtotal\`)\nVALUES (:order_id, :product_id, :product_name, :quantity, :price, :subtotal);\n\n-- 3. Deduct product inventory stock in Products Table\nUPDATE \`products\`\nSET \`stock\` = \`stock\` - :quantity\nWHERE \`id\` = :product_id AND \`stock\` >= :quantity;`;
+          sqlEl.value = `-- ================================================================\n-- 🛒 POS / Cashier Checkout (Multi-Table Atomic Transaction)\n-- All queries below run inside a single database transaction.\n-- If any error occurs or stock is insufficient, all changes are ROLLED BACK.\n-- ================================================================\n\n-- 1. Insert into Header Table (orders / sales)\nINSERT INTO \`orders\` (\`customer_name\`, \`total_amount\`, \`payment_method\`, \`cashier_id\`, \`status\`)\nVALUES (:customer_name, :total_amount, :payment_method, :cashier_id, 'completed');\n\n-- 2. Insert into Detail Table (order_items) using auto :last_insert_id\nINSERT INTO \`order_items\` (\`order_id\`, \`product_id\`, \`product_name\`, \`quantity\`, \`price\`, \`subtotal\`)\nVALUES (:last_insert_id, :product_id, :product_name, :quantity, :price, :subtotal);\n\n-- 3. Deduct product inventory stock in Products Table\nUPDATE \`products\`\nSET \`stock\` = \`stock\` - :quantity\nWHERE \`id\` = :product_id AND \`stock\` >= :quantity;`;
           if (paramsEl) {
             paramsEl.value = JSON.stringify({
-              order_id: `ORD-${Date.now().toString().slice(-6)}`,
               customer_name: "Walk-in Customer",
               total_amount: 150.00,
               payment_method: "cash",
@@ -1311,7 +2298,7 @@ let currentCollection = "users";
               amount: 250.00,
               notes: "Service Subscription Payment",
               user_id: "usr_admin",
-              details: "Created via Custom SQL API"
+              details: "Created via Custom API"
             }, null, 2);
           }
           break;
@@ -1321,7 +2308,7 @@ let currentCollection = "users";
           if (pathEl && !pathEl.value) pathEl.value = 'dashboard/summary';
           if (methodEl) methodEl.value = 'GET';
           if (txEl) txEl.checked = false;
-          sqlEl.value = `-- ================================================================\n-- 📊 Dashboard Metrics: Total Records, Status Counts & Revenue\n-- Gunakan LIMIT 1 jika ingin menghasilkan single JSON object { ... } langsung.\n-- ================================================================\nSELECT\n  COUNT(*) AS \`total_records\`,\n  COUNT(CASE WHEN \`status\` = 'active' OR \`status\` = 'completed' THEN 1 END) AS \`active_count\`,\n  COUNT(CASE WHEN \`status\` = 'pending' THEN 1 END) AS \`pending_count\`,\n  COALESCE(SUM(\`total_amount\`), 0) AS \`total_revenue\`,\n  COALESCE(AVG(\`total_amount\`), 0) AS \`average_amount\`,\n  MAX(\`created_at\`) AS \`latest_activity\`\nFROM \`${table}\` LIMIT 1;`;
+          sqlEl.value = `-- ================================================================\n-- 📊 Dashboard Metrics: Total Records, Status Counts & Revenue\n-- Use LIMIT 1 to produce a direct single JSON object { ... }.\n-- ================================================================\nSELECT\n  COUNT(*) AS \`total_records\`,\n  COUNT(CASE WHEN \`status\` = 'active' OR \`status\` = 'completed' THEN 1 END) AS \`active_count\`,\n  COUNT(CASE WHEN \`status\` = 'pending' THEN 1 END) AS \`pending_count\`,\n  COALESCE(SUM(\`total_amount\`), 0) AS \`total_revenue\`,\n  COALESCE(AVG(\`total_amount\`), 0) AS \`average_amount\`,\n  MAX(\`created_at\`) AS \`latest_activity\`\nFROM \`${table}\` LIMIT 1;`;
           if (paramsEl) paramsEl.value = '{}';
           break;
 
@@ -1399,6 +2386,7 @@ let currentCollection = "users";
       }
 
       updateCustomEpUrlPreview();
+      autoDetectTransactionCheckbox();
       showToast('SQL Template applied.');
     }
 
@@ -1414,6 +2402,16 @@ let currentCollection = "users";
     async function saveCustomEndpointForm(silent) {
       const alertEl = document.getElementById('customEpAlert');
       if (alertEl) alertEl.classList.add('hidden');
+
+      // Auto-save new custom prefix if user entered one
+      const prefixSelect = document.getElementById('epPrefixSelect');
+      const customPrefixInput = document.getElementById('epCustomPrefixInput');
+      if (prefixSelect && (prefixSelect.value === 'custom' || prefixSelect.value === '__custom__')) {
+        const rawCustom = (customPrefixInput?.value || '').trim();
+        if (rawCustom) {
+          saveCustomPrefix(rawCustom);
+        }
+      }
 
       const name = document.getElementById('epNameInput').value.trim();
       const method = document.getElementById('epMethodInput').value;
@@ -1461,6 +2459,9 @@ let currentCollection = "users";
         }
         const saved = data.item || data;
         currentCustomEpId = saved.id;
+        const currentPfx = getSelectedPrefix();
+        const currentSlug = (document.getElementById('epPathInput')?.value || '').trim().replace(/^\/+/, '');
+        saveEndpointPathMeta(saved.id, currentPfx, currentSlug);
         if (!silent) {
           showToast(`Endpoint "${resolveEndpointFullPath(saved.path)}" saved!`);
         }
@@ -1477,9 +2478,10 @@ let currentCollection = "users";
 
     async function deleteCurrentCustomEndpoint() {
       if (!currentCustomEpId) return;
-      if (!confirm('Delete this custom SQL endpoint?')) return;
+      if (!confirm('Delete this custom API endpoint?')) return;
       const res = await fetch(`/api/endpoints/${currentCustomEpId}`, { method: 'DELETE' });
       if (res.ok) {
+        deleteEndpointPathMeta(currentCustomEpId);
         currentCustomEpId = null;
         showToast('Custom endpoint deleted');
         await loadCustomEndpoints();
@@ -1573,26 +2575,58 @@ let currentCollection = "users";
     }
 
     function switchSettingsTab(tab) {
-      const tabs = ['quickmatrix', 'app', 'roles', 'backups', 'export', 'import', 'admins'];
+      const tabs = ['quickmatrix', 'app', 'roles', 'admins', 'backups'];
       tabs.forEach(t => {
         const pane = document.getElementById(`settingsPane_${t}`);
         if (pane) pane.classList.toggle('hidden', t !== tab);
+
+        const card = document.getElementById(`setTabContainer_${t}`);
+        const icon = document.getElementById(`setTabIcon_${t}`);
+        const sub = document.getElementById(`setTabSub_${t}`);
+        const badge = document.getElementById(`setTabBadge_${t}`);
+        const isSelected = t === tab;
+
+        if (card) {
+          card.className = isSelected
+            ? "group relative flex items-center rounded-2xl transition border bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold"
+            : "group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold";
+        }
+        if (icon) {
+          icon.className = isSelected
+            ? "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-white/20 text-white"
+            : "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700";
+        }
+        if (sub) {
+          sub.className = isSelected ? "text-[10px] text-emerald-100" : "text-[10px] text-slate-400";
+        }
+        if (badge) {
+          badge.className = isSelected
+            ? "px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-white/20 text-white"
+            : "px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700";
+        }
+
         const btn = document.getElementById(`setTab_${t}`);
         if (btn) {
-          if (t === tab) {
-            btn.className = "w-full text-left px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-2.5 transition shrink-0";
-          } else {
-            btn.className = "w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0";
-          }
+          btn.className = isSelected
+            ? "w-full text-left px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-2.5 transition shrink-0"
+            : "w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0";
         }
       });
       if (tab === 'quickmatrix') renderQuickMatrixTable();
       if (tab === 'roles') renderRolesSettings();
       if (tab === 'backups') loadBackups();
       if (tab === 'admins') loadAdminAccounts();
-      if (tab === 'export') {
-        document.getElementById('exportCollectionsPre').textContent = JSON.stringify(collections, null, 2);
-      }
+    }
+
+    function filterSettingsTabs() {
+      const q = (document.getElementById('settingsSearchInput')?.value || '').toLowerCase().trim();
+      const tabs = ['quickmatrix', 'app', 'roles', 'admins', 'backups'];
+      tabs.forEach(t => {
+        const c = document.getElementById(`setTabContainer_${t}`);
+        if (!c) return;
+        const text = c.textContent.toLowerCase();
+        c.classList.toggle('hidden', q !== '' && !text.includes(q));
+      });
     }
 
     // ================= COLLECTIONS MANAGEMENT & 1-CLICK QUICK TOGGLES =================
@@ -1649,15 +2683,6 @@ let currentCollection = "users";
       }
     }
 
-    function describeAccessSummary(col) {
-      if (!col) return 'Read: Public · Write: Auth Required';
-      const isListPub = !col.listRule || col.listRule === 'public';
-      const isCreatePub = col.createRule === 'public';
-      const readLabel = isListPub ? 'Public' : 'Restricted';
-      const writeLabel = isCreatePub ? 'Public' : 'Auth Required';
-      return `Read: ${readLabel} · Write: ${writeLabel}`;
-    }
-
     function renderCollectionsList() {
       const container = document.getElementById('collectionsList');
       const kw = (document.getElementById('collectionSearchInput')?.value || '').toLowerCase();
@@ -1670,10 +2695,10 @@ let currentCollection = "users";
         const isRel = c.autoLoadRelations === true || c.auto_load_relations === true;
         const fieldCount = (c.schema || []).length;
         return `
-          <div class="group relative flex items-center rounded-xl transition border ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold'}">
+          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold'}">
             <button onclick="selectCollection('${c.name}')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
               <div class="flex items-center space-x-2.5 truncate">
-                <span class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">
+                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">
                   <i class="fa-solid ${icon} text-[11px]"></i>
                 </span>
                 <div class="text-left truncate">
@@ -1684,11 +2709,11 @@ let currentCollection = "users";
               <div class="flex items-center space-x-1 shrink-0 ml-1">
                 ${isRel ? `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-700'}" title="Auto Relations Active"><i class="fa-solid fa-link"></i></span>` : ''}
                 ${isRealtime
-                  ? `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/20 text-amber-200' : 'bg-emerald-50 text-emerald-700'}" title="Realtime SSE Active"><i class="fa-solid fa-bolt"></i></span>`
+                  ? `<span class="px-2 py-1 rounded-lg text-[10px] font-mono ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}" title="Realtime SSE Active"><i class="fa-solid fa-bolt"></i></span>`
                   : `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/10 text-emerald-200' : 'bg-slate-100 text-slate-400'}" title="Realtime Inactive">off</span>`}
               </div>
             </button>
-            <button onclick="selectCollection('${c.name}'); switchWorkspaceSubView('settings');" class="p-2 mr-1 rounded-lg ${isActive ? 'text-emerald-100 hover:bg-white/15 hover:text-white' : 'text-slate-400 hover:bg-emerald-100 hover:text-emerald-800'} transition" title="Settings for table ${c.name}">
+            <button onclick="selectCollection('${c.name}'); switchWorkspaceSubView('settings');" class="p-2 mr-1 rounded-lg ${isActive ? 'text-white/80 hover:text-white' : 'text-slate-400 hover:bg-emerald-100 hover:text-emerald-800'} transition" title="Settings for table ${c.name}">
               <i class="fa-solid fa-gear text-[11px]"></i>
             </button>
           </div>
@@ -1774,11 +2799,6 @@ let currentCollection = "users";
           blameBadge.className = 'text-[11px] px-2.5 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 border border-slate-300 font-bold inline-flex items-center space-x-1.5 transition cursor-pointer shadow-2xs';
           blameBadge.innerHTML = '<i class="fa-solid fa-user-slash text-[10px]"></i><span>Blameable: <strong>OFF</strong></span>';
         }
-      }
-
-      const ruleText = document.getElementById('collectionRuleSummaryText');
-      if (ruleText) {
-        ruleText.textContent = describeAccessSummary(col);
       }
     }
 
@@ -1935,22 +2955,22 @@ let currentCollection = "users";
       let fields = [];
       if (type === 'auth') {
         fields = [
-          { name: 'id', type: 'text', sql: 'VARCHAR(255) PK', desc: 'Primary Key unik record user (Auto-generated)', icon: 'fa-solid fa-fingerprint', isBlameable: false },
-          { name: 'email', type: 'email', sql: 'VARCHAR(255) UNIQUE', desc: 'Email kredensial login (Wajib unik & NOT NULL)', icon: 'fa-solid fa-envelope', isBlameable: false },
-          { name: 'password', type: 'password', sql: 'VARCHAR(255) / TEXT', desc: 'Hash password terenkripsi bcrypt', icon: 'fa-solid fa-key', isBlameable: false },
-          { name: 'name', type: 'text', sql: 'VARCHAR(255)', desc: 'Nama lengkap tampilan pengguna', icon: 'fa-solid fa-id-card', isBlameable: false },
-          { name: 'username', type: 'text', sql: 'VARCHAR(50)', desc: 'Handle unik / username login pengguna', icon: 'fa-solid fa-at', isBlameable: false },
-          { name: 'role', type: 'text', sql: 'VARCHAR(50)', desc: 'Role otorisasi akses (default: "user")', icon: 'fa-solid fa-shield-halved', isBlameable: false },
-          { name: 'status', type: 'text', sql: 'VARCHAR(20)', desc: 'Status akun pengguna (default: "active")', icon: 'fa-solid fa-circle-check', isBlameable: false },
-          { name: 'verified', type: 'bool', sql: 'INTEGER', desc: 'Status verifikasi email user (0 / 1)', icon: 'fa-solid fa-badge-check', isBlameable: false },
-          { name: 'tokenKey', type: 'text', sql: 'VARCHAR(255)', desc: 'Kunci enkripsi token sesi & auth', icon: 'fa-solid fa-lock', isBlameable: false },
-          { name: 'created_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Timestamp saat akun pertama dibuat', icon: 'fa-solid fa-calendar-plus', isBlameable: false },
-          { name: 'updated_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Timestamp saat profil akun diubah', icon: 'fa-solid fa-clock-rotate-left', isBlameable: false },
+          { name: 'id', type: 'text', sql: 'VARCHAR(255) PK', desc: 'User record unique Primary Key (Auto-generated)', icon: 'fa-solid fa-fingerprint', isBlameable: false },
+          { name: 'email', type: 'email', sql: 'VARCHAR(255) UNIQUE', desc: 'Login credential email (Required & Unique)', icon: 'fa-solid fa-envelope', isBlameable: false },
+          { name: 'password', type: 'password', sql: 'VARCHAR(255) / TEXT', desc: 'Bcrypt-hashed encrypted password', icon: 'fa-solid fa-key', isBlameable: false },
+          { name: 'name', type: 'text', sql: 'VARCHAR(255)', desc: 'User display full name', icon: 'fa-solid fa-id-card', isBlameable: false },
+          { name: 'username', type: 'text', sql: 'VARCHAR(50)', desc: 'Unique handle / user login username', icon: 'fa-solid fa-at', isBlameable: false },
+          { name: 'role', type: 'text', sql: 'VARCHAR(50)', desc: 'Access authorization role (default: "user")', icon: 'fa-solid fa-shield-halved', isBlameable: false },
+          { name: 'status', type: 'text', sql: 'VARCHAR(20)', desc: 'User account status (default: "active")', icon: 'fa-solid fa-circle-check', isBlameable: false },
+          { name: 'verified', type: 'bool', sql: 'INTEGER', desc: 'User email verification status (0 / 1)', icon: 'fa-solid fa-badge-check', isBlameable: false },
+          { name: 'tokenKey', type: 'text', sql: 'VARCHAR(255)', desc: 'Session & auth token encryption key', icon: 'fa-solid fa-lock', isBlameable: false },
+          { name: 'created_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Timestamp when the account was first created', icon: 'fa-solid fa-calendar-plus', isBlameable: false },
+          { name: 'updated_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Timestamp when the account profile was modified', icon: 'fa-solid fa-clock-rotate-left', isBlameable: false },
           { 
             name: 'created_by', 
             type: 'text', 
             sql: 'VARCHAR(255)', 
-            desc: isBlameable ? 'ID admin/user pembuat akun (Blameable aktif)' : 'ID admin/user pembuat akun (Nonaktif — klik badge untuk aktifkan di Table Options)', 
+            desc: isBlameable ? 'Creator user/admin ID (Blameable active)' : 'Creator user/admin ID (Disabled — click badge to enable in Table Options)', 
             icon: 'fa-solid fa-user-check', 
             isBlameable: true 
           },
@@ -1958,7 +2978,7 @@ let currentCollection = "users";
             name: 'updated_by', 
             type: 'text', 
             sql: 'VARCHAR(255)', 
-            desc: isBlameable ? 'ID admin/user pengubah akun (Blameable aktif)' : 'ID admin/user pengubah akun (Nonaktif — klik badge untuk aktifkan di Table Options)', 
+            desc: isBlameable ? 'Editor user/admin ID (Blameable active)' : 'Editor user/admin ID (Disabled — click badge to enable in Table Options)', 
             icon: 'fa-solid fa-user-pen', 
             isBlameable: true 
           }
@@ -1966,14 +2986,14 @@ let currentCollection = "users";
       } else {
         // Base Table
         fields = [
-          { name: 'id', type: 'text', sql: 'VARCHAR(255) PK', desc: 'Primary Key unik record (Auto-generated)', icon: 'fa-solid fa-fingerprint', isBlameable: false },
-          { name: 'created_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Unix timestamp otomatis saat record di-insert', icon: 'fa-solid fa-calendar-plus', isBlameable: false },
-          { name: 'updated_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Unix timestamp otomatis saat record di-update', icon: 'fa-solid fa-clock-rotate-left', isBlameable: false },
+          { name: 'id', type: 'text', sql: 'VARCHAR(255) PK', desc: 'Unique record Primary Key (Auto-generated)', icon: 'fa-solid fa-fingerprint', isBlameable: false },
+          { name: 'created_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Auto Unix timestamp when record was inserted', icon: 'fa-solid fa-calendar-plus', isBlameable: false },
+          { name: 'updated_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Auto Unix timestamp when record was updated', icon: 'fa-solid fa-clock-rotate-left', isBlameable: false },
           { 
             name: 'created_by', 
             type: 'text', 
             sql: 'VARCHAR(255)', 
-            desc: isBlameable ? 'ID user pembuat record (Blameable aktif, dilewati jika unauthenticated)' : 'ID user pembuat record (Nonaktif — klik badge untuk aktifkan di Table Options)', 
+            desc: isBlameable ? 'Record creator user ID (Blameable active, skipped if unauthenticated)' : 'Record creator user ID (Disabled — click badge to enable in Table Options)', 
             icon: 'fa-solid fa-user-check', 
             isBlameable: true 
           },
@@ -1981,7 +3001,7 @@ let currentCollection = "users";
             name: 'updated_by', 
             type: 'text', 
             sql: 'VARCHAR(255)', 
-            desc: isBlameable ? 'ID user pengubah record (Blameable aktif, dilewati jika unauthenticated)' : 'ID user pengubah record (Nonaktif — klik badge untuk aktifkan di Table Options)', 
+            desc: isBlameable ? 'Record editor user ID (Blameable active, skipped if unauthenticated)' : 'Record editor user ID (Disabled — click badge to enable in Table Options)', 
             icon: 'fa-solid fa-user-pen', 
             isBlameable: true 
           }
@@ -1995,12 +3015,12 @@ let currentCollection = "users";
         let badgeHtml = '';
         if (f.isBlameable) {
           if (isBlameable) {
-            badgeHtml = `<span class="inline-flex items-center text-[10px] text-emerald-700 font-semibold px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 shrink-0 ml-1.5" title="Blameable behaviour aktif"><i class="fa-solid fa-circle-check text-[9px] mr-1 text-emerald-600"></i>Blameable: ON</span>`;
+            badgeHtml = `<span class="inline-flex items-center text-[10px] text-emerald-700 font-semibold px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 shrink-0 ml-1.5" title="Blameable behaviour active"><i class="fa-solid fa-circle-check text-[9px] mr-1 text-emerald-600"></i>Blameable: ON</span>`;
           } else {
-            badgeHtml = `<button type="button" onclick="switchColSettingsTab('options')" class="inline-flex items-center text-[10px] text-slate-500 hover:text-indigo-700 font-semibold px-2 py-0.5 rounded-full bg-slate-100 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 shrink-0 ml-1.5 transition cursor-pointer" title="Klik untuk mengaktifkan di tab Table Options"><i class="fa-solid fa-toggle-off text-[9px] mr-1 text-slate-400"></i>Blameable: OFF</button>`;
+            badgeHtml = `<button type="button" onclick="switchColSettingsTab('options')" class="inline-flex items-center text-[10px] text-slate-500 hover:text-indigo-700 font-semibold px-2 py-0.5 rounded-full bg-slate-100 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-200 shrink-0 ml-1.5 transition cursor-pointer" title="Click to enable in Table Options tab"><i class="fa-solid fa-toggle-off text-[9px] mr-1 text-slate-400"></i>Blameable: OFF</button>`;
           }
         } else {
-          badgeHtml = `<span class="inline-flex items-center text-[10px] text-emerald-700 font-semibold px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 shrink-0 ml-1.5" title="Field default ini dikelola otomatis oleh PadiBase"><i class="fa-solid fa-lock text-[8px] mr-1 text-emerald-600"></i>Default</span>`;
+          badgeHtml = `<span class="inline-flex items-center text-[10px] text-emerald-700 font-semibold px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 shrink-0 ml-1.5" title="This default field is automatically managed by PadiBase"><i class="fa-solid fa-lock text-[8px] mr-1 text-emerald-600"></i>Default</span>`;
         }
 
         return `
@@ -2043,7 +3063,7 @@ let currentCollection = "users";
       renderSchemaDataTypeButtons();
 
       if (customItems.length === 0) {
-        colContainer.innerHTML = `<div class="py-6 text-center text-xs text-slate-400 border border-dashed border-slate-300 rounded-2xl">Belum ada kolom kustom tambahan. Gunakan tombol Add Column di bawah untuk menambahkan kolom data aplikasi Anda.</div>`;
+        colContainer.innerHTML = `<div class="py-6 text-center text-xs text-slate-400 border border-dashed border-slate-300 rounded-2xl">No custom columns added yet. Use the Add Column buttons below to add application data columns.</div>`;
         return;
       }
 
@@ -2293,14 +3313,14 @@ let currentCollection = "users";
           bNotice.innerHTML = `
             <div class="p-2.5 rounded-lg bg-slate-200/60 border border-slate-300/80 text-slate-600 text-xs flex items-center space-x-2">
               <i class="fa-solid fa-toggle-off text-slate-400"></i>
-              <span>Blameable nonaktif. Field <code class="font-mono text-slate-700">created_by</code> dan <code class="font-mono text-slate-700">updated_by</code> tidak otomatis diisi.</span>
+              <span>Blameable disabled. <code class="font-mono text-slate-700">created_by</code> and <code class="font-mono text-slate-700">updated_by</code> fields are not automatically populated.</span>
             </div>
           `;
         } else if (hasCreatedBy && hasUpdatedBy) {
           bNotice.innerHTML = `
             <div class="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 text-xs flex items-center space-x-2">
               <i class="fa-solid fa-circle-check text-emerald-600"></i>
-              <span>Field <code class="font-mono font-bold bg-emerald-100/80 px-1 rounded">created_by</code> &amp; <code class="font-mono font-bold bg-emerald-100/80 px-1 rounded">updated_by</code> terdeteksi dan aktif.</span>
+              <span>Fields <code class="font-mono font-bold bg-emerald-100/80 px-1 rounded">created_by</code> &amp; <code class="font-mono font-bold bg-emerald-100/80 px-1 rounded">updated_by</code> detected and active.</span>
             </div>
           `;
         } else {
@@ -2312,13 +3332,13 @@ let currentCollection = "users";
               <div class="flex items-start space-x-2">
                 <i class="fa-solid fa-triangle-exclamation text-amber-500 mt-0.5 shrink-0"></i>
                 <div>
-                  <span class="font-bold">Notifikasi:</span> Field <code class="font-mono font-bold bg-amber-100/80 px-1 rounded">${missing.join(' & ')}</code> belum ada di skema tabel ini.
-                  <p class="text-[11px] text-amber-800 mt-0.5">PadiBase akan otomatis membuatkannya saat Anda menyimpan pengaturan ini.</p>
+                  <span class="font-bold">Notice:</span> Field <code class="font-mono font-bold bg-amber-100/80 px-1 rounded">${missing.join(' & ')}</code> is not yet present in this table schema.
+                  <p class="text-[11px] text-amber-800 mt-0.5">PadiBase will automatically create them when you save these settings.</p>
                 </div>
               </div>
               <button type="button" onclick="autoAddBlameableToSchema()" class="px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold transition flex items-center space-x-1 shrink-0">
                 <i class="fa-solid fa-plus text-[10px]"></i>
-                <span>Tambahkan ke Kolom Skema</span>
+                <span>Add to Table Schema</span>
               </button>
             </div>
           `;
@@ -2331,7 +3351,7 @@ let currentCollection = "users";
           tNotice.innerHTML = `
             <div class="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-800 text-xs flex items-center space-x-2">
               <i class="fa-solid fa-circle-check text-emerald-600"></i>
-              <span>Field timestamp <code class="font-mono font-bold bg-emerald-100/80 px-1 rounded">created_at</code> &amp; <code class="font-mono font-bold bg-emerald-100/80 px-1 rounded">updated_at</code> terdeteksi dan aktif.</span>
+              <span>Timestamp fields <code class="font-mono font-bold bg-emerald-100/80 px-1 rounded">created_at</code> &amp; <code class="font-mono font-bold bg-emerald-100/80 px-1 rounded">updated_at</code> detected and active.</span>
             </div>
           `;
         } else {
@@ -2343,13 +3363,13 @@ let currentCollection = "users";
               <div class="flex items-start space-x-2">
                 <i class="fa-solid fa-clock text-sky-600 mt-0.5 shrink-0"></i>
                 <div>
-                  <span class="font-bold">Notifikasi:</span> Field <code class="font-mono font-bold bg-sky-100/80 px-1 rounded">${missingT.join(' & ')}</code> belum ada di tabel ini.
-                  <p class="text-[11px] text-sky-800 mt-0.5">PadiBase otomatis mengisi waktu ini jika field tersedia di tabel.</p>
+                  <span class="font-bold">Notice:</span> Field <code class="font-mono font-bold bg-sky-100/80 px-1 rounded">${missingT.join(' & ')}</code> is not yet in this table.
+                  <p class="text-[11px] text-sky-800 mt-0.5">PadiBase automatically populates timestamps if these fields exist in the table.</p>
                 </div>
               </div>
               <button type="button" onclick="autoAddTimestampsToSchema()" class="px-2.5 py-1 rounded-md bg-sky-600 hover:bg-sky-700 text-white text-[11px] font-bold transition flex items-center space-x-1 shrink-0">
                 <i class="fa-solid fa-plus text-[10px]"></i>
-                <span>Tambahkan ke Kolom Skema</span>
+                <span>Add to Table Schema</span>
               </button>
             </div>
           `;
@@ -2369,7 +3389,7 @@ let currentCollection = "users";
       }
       renderInlineSchemaFields();
       updateOptionsFieldNotices();
-      showToast(`Berhasil menambahkan ${added} kolom blameable ke skema tabel.`);
+      showToast(`Successfully added ${added} blameable column(s) to table schema.`);
     }
 
     function autoAddTimestampsToSchema() {
@@ -2384,7 +3404,7 @@ let currentCollection = "users";
       }
       renderInlineSchemaFields();
       updateOptionsFieldNotices();
-      showToast(`Berhasil menambahkan ${added} kolom timestamp (created_at & updated_at) ke skema tabel.`);
+      showToast(`Successfully added ${added} timestamp column(s) (created_at & updated_at) to table schema.`);
     }
 
     function onInlineBlameableToggleChange(checked) {
@@ -2394,12 +3414,12 @@ let currentCollection = "users";
         const hasCreatedBy = inlineSchemaFields.some(f => f.name && f.name.toLowerCase() === 'created_by');
         const hasUpdatedBy = inlineSchemaFields.some(f => f.name && f.name.toLowerCase() === 'updated_by');
         if (!hasCreatedBy || !hasUpdatedBy) {
-          showToast('Blameable diaktifkan. Kolom created_by & updated_by akan dipastikan dibuat saat disimpan.', 'info');
+          showToast('Blameable enabled. created_by & updated_by columns will be ensured upon saving.', 'info');
         } else {
-          showToast('Blameable aktif.', 'success');
+          showToast('Blameable active.', 'success');
         }
       } else {
-        showToast('Blameable dinonaktifkan.', 'info');
+        showToast('Blameable disabled.', 'info');
       }
     }
 
@@ -2627,7 +3647,7 @@ let currentCollection = "users";
         if (currentSort) params.set('sort', currentSort);
         if (currentFilter) params.set('filter', currentFilter);
 
-        const res = await fetch(`/api/collections/${currentCollection}/records?${params.toString()}`);
+        const res = await fetch(`/api/${currentCollection}?${params.toString()}`);
         const data = await res.json();
         if (!res.ok) {
           showToast(data.message || 'Filter query error', 'error');
@@ -2826,7 +3846,7 @@ let currentCollection = "users";
     async function deleteSelectedRecords() {
       if (!confirm(`Delete ${selectedRecordIds.size} selected record(s)?`)) return;
       for (const id of selectedRecordIds) {
-        await fetch(`/api/collections/${currentCollection}/records/${id}`, { method: 'DELETE' });
+        await fetch(`/api/${currentCollection}/${id}`, { method: 'DELETE' });
       }
       selectedRecordIds.clear();
       updateBulkDeleteBar();
@@ -2874,7 +3894,7 @@ let currentCollection = "users";
       let record = {};
       if (recordId) {
         try {
-          const res = await fetch(`/api/collections/${currentCollection}/records/${recordId}`);
+          const res = await fetch(`/api/${currentCollection}/${recordId}`);
           if (res.ok) {
             const data = await res.json();
             record = data.item || data;
@@ -3135,8 +4155,8 @@ let currentCollection = "users";
       }
 
       const url = editingRecordId
-        ? `/api/collections/${currentCollection}/records/${editingRecordId}`
-        : `/api/collections/${currentCollection}/records`;
+        ? `/api/${currentCollection}/${editingRecordId}`
+        : `/api/${currentCollection}`;
       const method = editingRecordId ? 'PATCH' : 'POST';
 
       const fileInputs = document.querySelectorAll('#recordFormContainer input[type="file"]');
@@ -3274,7 +4294,7 @@ let currentCollection = "users";
     async function deleteRecordFromDrawer() {
       if (!editingRecordId) return;
       if (!confirm(`Delete record ${editingRecordId}?`)) return;
-      const res = await fetch(`/api/collections/${currentCollection}/records/${editingRecordId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/${currentCollection}/${editingRecordId}`, { method: 'DELETE' });
       if (res.ok) {
         closeRecordEditorPage();
         showToast('Record deleted successfully');
@@ -3475,22 +4495,22 @@ let currentCollection = "users";
       let fields = [];
       if (type === 'auth') {
         fields = [
-          { name: 'id', type: 'text', sql: 'VARCHAR(255) PK', desc: 'Primary Key unik record user (Auto-generated)', icon: 'fa-solid fa-fingerprint', isBlameable: false },
-          { name: 'email', type: 'email', sql: 'VARCHAR(255) UNIQUE', desc: 'Email kredensial login (Wajib unik)', icon: 'fa-solid fa-envelope', isBlameable: false },
-          { name: 'password', type: 'password', sql: 'VARCHAR(255) / TEXT', desc: 'Hash password terenkripsi bcrypt', icon: 'fa-solid fa-key', isBlameable: false },
-          { name: 'name', type: 'text', sql: 'VARCHAR(255)', desc: 'Nama lengkap tampilan akun user', icon: 'fa-solid fa-id-card', isBlameable: false },
-          { name: 'username', type: 'text', sql: 'VARCHAR(50)', desc: 'Handle unik / username login pengguna', icon: 'fa-solid fa-at', isBlameable: false },
-          { name: 'role', type: 'text', sql: 'VARCHAR(50)', desc: 'Role otorisasi akses (default: "user")', icon: 'fa-solid fa-shield-halved', isBlameable: false },
-          { name: 'status', type: 'text', sql: 'VARCHAR(20)', desc: 'Status akun pengguna (default: "active")', icon: 'fa-solid fa-circle-check', isBlameable: false },
-          { name: 'verified', type: 'bool', sql: 'INTEGER', desc: 'Status verifikasi email user (0 / 1)', icon: 'fa-solid fa-badge-check', isBlameable: false },
-          { name: 'tokenKey', type: 'text', sql: 'VARCHAR(255)', desc: 'Kunci enkripsi token sesi & auth', icon: 'fa-solid fa-lock', isBlameable: false },
-          { name: 'created_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Timestamp saat akun pertama dibuat', icon: 'fa-solid fa-calendar-plus', isBlameable: false },
-          { name: 'updated_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Timestamp saat profil akun diubah', icon: 'fa-solid fa-clock-rotate-left', isBlameable: false },
+          { name: 'id', type: 'text', sql: 'VARCHAR(255) PK', desc: 'User record unique Primary Key (Auto-generated)', icon: 'fa-solid fa-fingerprint', isBlameable: false },
+          { name: 'email', type: 'email', sql: 'VARCHAR(255) UNIQUE', desc: 'Login credential email (Required & Unique)', icon: 'fa-solid fa-envelope', isBlameable: false },
+          { name: 'password', type: 'password', sql: 'VARCHAR(255) / TEXT', desc: 'Bcrypt-hashed encrypted password', icon: 'fa-solid fa-key', isBlameable: false },
+          { name: 'name', type: 'text', sql: 'VARCHAR(255)', desc: 'User display full name', icon: 'fa-solid fa-id-card', isBlameable: false },
+          { name: 'username', type: 'text', sql: 'VARCHAR(50)', desc: 'Unique handle / user login username', icon: 'fa-solid fa-at', isBlameable: false },
+          { name: 'role', type: 'text', sql: 'VARCHAR(50)', desc: 'Access authorization role (default: "user")', icon: 'fa-solid fa-shield-halved', isBlameable: false },
+          { name: 'status', type: 'text', sql: 'VARCHAR(20)', desc: 'User account status (default: "active")', icon: 'fa-solid fa-circle-check', isBlameable: false },
+          { name: 'verified', type: 'bool', sql: 'INTEGER', desc: 'User email verification status (0 / 1)', icon: 'fa-solid fa-badge-check', isBlameable: false },
+          { name: 'tokenKey', type: 'text', sql: 'VARCHAR(255)', desc: 'Session & auth token encryption key', icon: 'fa-solid fa-lock', isBlameable: false },
+          { name: 'created_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Timestamp when the account was first created', icon: 'fa-solid fa-calendar-plus', isBlameable: false },
+          { name: 'updated_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Timestamp when the account profile was modified', icon: 'fa-solid fa-clock-rotate-left', isBlameable: false },
           { 
             name: 'created_by', 
             type: 'text', 
             sql: 'VARCHAR(255)', 
-            desc: isBlameable ? 'ID admin/user pembuat akun (Blameable aktif)' : 'ID admin/user pembuat akun (Blameable nonaktif)', 
+            desc: isBlameable ? 'Creator user/admin ID (Blameable active)' : 'Creator user/admin ID (Blameable disabled)', 
             icon: 'fa-solid fa-user-check', 
             isBlameable: true 
           },
@@ -3498,7 +4518,7 @@ let currentCollection = "users";
             name: 'updated_by', 
             type: 'text', 
             sql: 'VARCHAR(255)', 
-            desc: isBlameable ? 'ID admin/user pengubah akun (Blameable aktif)' : 'ID admin/user pengubah akun (Blameable nonaktif)', 
+            desc: isBlameable ? 'Editor user/admin ID (Blameable active)' : 'Editor user/admin ID (Blameable disabled)', 
             icon: 'fa-solid fa-user-pen', 
             isBlameable: true 
           }
@@ -3506,14 +4526,14 @@ let currentCollection = "users";
       } else {
         // Base Table
         fields = [
-          { name: 'id', type: 'text', sql: 'VARCHAR(255) PK', desc: 'Primary Key unik record (Auto-generated)', icon: 'fa-solid fa-fingerprint', isBlameable: false },
-          { name: 'created_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Unix timestamp otomatis saat record di-insert', icon: 'fa-solid fa-calendar-plus', isBlameable: false },
-          { name: 'updated_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Unix timestamp otomatis saat record di-update', icon: 'fa-solid fa-clock-rotate-left', isBlameable: false },
+          { name: 'id', type: 'text', sql: 'VARCHAR(255) PK', desc: 'Unique record Primary Key (Auto-generated)', icon: 'fa-solid fa-fingerprint', isBlameable: false },
+          { name: 'created_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Auto Unix timestamp when record was inserted', icon: 'fa-solid fa-calendar-plus', isBlameable: false },
+          { name: 'updated_at', type: 'number', sql: 'BIGINT / TIMESTAMP', desc: 'Auto Unix timestamp when record was updated', icon: 'fa-solid fa-clock-rotate-left', isBlameable: false },
           { 
             name: 'created_by', 
             type: 'text', 
             sql: 'VARCHAR(255)', 
-            desc: isBlameable ? 'ID user pembuat record (Blameable aktif, dilewati jika unauthenticated)' : 'ID user pembuat record (Blameable nonaktif — centang opsi Blameable di atas)', 
+            desc: isBlameable ? 'Record creator user ID (Blameable active, skipped if unauthenticated)' : 'Record creator user ID (Blameable disabled — check Blameable above)', 
             icon: 'fa-solid fa-user-check', 
             isBlameable: true 
           },
@@ -3521,7 +4541,7 @@ let currentCollection = "users";
             name: 'updated_by', 
             type: 'text', 
             sql: 'VARCHAR(255)', 
-            desc: isBlameable ? 'ID user pengubah record (Blameable aktif, dilewati jika unauthenticated)' : 'ID user pengubah record (Blameable nonaktif — centang opsi Blameable di atas)', 
+            desc: isBlameable ? 'Record editor user ID (Blameable active, skipped if unauthenticated)' : 'Record editor user ID (Blameable disabled — check Blameable above)', 
             icon: 'fa-solid fa-user-pen', 
             isBlameable: true 
           }
@@ -3540,7 +4560,7 @@ let currentCollection = "users";
             badgeHtml = `<span class="inline-flex items-center text-[10px] text-slate-500 font-semibold px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200 shrink-0 ml-1.5"><i class="fa-solid fa-toggle-off text-[9px] mr-1 text-slate-400"></i>Blameable: OFF</span>`;
           }
         } else {
-          badgeHtml = `<span class="inline-flex items-center text-[10px] text-emerald-700 font-semibold px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 shrink-0 ml-1.5" title="Otomatis diisi dan dikelola oleh PadiBase"><i class="fa-solid fa-lock text-[8px] mr-1 text-emerald-600"></i>Auto</span>`;
+          badgeHtml = `<span class="inline-flex items-center text-[10px] text-emerald-700 font-semibold px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200 shrink-0 ml-1.5" title="Automatically populated and managed by PadiBase"><i class="fa-solid fa-lock text-[8px] mr-1 text-emerald-600"></i>Auto</span>`;
         }
 
         return `
@@ -3776,7 +4796,7 @@ let currentCollection = "users";
       const dupField = cleanSchema.find(f => systemReservedNames.includes(f.name.toLowerCase().trim()));
       if (dupField) {
         if (alertEl) {
-          alertEl.textContent = `Kolom "${dupField.name}" adalah auto-generated system field bawaan PadiBase. Anda tidak perlu menambahkannya di Custom Columns.`;
+          alertEl.textContent = `Column "${dupField.name}" is an auto-generated system field managed by PadiBase. You do not need to add it to Custom Columns.`;
           alertEl.classList.remove('hidden');
         }
         return;
@@ -3915,6 +4935,15 @@ let currentCollection = "users";
       const authGroupLabel = document.getElementById('apiAuthGroupLabel');
       if (authGroupLabel) authGroupLabel.classList.toggle('hidden', !isAuthCol);
 
+      // Only show Upload File endpoint tab if this table actually has column(s) of type 'file'
+      const hasFileFields = Boolean(col && Array.isArray(col.schema) && col.schema.some(f => f.type === 'file'));
+      const fileTab = document.getElementById('apiTabFile') || document.querySelector('#apiPreviewTabs button[data-api-tab="file"]');
+      if (fileTab) fileTab.classList.toggle('hidden', !hasFileFields);
+
+      if (!hasFileFields && currentSelectedApiTab === 'file') {
+        currentSelectedApiTab = 'list';
+      }
+
       if (!isAuthCol && ['register', 'auth', 'forgot', 'reset', 'change_pw', 'me'].includes(currentSelectedApiTab)) {
         currentSelectedApiTab = 'list';
       }
@@ -3962,8 +4991,6 @@ let currentCollection = "users";
           btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
         } else if (['register', 'auth', 'forgot', 'reset', 'change_pw', 'me'].includes(tabName)) {
           btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-teal-800 hover:bg-teal-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
-        } else if (['transactions', 'sql'].includes(tabName)) {
-          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-amber-800 hover:bg-amber-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         } else {
           btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         }
@@ -3978,6 +5005,8 @@ let currentCollection = "users";
       (col.schema || []).forEach(f => {
         sampleObj[f.name] = f.type === 'number' ? 100 : (f.type === 'bool' ? true : `sample_${f.name}`);
       });
+
+      const fileField = (col.schema || []).find(f => f.type === 'file')?.name || 'file';
 
       const sampleUserRecord = {
         id: "rec_u0192a8b",
@@ -4000,60 +5029,60 @@ let currentCollection = "users";
           desc: `Retrieve ${cName} records with pagination, search filters, and sorting.`,
           method: 'GET',
           badge: 'bg-emerald-100 text-emerald-800',
-          path: `/api/collections/${cName}/records?page=1&perPage=30`,
+          path: `/api/${cName}?page=1&perPage=30`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records?page=1&perPage=30');\nconst { item, meta, debug } = await res.json();\nconsole.log(item, meta);`,
-          curl: `curl -X GET "${baseUrl}/api/collections/${cName}/records?page=1&perPage=30"`
+          js: `const res = await fetch('${baseUrl}/api/${cName}?page=1&perPage=30');\nconst { item, meta, debug } = await res.json();\nconsole.log(item, meta);`,
+          curl: `curl -X GET "${baseUrl}/api/${cName}?page=1&perPage=30"`
         },
         all: {
           title: `Fetch All Records Without Pagination (${cName})`,
-          desc: `Retrieve rows from ${cName} via standard Padi Rust route (/api/${cName}/all). Capped at 5,000 max records to protect server memory. Optional query: ?limit=500 (max: 5000), ?offset=0, ?sort_by=id&order=desc.`,
+          desc: `Retrieve rows from ${cName} via standard clean Padi Rust route (/api/${cName}/all). Capped at 5,000 max records. Optional query: ?limit=500 (max: 5000), ?offset=0, ?sort_by=id&order=desc.`,
           method: 'GET',
           badge: 'bg-emerald-100 text-emerald-800',
-          path: `/api/collections/${cName}/records/all?limit=5000&sort_by=id&order=desc`,
+          path: `/api/${cName}/all?limit=5000&sort_by=id&order=desc`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/all?limit=5000&sort_by=id&order=desc');\nconst { item, debug } = await res.json();\nconsole.log(item);`,
-          curl: `curl -X GET "${baseUrl}/api/collections/${cName}/records/all?limit=5000&sort_by=id&order=desc"`
+          js: `const res = await fetch('${baseUrl}/api/${cName}/all?limit=5000&sort_by=id&order=desc');\nconst { item, debug } = await res.json();\nconsole.log(item);`,
+          curl: `curl -X GET "${baseUrl}/api/${cName}/all?limit=5000&sort_by=id&order=desc"`
         },
         view: {
           title: `Fetch Single Record by ID (${cName})`,
           desc: `Retrieve single record details from ${cName} using ID.`,
           method: 'GET',
           badge: 'bg-emerald-100 text-emerald-800',
-          path: `/api/collections/${cName}/records/RECORD_ID`,
+          path: `/api/${cName}/RECORD_ID`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID');\nconst { item } = await res.json();\nconsole.log(item);`,
-          curl: `curl -X GET "${baseUrl}/api/collections/${cName}/records/RECORD_ID"`
+          js: `const res = await fetch('${baseUrl}/api/${cName}/RECORD_ID');\nconst { item } = await res.json();\nconsole.log(item);`,
+          curl: `curl -X GET "${baseUrl}/api/${cName}/RECORD_ID"`
         },
         create: {
           title: `Create New Record (${cName})`,
           desc: `Insert a new record into table ${cName}.`,
           method: 'POST',
           badge: 'bg-sky-100 text-sky-800',
-          path: `/api/collections/${cName}/records`,
+          path: `/api/${cName}`,
           statusCode: '201 Created',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`,
-          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/records" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(sampleObj, null, 2)}'`
+          js: `const res = await fetch('${baseUrl}/api/${cName}', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`,
+          curl: `curl -X POST "${baseUrl}/api/${cName}" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(sampleObj, null, 2)}'`
         },
         update: {
           title: `Update Record (${cName})`,
           desc: `Modify some or all fields of an existing record by ID.`,
           method: 'PATCH',
           badge: 'bg-amber-100 text-amber-800',
-          path: `/api/collections/${cName}/records/RECORD_ID`,
+          path: `/api/${cName}/RECORD_ID`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID', {\n  method: 'PATCH',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`,
-          curl: `curl -X PATCH "${baseUrl}/api/collections/${cName}/records/RECORD_ID" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(sampleObj, null, 2)}'`
+          js: `const res = await fetch('${baseUrl}/api/${cName}/RECORD_ID', {\n  method: 'PATCH',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`,
+          curl: `curl -X PATCH "${baseUrl}/api/${cName}/RECORD_ID" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(sampleObj, null, 2)}'`
         },
         delete: {
           title: `Delete Record (${cName})`,
           desc: `Remove a record from table ${cName} by ID.`,
           method: 'DELETE',
           badge: 'bg-rose-100 text-rose-800',
-          path: `/api/collections/${cName}/records/RECORD_ID`,
+          path: `/api/${cName}/RECORD_ID`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/records/RECORD_ID', {\n  method: 'DELETE'\n});\nconst { item } = await res.json();`,
-          curl: `curl -X DELETE "${baseUrl}/api/collections/${cName}/records/RECORD_ID"`
+          js: `const res = await fetch('${baseUrl}/api/${cName}/RECORD_ID', {\n  method: 'DELETE'\n});\nconst { item } = await res.json();`,
+          curl: `curl -X DELETE "${baseUrl}/api/${cName}/RECORD_ID"`
         },
         realtime: {
           title: `Subscribe to Realtime SSE Stream (${cName})`,
@@ -4062,78 +5091,78 @@ let currentCollection = "users";
           badge: 'bg-purple-100 text-purple-800',
           path: `/api/realtime`,
           statusCode: '200 OK (text/event-stream)',
-          js: `const evtSource = new EventSource('${baseUrl}/api/realtime');\nevtSource.onmessage = (event) => {\n  const data = JSON.parse(event.data);\n  if (data.collection === '${cName}') {\n    console.log('Change event:', data.action, data.record);\n  }\n};`,
+          js: `const evtSource = new EventSource('${baseUrl}/api/realtime');\nevtSource.onmessage = (event) => {\n  const data = JSON.parse(event.data);\n  if (data.table === '${cName}') {\n    console.log('Change event:', data.action, data.record);\n  }\n};`,
           curl: `curl -N "${baseUrl}/api/realtime"`
         },
         file: {
           title: `Upload File / Image (${cName})`,
-          desc: `Upload files via multipart/form-data and link them automatically to the record.`,
+          desc: `Upload files via multipart/form-data to column "${fileField}" and link them automatically to the record.`,
           method: 'POST',
           badge: 'bg-indigo-100 text-indigo-800',
           path: `/api/files/${cName}/RECORD_ID`,
           statusCode: '200 OK',
-          js: `const formData = new FormData();\nformData.append('file', fileInputElement.files[0]);\n\nconst res = await fetch('${baseUrl}/api/files/${cName}/RECORD_ID', {\n  method: 'POST',\n  body: formData\n});\nconst result = await res.json();`,
-          curl: `curl -X POST "${baseUrl}/api/files/${cName}/RECORD_ID" \\\n  -F "file=@/path/to/my_image.png"`
+          js: `const formData = new FormData();\nformData.append('${fileField}', fileInputElement.files[0]);\n\nconst res = await fetch('${baseUrl}/api/files/${cName}/RECORD_ID', {\n  method: 'POST',\n  body: formData\n});\nconst result = await res.json();`,
+          curl: `curl -X POST "${baseUrl}/api/files/${cName}/RECORD_ID" \\\n  -F "${fileField}=@/path/to/my_image.png"`
         },
         auth: {
           title: `User Login & Obtain JWT Token (${cName})`,
           desc: `Verify identity (username/email) & password and return a signed JWT authentication token along with user record.`,
           method: 'POST',
           badge: 'bg-teal-100 text-teal-800',
-          path: `/api/collections/${cName}/auth-with-password`,
+          path: `/api/${cName}/auth-with-password`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/auth-with-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    identity: 'john@example.com',\n    password: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`,
-          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/auth-with-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "identity": "john@example.com",\n  "password": "secret123456"\n}'`
+          js: `const res = await fetch('${baseUrl}/api/${cName}/auth-with-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    identity: 'john@example.com',\n    password: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`,
+          curl: `curl -X POST "${baseUrl}/api/${cName}/auth-with-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "identity": "john@example.com",\n  "password": "secret123456"\n}'`
         },
         register: {
           title: `Register New Account (${cName})`,
           desc: `Create a new user account in ${cName} and immediately receive a signed JWT token + user record.`,
           method: 'POST',
           badge: 'bg-teal-100 text-teal-800',
-          path: `/api/collections/${cName}/register`,
+          path: `/api/${cName}/register`,
           statusCode: '201 Created',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/register', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    email: 'john@example.com',\n    username: 'john123',\n    name: 'John Doe',\n    password: 'secret123456',\n    passwordConfirm: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`,
-          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/register" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "email": "john@example.com",\n  "username": "john123",\n  "name": "John Doe",\n  "password": "secret123456",\n  "passwordConfirm": "secret123456"\n}'`
+          js: `const res = await fetch('${baseUrl}/api/${cName}/register', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    email: 'john@example.com',\n    username: 'john123',\n    name: 'John Doe',\n    password: 'secret123456',\n    passwordConfirm: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`,
+          curl: `curl -X POST "${baseUrl}/api/${cName}/register" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "email": "john@example.com",\n  "username": "john123",\n  "name": "John Doe",\n  "password": "secret123456",\n  "passwordConfirm": "secret123456"\n}'`
         },
         forgot: {
           title: `Forgot Password - Generate Reset Token (${cName})`,
           desc: `Generate a one-time password reset token for a user account by email or username.`,
           method: 'POST',
           badge: 'bg-teal-100 text-teal-800',
-          path: `/api/collections/${cName}/forgot-password`,
+          path: `/api/${cName}/forgot-password`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/forgot-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    email: 'john@example.com'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.email, item.reset_token);`,
-          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/forgot-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "email": "john@example.com"\n}'`
+          js: `const res = await fetch('${baseUrl}/api/${cName}/forgot-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    email: 'john@example.com'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.email, item.reset_token);`,
+          curl: `curl -X POST "${baseUrl}/api/${cName}/forgot-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "email": "john@example.com"\n}'`
         },
         reset: {
           title: `Reset Password with Token (${cName})`,
           desc: `Verify the one-time reset token and set a new Argon2id-hashed password for the account.`,
           method: 'POST',
           badge: 'bg-teal-100 text-teal-800',
-          path: `/api/collections/${cName}/reset-password`,
+          path: `/api/${cName}/reset-password`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/reset-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    token: 'd7f4a1c2e8b940bf7c53e01a8',\n    password: 'newSecretPassword123',\n    passwordConfirm: 'newSecretPassword123'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.message);`,
-          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/reset-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "token": "d7f4a1c2e8b940bf7c53e01a8",\n  "password": "newSecretPassword123",\n  "passwordConfirm": "newSecretPassword123"\n}'`
+          js: `const res = await fetch('${baseUrl}/api/${cName}/reset-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    token: 'd7f4a1c2e8b940bf7c53e01a8',\n    password: 'newSecretPassword123',\n    passwordConfirm: 'newSecretPassword123'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.message);`,
+          curl: `curl -X POST "${baseUrl}/api/${cName}/reset-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "token": "d7f4a1c2e8b940bf7c53e01a8",\n  "password": "newSecretPassword123",\n  "passwordConfirm": "newSecretPassword123"\n}'`
         },
         change_pw: {
           title: `Change Password for Logged-in User (${cName})`,
           desc: `Verify current password and update to a new password while returning a refreshed JWT token.`,
           method: 'POST',
           badge: 'bg-teal-100 text-teal-800',
-          path: `/api/collections/${cName}/change-password`,
+          path: `/api/${cName}/change-password`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/change-password', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    oldPassword: 'secret123456',\n    newPassword: 'updatedPassword789',\n    passwordConfirm: 'updatedPassword789'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token);`,
-          curl: `curl -X POST "${baseUrl}/api/collections/${cName}/change-password" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\\n  -d '{\n  "oldPassword": "secret123456",\n  "newPassword": "updatedPassword789",\n  "passwordConfirm": "updatedPassword789"\n}'`
+          js: `const res = await fetch('${baseUrl}/api/${cName}/change-password', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    oldPassword: 'secret123456',\n    newPassword: 'updatedPassword789',\n    passwordConfirm: 'updatedPassword789'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token);`,
+          curl: `curl -X POST "${baseUrl}/api/${cName}/change-password" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\\n  -d '{\n  "oldPassword": "secret123456",\n  "newPassword": "updatedPassword789",\n  "passwordConfirm": "updatedPassword789"\n}'`
         },
         me: {
           title: `Get Current User Profile & Refresh JWT (${cName})`,
           desc: `Fetch the authenticated user's record and receive a refreshed JWT token.`,
           method: 'GET',
           badge: 'bg-teal-100 text-teal-800',
-          path: `/api/collections/${cName}/me`,
+          path: `/api/${cName}/me`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/collections/${cName}/me', {\n  headers: {\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  }\n});\nconst { item } = await res.json();\nconsole.log(item.record, item.token);`,
-          curl: `curl -X GET "${baseUrl}/api/collections/${cName}/me" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN"`
+          js: `const res = await fetch('${baseUrl}/api/${cName}/me', {\n  headers: {\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  }\n});\nconst { item } = await res.json();\nconsole.log(item.record, item.token);`,
+          curl: `curl -X GET "${baseUrl}/api/${cName}/me" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN"`
         },
         transactions: {
           title: `Atomic Database Transaction / Batch (${cName})`,
@@ -4142,8 +5171,8 @@ let currentCollection = "users";
           badge: 'bg-amber-100 text-amber-800',
           path: `/api/transactions`,
           statusCode: '200 OK',
-          js: `const res = await fetch('${baseUrl}/api/transactions', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    operations: [\n      {\n        action: 'create',\n        collection: '${cName}',\n        data: ${JSON.stringify(sampleObj)}\n      },\n      {\n        action: 'update',\n        collection: '${cName}',\n        id: 'rec_001',\n        data: ${JSON.stringify(sampleObj)}\n      }\n    ]\n  })\n});\nconst { item } = await res.json();`,
-          curl: `curl -X POST "${baseUrl}/api/transactions" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\\n  -d '{\n  "operations": [\n    {\n      "action": "create",\n      "collection": "${cName}",\n      "data": ${JSON.stringify(sampleObj)}\n    }\n  ]\n}'`
+          js: `const res = await fetch('${baseUrl}/api/transactions', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    operations: [\n      {\n        action: 'create',\n        table: '${cName}',\n        data: ${JSON.stringify(sampleObj)}\n      },\n      {\n        action: 'update',\n        table: '${cName}',\n        id: 'rec_001',\n        data: ${JSON.stringify(sampleObj)}\n      }\n    ]\n  })\n});\nconst { item } = await res.json();`,
+          curl: `curl -X POST "${baseUrl}/api/transactions" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\\n  -d '{\n  "operations": [\n    {\n      "action": "create",\n      "table": "${cName}",\n      "data": ${JSON.stringify(sampleObj)}\n    }\n  ]\n}'`
         },
         sql: {
           title: `Execute Custom Parameterized SQL (${cName})`,
@@ -4485,14 +5514,15 @@ let currentCollection = "users";
             </button>
           </div>
         </div>
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div class="space-y-4">
+          <!-- 1. Request Code Snippet (JS Fetch / cURL) -->
           <div>
             <div class="flex items-center justify-between mb-1.5">
               <div class="flex items-center space-x-1.5 bg-slate-200/60 p-0.5 rounded-lg border border-slate-200">
-                <button type="button" id="apiSnippetBtn_js" onclick="toggleApiSnippetMode('js')" class="px-2 py-0.5 rounded-md ${currentApiSnippetMode === 'js' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900 font-semibold'} text-[10px] transition cursor-pointer">
+                <button type="button" id="apiSnippetBtn_js" onclick="toggleApiSnippetMode('js')" class="px-2.5 py-0.5 rounded-md ${currentApiSnippetMode === 'js' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900 font-semibold'} text-[10px] transition cursor-pointer">
                   JS Fetch
                 </button>
-                <button type="button" id="apiSnippetBtn_curl" onclick="toggleApiSnippetMode('curl')" class="px-2 py-0.5 rounded-md ${currentApiSnippetMode === 'curl' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900 font-semibold'} text-[10px] transition cursor-pointer">
+                <button type="button" id="apiSnippetBtn_curl" onclick="toggleApiSnippetMode('curl')" class="px-2.5 py-0.5 rounded-md ${currentApiSnippetMode === 'curl' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900 font-semibold'} text-[10px] transition cursor-pointer">
                   cURL
                 </button>
               </div>
@@ -4501,9 +5531,11 @@ let currentCollection = "users";
                 <span>Copy Snippet</span>
               </button>
             </div>
-            <pre id="apiSnippetPre_js" class="${currentApiSnippetMode === 'js' ? '' : 'hidden '}bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto min-h-[220px] max-h-[380px]">${d.js}</pre>
-            <pre id="apiSnippetPre_curl" class="${currentApiSnippetMode === 'curl' ? '' : 'hidden '}bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto min-h-[220px] max-h-[380px]">${d.curl}</pre>
+            <pre id="apiSnippetPre_js" class="${currentApiSnippetMode === 'js' ? '' : 'hidden '}bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto max-h-[260px]">${d.js}</pre>
+            <pre id="apiSnippetPre_curl" class="${currentApiSnippetMode === 'curl' ? '' : 'hidden '}bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto max-h-[260px]">${d.curl}</pre>
           </div>
+
+          <!-- 2. JSON Response (Padi Framework) Below Code Snippet -->
           <div>
             <div class="flex items-center justify-between mb-1.5">
               <div class="text-[11px] font-extrabold uppercase tracking-wider text-teal-700 flex items-center space-x-1.5">
@@ -4518,7 +5550,7 @@ let currentCollection = "users";
                 </button>
               </div>
             </div>
-            <pre class="bg-slate-950 text-teal-300 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto min-h-[220px] max-h-[380px]">${currentApiPreviewResponseJson}</pre>
+            <pre class="bg-slate-950 text-teal-300 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto max-h-[300px]">${currentApiPreviewResponseJson}</pre>
           </div>
         </div>
       `;
@@ -4641,60 +5673,168 @@ let currentCollection = "users";
       }
     }
 
+    function triggerUploadBackup() {
+      const input = document.getElementById('backupUploadInput');
+      if (input) {
+        input.value = '';
+        input.click();
+      }
+    }
+
+    async function handleUploadBackupFile(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+
+      const fd = new FormData();
+      fd.append('file', file);
+
+      showToast(`Uploading backup file "${file.name}"...`);
+
+      try {
+        const res = await fetch('/api/backups/upload', {
+          method: 'POST',
+          body: fd
+        });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(`Backup "${file.name}" uploaded successfully!`);
+          loadBackups();
+        } else {
+          showToast(data.message || 'Failed to upload backup archive', 'error');
+        }
+      } catch (err) {
+        showToast('Upload error: ' + err.message, 'error');
+      }
+    }
+
     async function loadBackups() {
       const tbody = document.getElementById('backupsTableBody');
+      if (!tbody) return;
       try {
         const res = await fetch('/api/backups');
         const data = await res.json();
         const items = data.item || data.items || [];
         if (items.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="4" class="py-8 text-center text-slate-400 font-sans">Belum ada file backup database. Klik "Create Backup Now" untuk membuat cadangan.</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="6" class="py-10 text-center text-slate-400 font-sans"><div class="flex flex-col items-center justify-center space-y-2"><i class="fa-solid fa-box-archive text-3xl text-slate-300"></i><p class="font-medium text-xs">No database backups found yet.</p><p class="text-[11px] text-slate-400">Click "Create Backup Now" to generate an archive containing your database and file uploads.</p></div></td></tr>`;
         } else {
-          tbody.innerHTML = items.map(b => `
-            <tr class="hover:bg-emerald-50/30">
-              <td class="py-3 px-4 font-bold text-slate-800"><i class="fa-solid fa-box-archive text-emerald-600 mr-2"></i>${b.key}</td>
-              <td class="py-3 px-4 text-slate-500">${formatBytes(b.size)}</td>
-              <td class="py-3 px-4 text-slate-400">${formatDateCell(b.created)}</td>
-              <td class="py-3 px-4 text-right space-x-2">
-                <a href="/api/backups/${b.key}" download class="text-emerald-600 hover:underline font-sans font-bold">Download</a>
-                <button onclick="handleRestoreBackup('${b.key}')" class="text-amber-600 hover:underline font-sans font-bold ml-2">Restore</button>
-                <button onclick="handleDeleteBackup('${b.key}')" class="text-rose-600 hover:underline font-sans font-bold ml-2">Delete</button>
-              </td>
-            </tr>
-          `).join('');
-        }
-      } catch (_) {}
-    }
+          tbody.innerHTML = items.map(b => {
+            const isZip = b.is_zip || b.key.endsWith('.zip');
+            const typeBadge = isZip
+              ? `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center space-x-1"><i class="fa-solid fa-file-zipper text-[9px]"></i><span>ZIP (DB + Storage)</span></span>`
+              : `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-600 inline-flex items-center space-x-1"><i class="fa-solid fa-database text-[9px]"></i><span>Database Snapshot</span></span>`;
+            const filesCount = b.storage_files != null && b.storage_files > 0
+              ? `<span class="px-2 py-0.5 rounded-md text-[10px] font-mono font-bold bg-teal-50 text-teal-700 border border-teal-200">${b.storage_files} file${b.storage_files === 1 ? '' : 's'}</span>`
+              : (isZip ? `<span class="text-slate-400 text-[11px]">0 files</span>` : `<span class="text-slate-300 text-[11px]">-</span>`);
 
-    async function handleCreateBackup() {
-      const res = await fetch('/api/backups', { method: 'POST' });
-      if (res.ok) {
-        showToast('Database backup created successfully');
-        loadBackups();
+            return `
+              <tr class="hover:bg-emerald-50/30 transition">
+                <td class="py-3 px-4 font-bold text-slate-800">
+                  <div class="flex items-center space-x-2">
+                    <span class="w-6 h-6 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center text-xs shrink-0">
+                      <i class="fa-solid fa-box-archive text-[10px]"></i>
+                    </span>
+                    <span class="truncate max-w-xs md:max-w-md font-mono text-xs">${b.key}</span>
+                  </div>
+                </td>
+                <td class="py-3 px-4">${typeBadge}</td>
+                <td class="py-3 px-4 text-slate-600 font-mono text-xs">${formatBytes(b.size)}</td>
+                <td class="py-3 px-4">${filesCount}</td>
+                <td class="py-3 px-4 text-slate-400 text-xs">${formatDateCell(b.created)}</td>
+                <td class="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+                  <a href="/api/backups/${encodeURIComponent(b.key)}" download class="px-2.5 py-1 rounded-lg text-emerald-700 hover:bg-emerald-50 font-bold transition inline-flex items-center space-x-1 text-xs">
+                    <i class="fa-solid fa-download text-[10px]"></i>
+                    <span>Download</span>
+                  </a>
+                  <button onclick="handleRestoreBackup('${b.key}')" class="px-2.5 py-1 rounded-lg text-amber-700 hover:bg-amber-50 font-bold transition inline-flex items-center space-x-1 text-xs cursor-pointer">
+                    <i class="fa-solid fa-rotate-left text-[10px]"></i>
+                    <span>Restore</span>
+                  </button>
+                  <button onclick="handleDeleteBackup('${b.key}')" class="px-2.5 py-1 rounded-lg text-rose-600 hover:bg-rose-50 font-bold transition inline-flex items-center space-x-1 text-xs cursor-pointer">
+                    <i class="fa-solid fa-trash-can text-[10px]"></i>
+                    <span>Delete</span>
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('');
+        }
+      } catch (err) {
+        console.error("Failed to load backups:", err);
       }
     }
 
+    async function handleCreateBackup() {
+      const btn = document.getElementById('createBackupBtn');
+      const text = document.getElementById('createBackupBtnText');
+      const icon = document.getElementById('createBackupIcon');
+      if (btn) btn.disabled = true;
+      if (text) text.textContent = 'Archiving DB & Storage...';
+      if (icon) icon.className = 'fa-solid fa-spinner fa-spin text-xs';
+
+      try {
+        const res = await fetch('/api/backups', { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          const item = data.item || data;
+          const filesCount = item.storage_files != null ? ` (${item.storage_files} upload files included)` : '';
+          showToast(`Unified backup created successfully: ${item.key || 'archive.zip'}${filesCount}`);
+          await loadBackups();
+        } else {
+          showToast(data.message || 'Failed to create backup archive', 'error');
+        }
+      } catch (err) {
+        showToast('Backup error: ' + err.message, 'error');
+      } finally {
+        if (btn) btn.disabled = false;
+        if (text) text.textContent = 'Create Backup Now';
+        if (icon) icon.className = 'fa-solid fa-plus text-xs';
+      }
+    }
+
+    // Alias for legacy templates
+    window.createDatabaseBackup = handleCreateBackup;
+
     async function handleRestoreBackup(key) {
-      if (!confirm(`Restore database from "${key}"? Current data will be replaced by backup contents.`)) return;
-      const res = await fetch(`/api/backups/${key}/restore`, { method: 'POST' });
-      if (res.ok) {
-        showToast('Database restored successfully');
-        loadCollections();
+      const isConfirmed = confirm(
+        `⚠️ RESTORE BACKUP WARNING!\n\n` +
+        `Are you sure you want to restore the entire system from "${key}"?\n\n` +
+        `• Current database data will be REPLACED by the backup snapshot.\n` +
+        `• Stored physical files in "storage/" will be unpacked and updated.\n` +
+        `• Active connections will be re-checkpointed.\n\n` +
+        `This operation cannot be undone. Click OK to proceed.`
+      );
+      if (!isConfirmed) return;
+
+      showToast(`Restoring system from "${key}"... please wait.`);
+
+      try {
+        const res = await fetch(`/api/backups/${encodeURIComponent(key)}/restore`, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(data.message || 'System restored successfully!');
+          await loadCollections();
+          renderQuickMatrixTable();
+        } else {
+          showToast(data.message || 'Failed to restore backup', 'error');
+        }
+      } catch (err) {
+        showToast('Restore error: ' + err.message, 'error');
       }
     }
 
     async function handleDeleteBackup(key) {
-      if (!confirm(`Delete backup file "${key}"?`)) return;
-      const res = await fetch(`/api/backups/${key}`, { method: 'DELETE' });
-      if (res.ok) {
-        showToast('Backup file deleted');
-        loadBackups();
+      if (!confirm(`Permanently delete backup file "${key}"?`)) return;
+      try {
+        const res = await fetch(`/api/backups/${encodeURIComponent(key)}`, { method: 'DELETE' });
+        if (res.ok || res.status === 204) {
+          showToast(`Backup "${key}" deleted`);
+          loadBackups();
+        } else {
+          showToast('Failed to delete backup file', 'error');
+        }
+      } catch (err) {
+        showToast('Delete error: ' + err.message, 'error');
       }
-    }
-
-    function copyExportedSchema() {
-      navigator.clipboard.writeText(JSON.stringify(collections, null, 2));
-      showToast('JSON schema copied to clipboard');
     }
 
     function downloadExportedSchema() {
@@ -4703,25 +5843,7 @@ let currentCollection = "users";
       a.href = URL.createObjectURL(blob);
       a.download = 'padibase_schema_blueprint.json';
       a.click();
-    }
-
-    async function submitImportCollectionsSchema() {
-      try {
-        const parsed = JSON.parse(document.getElementById('importSchemaTextarea').value || '[]');
-        const cols = Array.isArray(parsed) ? parsed : [parsed];
-        const res = await fetch('/api/collections/import', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ collections: cols })
-        });
-        if (res.ok) {
-          showToast('Schema blueprint successfully applied!');
-          await loadCollections();
-          switchMainView('collections');
-        }
-      } catch (e) {
-        showToast('Invalid JSON format: ' + e.message, 'error');
-      }
+      showToast('Schema blueprint downloaded as schema.json');
     }
 
     async function loadAdminAccounts() {
@@ -4776,7 +5898,7 @@ let currentCollection = "users";
     // ================= DATA EXPORT & IMPORT =================
     function handleExportCollection() {
       const a = document.createElement('a');
-      a.href = `/api/collections/${currentCollection}/export`;
+      a.href = `/api/${currentCollection}/export`;
       a.download = `${currentCollection}_export.json`;
       a.click();
     }
@@ -4787,13 +5909,13 @@ let currentCollection = "users";
         a.href = `/api/api-collection?download=true`;
         a.download = `padi_base_api_collection.json`;
       } else {
-        a.href = `/api/collections/${currentCollection}/api-collection?download=true`;
-        a.download = `${currentCollection}_collection.json`;
+        a.href = `/api/${currentCollection}/api-collection?download=true`;
+        a.download = `${currentCollection}_api.json`;
       }
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      showToast(isFull ? 'Successfully downloaded full API collection (.json)' : `Successfully downloaded API collection for ${currentCollection} (.json)`);
+      showToast(isFull ? 'Successfully downloaded full API collection (.json)' : `Successfully downloaded API endpoints for ${currentCollection} (.json)`);
     }
 
     function openImportModal() {
@@ -4814,7 +5936,7 @@ let currentCollection = "users";
       try {
         let payload = JSON.parse(document.getElementById('importJsonTextarea').value || '[]');
         if (!Array.isArray(payload)) payload = [payload];
-        const res = await fetch(`/api/collections/${currentCollection}/import`, {
+        const res = await fetch(`/api/${currentCollection}/import`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
@@ -4839,7 +5961,8 @@ let currentCollection = "users";
         try {
           const data = JSON.parse(event.data);
           logSSEEvent(data);
-          if (data.collection === currentCollection) loadRecords();
+          const targetTable = data.table || data.collection;
+          if (targetTable === currentCollection) loadRecords();
         } catch (_) {}
       };
     }
@@ -4902,7 +6025,7 @@ let currentCollection = "users";
           <div class="flex items-center space-x-2 shrink-0 flex-wrap gap-y-1">
             <span class="text-slate-500 font-mono text-xs whitespace-nowrap shrink-0">[${new Date().toLocaleTimeString()}]</span>
             <span class="font-extrabold uppercase px-2 py-0.5 rounded text-[11px] border ${badgeCls} shrink-0">${action}</span>
-            <span class="text-teal-300 font-bold text-xs font-mono shrink-0">${data.collection}</span>
+            <span class="text-teal-300 font-bold text-xs font-mono shrink-0">${data.table || data.collection}</span>
             ${recordId !== '' ? `<span class="text-slate-400 text-xs font-mono bg-slate-800/80 px-1.5 py-0.5 rounded shrink-0">#${recordId}</span>` : ''}
           </div>
           <div class="flex items-center space-x-2 shrink-0">

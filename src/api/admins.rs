@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
@@ -8,8 +8,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::core::app::AppState;
-use crate::core::auth::{create_jwt, verify_password};
+use crate::core::auth::{authenticate_headers, create_jwt, verify_password};
 use crate::core::db::{get_system_settings, json_get_i64, json_get_str, save_system_settings, Val};
+
+fn check_admin_token_if_present(
+    headers: &HeaderMap,
+) -> Result<bool, (StatusCode, Json<serde_json::Value>)> {
+    if let Some(claims) = authenticate_headers(headers)? {
+        if claims.role != "admin" && claims.role != "superadmin" {
+            return Err((
+                StatusCode::FORBIDDEN,
+                Json(json!({ "code": 403, "message": "Only administrators can perform this action." })),
+            ));
+        }
+        return Ok(true);
+    }
+    Ok(false)
+}
 
 #[derive(Deserialize)]
 pub struct AuthWithPasswordRequest {
@@ -85,7 +100,9 @@ pub async fn has_admins(
 
 pub async fn list_admins(
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    check_admin_token_if_present(&headers)?;
     let rows = state
         .db
         .fetch_all(
@@ -124,8 +141,10 @@ pub struct CreateAdminRequest {
 
 pub async fn create_admin(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<CreateAdminRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    check_admin_token_if_present(&headers)?;
     if payload.password.len() < 8 {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -156,8 +175,10 @@ pub async fn create_admin(
 
 pub async fn delete_admin(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    check_admin_token_if_present(&headers)?;
     let count_row = state
         .db
         .fetch_one("SELECT COUNT(*) as `total` FROM `_admins`", &[])
@@ -205,8 +226,10 @@ pub async fn get_settings(
 
 pub async fn update_settings(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<serde_json::Value>)> {
+    check_admin_token_if_present(&headers)?;
     let updated = save_system_settings(&state.db, payload).await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,

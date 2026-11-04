@@ -176,6 +176,20 @@ async fn handle_auth_with_password(
 
     let id = json_get_str(&row, "id");
     let email = json_get_str(&row, "email");
+    let status = json_get_str(&row, "status");
+    if !status.trim().is_empty()
+        && !status.eq_ignore_ascii_case("active")
+        && !status.eq_ignore_ascii_case("1")
+        && !status.eq_ignore_ascii_case("true")
+    {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "code": 403,
+                "message": format!("Account is currently '{}' and cannot sign in.", status.trim())
+            })),
+        ));
+    }
     let raw_role = json_get_str(&row, "role");
     let role = if !raw_role.trim().is_empty() {
         raw_role.trim().to_string()
@@ -392,11 +406,7 @@ async fn handle_register(
 
     if col.realtime {
         if let Ok(val) = serde_json::to_value(&record) {
-            state.realtime.broadcast(RealtimeMessage {
-                action: "create".to_string(),
-                collection: col.name.clone(),
-                record: val,
-            });
+            state.realtime.broadcast(RealtimeMessage::new("create", &col.name, val));
         }
     }
 
@@ -884,6 +894,25 @@ async fn handle_auth_refresh(
             )
         })?;
 
+    let status = record
+        .data
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("active");
+    if !status.trim().is_empty()
+        && !status.eq_ignore_ascii_case("active")
+        && !status.eq_ignore_ascii_case("1")
+        && !status.eq_ignore_ascii_case("true")
+    {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(json!({
+                "code": 403,
+                "message": format!("Account is currently '{}'.", status.trim())
+            })),
+        ));
+    }
+
     let email = record
         .data
         .get("email")
@@ -908,5 +937,125 @@ async fn handle_auth_refresh(
     Ok(Json(json!({
         "token": token,
         "record": record
+    })))
+}
+
+/// Logout endpoint: `POST /api/{collection}/logout` (rotates tokenKey & invalidates session)
+pub async fn logout(
+    State(state): State<AppState>,
+    Path(collection_name): Path<String>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    handle_logout(state, Some(collection_name), headers).await
+}
+
+/// Shortcut logout endpoint: `POST /api/auth/logout`
+pub async fn logout_default(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    handle_logout(state, None, headers).await
+}
+
+async fn handle_logout(
+    state: AppState,
+    collection_override: Option<String>,
+    headers: HeaderMap,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    if let Some(claims) = authenticate_headers(&headers)? {
+        let col_lookup = collection_override
+            .or_else(|| claims.collection_id.clone())
+            .unwrap_or_else(|| "users".to_string());
+
+        if let Ok(col) = resolve_auth_collection(&state, &col_lookup).await {
+            if let Ok(meta) = get_table_metadata(&state.db, &col.name).await {
+                if meta.has_column("tokenKey") {
+                    let rotated = generate_token_key();
+                    let sql = format!(
+                        "UPDATE `{}` SET `tokenKey` = ? WHERE `{}` = ?;",
+                        col.name, meta.pk_column
+                    );
+                    let _ = state
+                        .db
+                        .execute(&sql, &[Val::from(&rotated), Val::from(&claims.sub)])
+                        .await;
+                }
+            }
+        }
+    }
+
+    Ok(Json(json!({
+        "success": true,
+        "message": "Logged out successfully."
+    })))
+}
+
+/// Update current user's profile: `PATCH / PUT /api/{collection}/me`
+pub async fn update_profile(
+    State(state): State<AppState>,
+    Path(collection_name): Path<String>,
+    headers: HeaderMap,
+    Json(payload): Json<Map<String, Value>>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    handle_update_profile(state, Some(collection_name), headers, payload).await
+}
+
+/// Shortcut update current user's profile: `PATCH / PUT /api/auth/me` or `/api/auth/profile`
+pub async fn update_profile_default(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<Map<String, Value>>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    handle_update_profile(state, None, headers, payload).await
+}
+
+async fn handle_update_profile(
+    state: AppState,
+    collection_override: Option<String>,
+    headers: HeaderMap,
+    mut payload: Map<String, Value>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let claims = authenticate_headers(&headers)?.ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({ "code": 401, "message": "Authentication required." })),
+        )
+    })?;
+
+    let col_lookup = collection_override
+        .or_else(|| claims.collection_id.clone())
+        .unwrap_or_else(|| "users".to_string());
+    let col = resolve_auth_collection(&state, &col_lookup).await?;
+
+    // Prevent non-admin users from escalating their own role, status, or verification state
+    let is_admin = claims.role == "admin" || claims.role == "superadmin";
+    if !is_admin {
+        payload.remove("role");
+        payload.remove("status");
+        payload.remove("verified");
+    }
+    payload.remove("id");
+    payload.remove("tokenKey");
+    payload.remove("passwordHash");
+    payload.remove("password");
+
+    let record = crate::core::record::update_record(&state.db, &col, &claims.sub, payload)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "code": 400, "message": format!("Failed to update profile: {}", e) })),
+            )
+        })?;
+
+    if col.realtime {
+        if let Ok(val) = serde_json::to_value(&record) {
+            state.realtime.broadcast(RealtimeMessage::new("update", &col.name, val));
+        }
+    }
+
+    Ok(Json(json!({
+        "record": record,
+        "message": "Profile updated successfully."
     })))
 }

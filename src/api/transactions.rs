@@ -133,11 +133,7 @@ pub async fn execute_transaction(
 
                 if col.realtime {
                     if let Ok(val) = serde_json::to_value(&record) {
-                        pending_realtime_events.push(RealtimeMessage {
-                            action: "create".to_string(),
-                            collection: col.name.clone(),
-                            record: val,
-                        });
+                        pending_realtime_events.push(RealtimeMessage::new("create", &col.name, val));
                     }
                 }
 
@@ -223,11 +219,7 @@ pub async fn execute_transaction(
 
                 if col.realtime {
                     if let Ok(val) = serde_json::to_value(&record) {
-                        pending_realtime_events.push(RealtimeMessage {
-                            action: "update".to_string(),
-                            collection: col.name.clone(),
-                            record: val,
-                        });
+                        pending_realtime_events.push(RealtimeMessage::new("update", &col.name, val));
                     }
                 }
 
@@ -321,11 +313,11 @@ pub async fn execute_transaction(
                 }
 
                 if col.realtime {
-                    pending_realtime_events.push(RealtimeMessage {
-                        action: "delete".to_string(),
-                        collection: col.name.clone(),
-                        record: json!({ "id": rec_id }),
-                    });
+                    pending_realtime_events.push(RealtimeMessage::new(
+                        "delete",
+                        &col.name,
+                        json!({ "id": rec_id }),
+                    ));
                 }
 
                 results.push(json!({
