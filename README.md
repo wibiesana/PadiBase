@@ -22,6 +22,12 @@
   Dashboard web yang modern dan responsif ter-embed langsung di dalam binary via `rust-embed` dan dapat diakses di `/dashboard/`.
 - **📁 File Storage System**:
   Manajemen penyimpanan media & attachments dengan proteksi directory traversal.
+- **🛠️ Visual SQL Query Builder & Advanced Aggregation**:
+  Perancang query SQL interaktif visual dengan live preview, live parameter binding, JOINs, atomic multi-table transactions, serta dukungan fungsi kalkulasi & agregasi lengkap (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `COALESCE`, `ROUND`, `GROUP_CONCAT`, `GROUP BY`, `HAVING`, `DISTINCT`).
+- **🛡️ Granular API Access Rules & RBAC (Pemisahan 'list' vs 'all')**:
+  Kontrol hak akses independen antara `list` (paginasi) dan `all` (unpaginated list gaya Padi Rust) yang terintegrasi di modal terpadu *API Endpoints & Rules*, dengan default role bersih (`admin` dan `user`).
+- **💎 Custom Confirmation Modal & Ergonomic Table Experience**:
+  Menggantikan dialog browser bawaan dengan modal konfirmasi interaktif bergaya modern (Danger, Warning, Info, Primary), dukungan keyboard shortcut (<kbd>Esc</kbd> / <kbd>Enter</kbd>), dan interaksi tabel aman (drawer edit hanya dipicu via tombol Edit).
 - **📑 API Collection Exporter (Postman & REST Client)**:
   Ekspor seluruh koleksi atau per-koleksi ke format standar **Postman Collection v2.1.0** yang langsung dapat diimpor ke **Postman**, **Insomnia**, **Thunder Client**, **Bruno**, maupun **VS Code REST Client**, lengkap dengan environment variable (`base_url`, `auth_token`, id variable), dummy sample body otomatis, dan post-response test script.
 
@@ -176,28 +182,94 @@ File yang dihasilkan di folder `./api_collection/`:
 
 ## 🔒 Security & API Access Rules (Default Logged-in Requirement)
 
-Secara default, **PadiBase menerapkan proteksi keamanan berbasis autentikasi**:
+Secara default, **PadiBase menerapkan proteksi keamanan berbasis autentikasi dan RBAC**:
 1. **Default Create, Update, dan Delete**:
    - Operasi `create`, `update`, dan `delete` **secara default wajib dilakukan oleh user yang telah login** (`@request.auth.id != ""`, baik sebagai admin token maupun user token dari auth collection).
    - Request dari user anonymous / publik tanpa header `Authorization: Bearer <token>` akan ditolak dengan response **`401 Unauthorized`**.
-2. **Otorisasi Berbasis Role (`users.role` / RBAC)**:
-   - Mendukung pembatasan aksi spesifik berdasarkan role pengguna yang login (misalnya `creator`, `editor`, `admin`, dll.).
+2. **Pemisahan Akses Mandiri untuk `list` vs `all`**:
+   - **`list_rule`**: Mengatur izin untuk pembacaan data terpaginasi (`GET /api/:collection?page=1&perPage=30`).
+   - **`all_rule`**: Mengatur izin khusus untuk penarikan **seluruh data tanpa paginasi** (`GET /api/:collection/all` dan ekspor data). Hal ini memberi fleksibilitas jika Anda ingin paginasi terbuka untuk publik (`public`), namun penarikan seluruh data massal (`all`) dibatasi khusus pengguna terotentikasi atau `admin`.
+3. **Otorisasi Berbasis Role (`users.role` / RBAC)**:
+   - Mendukung pembatasan aksi spesifik berdasarkan role pengguna yang login (default ringkas: `admin` dan `user`, serta role tambahan yang dapat dibuat di Settings).
    - Role dibaca otomatis dari kolom `role` di tabel `users` saat user login dan disematkan ke dalam JWT Claims.
    - Format ekspresi rule yang didukung:
-     - `@request.auth.role = 'creator'` atau `@request.auth.role in ['admin', 'creator']`
-     - `admin, creator` (format shortcut fleksibel)
-     - `role: creator, admin`
+     - `@request.auth.role = 'admin'` atau `@request.auth.role = 'user'`
+     - `@request.auth.role in ['admin', 'manager']`
+     - `admin, user` (format shortcut fleksibel)
+     - `role: admin, user`
    - Superadmin / Admin selalu memiliki hak akses penuh (*bypass*).
-3. **Kecuali User Mengubah Setting Sebaliknya di Dashboard (`/dashboard/`)**:
-   - Jika ingin membuka akses publik untuk aksi tertentu (misalnya buku tamu, registrasi publik, form kontak publik), administrator dapat membuka drawer **Schema & Rules** di Dashboard dan mengubah rule field tersebut menjadi `public`.
-   - Tersedia tombol preset cepat di Dashboard:
+4. **Terintegrasi Penuh pada Modal "API Endpoints & Rules"**:
+   - Konfigurasi Access Rules kini disatukan langsung di dalam modal **API Endpoints & Rules** (sebelumnya terpisah di Structure Drawer), sehingga developer dapat melihat spesifikasi REST endpoint dan mengatur aturan keamanannya secara berdampingan.
+   - Tersedia tombol preset cepat:
      - `Auth (Default)`: Wajib login (`@request.auth.id != ""`).
-     - `Creator`: Khusus role creator atau admin (`@request.auth.role in ['admin', 'creator']`).
      - `Public`: Terbuka untuk umum / siapapun (`public`).
      - `Owner`: Hanya pemilik record yang bersangkutan (`id = @request.auth.id` atau `user_id = @request.auth.id`).
-     - `Admin`: Hanya administrator (`admin`).
-4. **List dan View**:
-   - Operasi membaca data (`list`, `all`, `get_one`) secara default terbuka untuk publik (`public`) agar frontend dapat menyajikan data dengan cepat, kecuali jika rule list/view diatur khusus ke `auth`, role tertentu, atau `admin`.
+     - `Admin`: Khusus administrator (`@request.auth.role = 'admin'`).
+
+---
+
+## 🛠️ Visual SQL Builder & Advanced Aggregate Engine
+
+PadiBase dilengkapi dengan **Visual SQL Builder** terintegrasi di `/dashboard/` untuk mendesain query database yang kompleks secara visual dengan sinkronisasi parameter dinamis dan eksekusi live test:
+
+### 1. Fitur Perancangan Visual:
+- **Operasi SQL Utama**: Mendukung `SELECT`, `INSERT`, `UPDATE`, `DELETE`, dan `COUNT`.
+- **Dukungan `SELECT DISTINCT`**: Checkbox satu-klik untuk memfilter duplikasi baris.
+- **Table JOINs Interaktif**: Hubungkan tabel relasi dengan mudah menggunakan `LEFT JOIN`, `INNER JOIN`, atau `RIGHT JOIN`.
+- **Multi-Table Atomic Transactions**: Tambahkan beberapa mutasi tabel dalam satu transaksi atomik (`BEGIN ... COMMIT`) dengan referensi otomatis ID yang baru dibuat via `:last_insert_id`.
+- **WHERE Clause Builder**: Buat filter dinamis berbasis parameter (`:param`) maupun token autentikasi (`@request.auth.id`), lengkap dengan preset tombol *"👤 Own Create Only"*.
+
+### 2. Fungsi Kalkulasi & Agregasi Lengkap (*Aggregate Functions*):
+Anda dapat menambahkan multi-kalkulasi langsung ke dalam query dengan alias kustom:
+- **`COUNT(*)`**: Total seluruh baris data.
+- **`COUNT(col)`**: Menghitung baris kolom yang tidak bernilai NULL.
+- **`COUNT(DISTINCT col)`**: Menghitung nilai unik (*unique count*).
+- **`SUM(col)`**: Menjumlahkan total nilai kolom numerik.
+- **`COALESCE(SUM(col), 0)`**: Penjumlahan aman (*safe sum*) untuk menghindari nilai NULL saat data kosong.
+- **`AVG(col)`**: Menghitung nilai rata-rata.
+- **`ROUND(AVG(col), 2)`**: Nilai rata-rata yang dibulatkan hingga 2 desimal.
+- **`MIN(col)`**: Mengambil nilai terkecil / tanggal terawal.
+- **`MAX(col)`**: Mengambil nilai terbesar / tanggal terakhir.
+- **`GROUP_CONCAT(col)`**: Menggabungkan teks baris menjadi string berkoma.
+
+### 3. Pengelompokan & Filter Agregat (`GROUP BY` & `HAVING`):
+- **Group By Chips**: Cukup klik nama kolom (misal `is_active`, `category`, `status`), query akan otomatis menambahkan klausa `GROUP BY`.
+- **HAVING Clause**: Tuliskan kondisi filter untuk kelompok agregat (misal `count > 1` atau `SUM(id) >= 100`).
+- **Dynamic Sorting (`ORDER BY`)**: Dropdown pengurutan otomatis mendeteksi nama alias agregasi yang Anda buat (misal: Anda dapat langsung mengurutkan `ORDER BY count DESC` atau `ORDER BY total_value DESC`).
+
+### 4. Eksekusi Komentar SQL (`--` & `/* */`) yang Bersih:
+- Engine backend PadiBase secara otomatis mengabaikan header komentar SQL (`-- ...` dan `/* ... */`) saat mendeteksi tipe statement, memastikan query `SELECT` yang memiliki header catatan/komentar tetap mengeksekusi pengambilan data baris secara utuh.
+- Logger profiler debug pada response JSON (`debug.queries`) otomatis dibersihkan dari baris komentar banner agar tampilan log query tetap ringkas dan fokus pada SQL murninya.
+
+### 5. Relasi Objek JSON Bertingkat (*Nested JSON Object Relations*):
+- **⚡ Tombol Auto-Detect Relations**:
+  Cukup satu klik tombol *⚡ Auto-Detect Relations* di card Table JOINs, builder akan memindai kolom foreign key (`user_id`, `chapter_id`, dll.) pada tabel yang dipilih, mencocokkan tabel relasinya, dan menyusun JOIN nested object secara otomatis.
+- **Toggle Output: Nested Object vs Flat Columns**:
+  Tiap baris JOIN menyediakan opsi format:
+  - **📦 Nested Object**: Menghasilkan objek bersarang seperti `"user": { "id": 4, "username": "alina" }` dan `"chapter": { "id": 486, "title": "Bab 1: 18:47" }`.
+  - **📄 Flat Columns**: Menghasilkan kolom biasa ber-alias seperti `users_username`.
+- **Kunci Objek & Field Selector Dinamis**:
+  Dapat menentukan key nama relasi (misalnya `user`, `chapter`) dan memilih field spesifik mana saja yang ingin disematkan ke dalam objek.
+- **Sintaks SQL Native `JSON_OBJECT(...)`**:
+  Builder menyusun query menggunakan fungsi native `JSON_OBJECT('id', u.id, 'username', u.username) AS user` yang kompatibel dengan SQLite, MySQL, dan PostgreSQL.
+- **Auto-Parsing JSON Response di Backend**:
+  Serializer response PadiBase otomatis mengenali string JSON hasil `JSON_OBJECT` dan mem-parsingnya menjadi objek JSON asli (*native JSON object/array*), tanpa karakter escape (`\"`).
+
+---
+
+## 💎 Pengalaman UI & Sistem Konfirmasi Modern
+
+1. **Global Custom Confirmation Modal (`#padiConfirmModal`)**:
+   - Seluruh pop-up `confirm(...)` bawaan browser telah digantikan oleh modal kustom modern dengan efek `backdrop-blur-xs`, animasi kartu halus, serta ikon badge kontekstual:
+     - **Danger (Rose)**: Hapus record, hapus file storage, drop tabel, hapus endpoint/role/admin.
+     - **Warning (Amber)**: Restore backup database snapshot.
+     - **Info (Teal)**: Kirim email link verifikasi user, toggle verifikasi akun.
+   - **Keyboard Navigation**: Mendukung tombol <kbd>Esc</kbd> untuk membatalkan dialog dan tombol <kbd>Enter</kbd> untuk langsung mengonfirmasi aksi.
+2. **Interaksi Tabel Data yang Aman**:
+   - Baris data tabel (`<tr>`) tidak lagi memicu drawer edit record saat diklik secara tidak sengaja.
+   - Form editor record kini hanya muncul jika pengguna menekan tombol **Edit** kuning di kolom aksi secara eksplisit.
+3. **Ergonomi Navigasi**:
+   - Menu **Settings & System** diposisikan rapi di bagian paling bawah left rail navigasi (di bawah Visual SQL Builder).
 
 ---
 

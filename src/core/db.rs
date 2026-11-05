@@ -202,6 +202,39 @@ fn redact_binding(v: Value) -> Value {
     }
 }
 
+fn clean_sql_for_log(sql: &str) -> String {
+    let mut result = String::with_capacity(sql.len());
+    let mut chars = sql.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '-' && chars.peek() == Some(&'-') {
+            chars.next();
+            while let Some(&nc) = chars.peek() {
+                chars.next();
+                if nc == '\n' {
+                    result.push(' ');
+                    break;
+                }
+            }
+        } else if c == '/' && chars.peek() == Some(&'*') {
+            chars.next();
+            while let Some(nc) = chars.next() {
+                if nc == '*' && chars.peek() == Some(&'/') {
+                    chars.next();
+                    break;
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    let collapsed = result.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        sql.split_whitespace().collect::<Vec<_>>().join(" ")
+    } else {
+        collapsed
+    }
+}
+
 pub fn record_query(sql: &str, params: &[Val], start: std::time::Instant) {
     // Profiling is only active inside a request scope with debug enabled; skip all work otherwise.
     let _ = REQUEST_QUERIES.try_with(|cell| {
@@ -212,7 +245,7 @@ pub fn record_query(sql: &str, params: &[Val], start: std::time::Instant) {
                 return;
             }
             logs.push(QueryLog {
-                sql: sql.split_whitespace().collect::<Vec<_>>().join(" "),
+                sql: clean_sql_for_log(sql),
                 bindings: params
                     .iter()
                     .map(|p| redact_binding(Value::from(p)))
@@ -683,6 +716,18 @@ fn bind_postgres<'q>(
     q
 }
 
+fn parse_json_str_or_val(s: String) -> Value {
+    let trimmed = s.trim();
+    if (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+    {
+        if let Ok(parsed) = serde_json::from_str::<Value>(trimmed) {
+            return parsed;
+        }
+    }
+    Value::String(s)
+}
+
 fn sqlite_row_to_json(row: &sqlx::sqlite::SqliteRow) -> Value {
     let mut map = Map::new();
     for (i, col) in row.columns().iter().enumerate() {
@@ -693,9 +738,9 @@ fn sqlite_row_to_json(row: &sqlx::sqlite::SqliteRow) -> Value {
         } else if let Ok(v) = row.try_get::<Option<bool>, _>(i) {
             v.map(|x| json!(x))
         } else if let Ok(v) = row.try_get::<Option<String>, _>(i) {
-            v.map(|x| json!(x))
+            v.map(parse_json_str_or_val)
         } else if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(i) {
-            v.map(|x| String::from_utf8(x).map(|s| json!(s)).unwrap_or(Value::Null))
+            v.map(|x| String::from_utf8(x).map(parse_json_str_or_val).unwrap_or(Value::Null))
         } else {
             None
         };
@@ -726,9 +771,9 @@ fn mysql_row_to_json(row: &sqlx::mysql::MySqlRow) -> Value {
         } else if let Ok(v) = row.try_get::<Option<chrono::NaiveTime>, _>(i) {
             v.map(|x| json!(x.to_string()))
         } else if let Ok(v) = row.try_get::<Option<String>, _>(i) {
-            v.map(|x| json!(x))
+            v.map(parse_json_str_or_val)
         } else if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(i) {
-            v.map(|x| String::from_utf8(x).map(|s| json!(s)).unwrap_or(Value::Null))
+            v.map(|x| String::from_utf8(x).map(parse_json_str_or_val).unwrap_or(Value::Null))
         } else {
             None
         };
@@ -759,9 +804,9 @@ fn pg_row_to_json(row: &sqlx::postgres::PgRow) -> Value {
         } else if let Ok(v) = row.try_get::<Option<chrono::NaiveTime>, _>(i) {
             v.map(|x| json!(x.to_string()))
         } else if let Ok(v) = row.try_get::<Option<String>, _>(i) {
-            v.map(|x| json!(x))
+            v.map(parse_json_str_or_val)
         } else if let Ok(v) = row.try_get::<Option<Vec<u8>>, _>(i) {
-            v.map(|x| String::from_utf8(x).map(|s| json!(s)).unwrap_or(Value::Null))
+            v.map(|x| String::from_utf8(x).map(parse_json_str_or_val).unwrap_or(Value::Null))
         } else {
             None
         };
@@ -1105,6 +1150,7 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
             auto_load_relations: false,
             blameable: true,
             list_rule: Some("".to_string()),
+            all_rule: Some("".to_string()),
             view_rule: Some("".to_string()),
             create_rule: Some("".to_string()),
             update_rule: Some("id = @request.auth.id".to_string()),
@@ -1140,11 +1186,6 @@ pub fn default_system_settings() -> Value {
         },
         "roles": [
             "admin",
-            "manager",
-            "editor",
-            "moderator",
-            "staff",
-            "creator",
             "user"
         ],
         "smtp": {
@@ -1190,11 +1231,6 @@ pub async fn get_available_roles(pool: &DbPool) -> Vec<String> {
     }
     vec![
         "admin".to_string(),
-        "manager".to_string(),
-        "editor".to_string(),
-        "moderator".to_string(),
-        "staff".to_string(),
-        "creator".to_string(),
         "user".to_string(),
     ]
 }
@@ -1406,6 +1442,7 @@ fn value_to_collection(r: &Value) -> Collection {
         auto_load_relations,
         blameable,
         list_rule: json_get_opt_str(r, "listRule"),
+        all_rule: json_get_opt_str(r, "allRule"),
         view_rule: json_get_opt_str(r, "viewRule"),
         create_rule: json_get_opt_str(r, "createRule"),
         update_rule: json_get_opt_str(r, "updateRule"),
@@ -2184,6 +2221,7 @@ pub async fn sync_existing_tables(pool: &DbPool) -> Result<Vec<String>> {
             auto_load_relations: false,
             blameable: true,
             list_rule: Some("".to_string()),
+            all_rule: Some("".to_string()),
             view_rule: Some("".to_string()),
             create_rule: Some("@request.auth.id != \"\"".to_string()),
             update_rule: Some("@request.auth.id != \"\"".to_string()),

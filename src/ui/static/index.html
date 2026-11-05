@@ -159,16 +159,16 @@
             <span id="sseStatusDot" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse ml-auto hidden md:block"></span>
           </button>
 
-          <!-- 4. Settings & System -->
-          <button id="railSettingsBtn" onclick="switchMainView('settings')" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-900 transition relative" title="Settings & System">
-            <i class="fa-solid fa-sliders text-sm w-5 text-center text-indigo-400"></i>
-            <span class="hidden md:inline">Settings &amp; System</span>
-          </button>
-
-          <!-- 5. Visual SQL Builder -->
+          <!-- 4. Visual SQL Builder -->
           <button id="railSqlbuilderBtn" onclick="switchMainView('sqlbuilder')" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-900 transition relative" title="Visual SQL Builder">
             <i class="fa-solid fa-wand-magic-sparkles text-sm w-5 text-center text-cyan-400"></i>
             <span class="hidden md:inline">Visual SQL Builder</span>
+          </button>
+
+          <!-- 5. Settings & System -->
+          <button id="railSettingsBtn" onclick="switchMainView('settings')" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-900 transition relative" title="Settings & System">
+            <i class="fa-solid fa-sliders text-sm w-5 text-center text-indigo-400"></i>
+            <span class="hidden md:inline">Settings &amp; System</span>
           </button>
         </nav>
       </div>
@@ -301,18 +301,18 @@
               </div>
             </div>
 
-            <!-- Right Actions: API Preview, Edit Table & Schema, New Record -->
+            <!-- Right Actions: API Endpoints & Rules, Edit Table Schema, New Record -->
             <div class="flex items-center space-x-2 shrink-0">
-              <!-- API Preview Modal Trigger -->
-              <button onclick="openApiPreviewModal()" class="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center space-x-1.5 transition" title="View API endpoints for this table">
-                <i class="fa-solid fa-code text-slate-500 text-[11px]"></i>
-                <span class="hidden sm:inline">API Preview</span>
+              <!-- API Endpoints & Rules Modal Trigger -->
+              <button onclick="openApiPreviewModal()" class="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center space-x-1.5 transition" title="View API endpoints, copy code snippets, and manage access rules">
+                <i class="fa-solid fa-code text-indigo-600 text-[11px]"></i>
+                <span class="hidden sm:inline">API Endpoints &amp; Rules</span>
               </button>
 
-              <!-- Edit Table Schema & Rules Drawer Trigger -->
-              <button onclick="openSchemaEditorPage()" class="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center space-x-1.5 transition" title="Edit table structure, schema columns, and API access rules">
+              <!-- Edit Table Schema & Structure Drawer Trigger -->
+              <button onclick="openSchemaEditorPage()" class="px-3 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold flex items-center space-x-1.5 transition" title="Edit table structure, schema columns, and table options">
                 <i class="fa-solid fa-table-columns text-emerald-600 text-[11px]"></i>
-                <span class="hidden sm:inline">Structure &amp; Rules</span>
+                <span class="hidden sm:inline">Structure</span>
               </button>
 
               <!-- New Record Slide-Over Trigger -->
@@ -663,7 +663,7 @@
                   </div>
                 </div>
                 <input type="text" id="epAuthRuleInput" value="public" oninput="updateRoleDropdownUI('epAuthRuleInput')" placeholder='public or @request.auth.role = "admin"' class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 font-mono text-xs text-slate-800 focus:outline-none focus:border-emerald-600 shadow-2xs">
-                <div class="text-[11px] text-slate-400">Controls who can call this endpoint: e.g. <code>public</code>, <code>@request.auth.id != ''</code>, or <code>@request.auth.role = 'manager'</code>.</div>
+                <div class="text-[11px] text-slate-400">Controls who can call this endpoint: e.g. <code>public</code>, <code>@request.auth.id != ''</code>, or <code>@request.auth.role = 'admin'</code>.</div>
               </div>
 
               <!-- Description & Execution Options -->
@@ -1631,16 +1631,6 @@
                   </div>
                 </div>
 
-                <!-- Scalar / Hello Quick Action Banner -->
-                <div class="flex items-center justify-between bg-emerald-50/70 border border-emerald-200 rounded-xl px-3.5 py-2 text-xs flex-wrap gap-2">
-                  <div class="flex items-center space-x-2 text-emerald-800">
-                    <i class="fa-solid fa-lightbulb text-emerald-600 text-sm"></i>
-                    <span>Need to return just plain text or custom message without SQL query?</span>
-                  </div>
-                  <button type="button" onclick="applyQbPlainText('hello')" class="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition shrink-0 cursor-pointer shadow-2xs">
-                    💬 Return 'hello' Text (Direct / No SQL)
-                  </button>
-                </div>
               </div>
 
               <!-- Column Selector Section (SELECT, INSERT, UPDATE) -->
@@ -1651,12 +1641,53 @@
                     <span id="qbColumnsLabel">Select Columns to Return</span>
                   </label>
                   <div class="flex items-center space-x-1.5 text-xs">
+                    <label class="flex items-center space-x-1 cursor-pointer font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-lg transition" title="Filter duplicate rows with SELECT DISTINCT">
+                      <input type="checkbox" id="qbDistinctCheckbox" onchange="buildSqlFromQb()" class="rounded border-slate-300 text-emerald-600">
+                      <span class="text-[11px]">DISTINCT</span>
+                    </label>
                     <button type="button" onclick="qbSelectAllColumns(true)" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[11px] transition cursor-pointer">All (*)</button>
                     <button type="button" onclick="qbSelectAllColumns(false)" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[11px] transition cursor-pointer">Clear</button>
                   </div>
                 </div>
                 <div id="qbColumnsContainer" class="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-1.5 bg-slate-50/80 rounded-xl border border-slate-150">
                   <!-- Column chips injected here -->
+                </div>
+              </div>
+
+              <!-- Aggregate Functions & Calculations Section (COUNT, SUM, AVG, MIN, MAX) -->
+              <div id="qbAggregatesSection" class="space-y-2.5 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <label class="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
+                      <i class="fa-solid fa-calculator text-amber-500"></i>
+                      <span>Aggregate Functions &amp; Calculations (COUNT, SUM, AVG, MIN, MAX)</span>
+                    </label>
+                    <p class="text-[10px] text-slate-400">Compute metrics, statistics, and totals directly in SQL with custom aliases.</p>
+                  </div>
+                  <div class="flex items-center space-x-1.5">
+                    <button type="button" onclick="addQbAggregateRow()" class="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-[11px] transition flex items-center space-x-1 cursor-pointer border border-amber-200">
+                      <i class="fa-solid fa-plus text-[10px]"></i>
+                      <span>Add Function</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Quick Presets -->
+                <div class="flex items-center flex-wrap gap-1.5 pt-0.5 text-[11px]">
+                  <span class="text-slate-400 text-[10px] font-semibold mr-1">Quick Add:</span>
+                  <button type="button" onclick="quickAddQbAggregate('COUNT_ALL', '*')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[10px] font-bold transition cursor-pointer">+ COUNT(*)</button>
+                  <button type="button" onclick="quickAddQbAggregate('COUNT')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[10px] font-bold transition cursor-pointer">+ COUNT(col)</button>
+                  <button type="button" onclick="quickAddQbAggregate('SUM')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[10px] font-bold transition cursor-pointer">+ SUM(col)</button>
+                  <button type="button" onclick="quickAddQbAggregate('COALESCE_SUM')" class="px-2 py-0.5 rounded-md bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200/80 font-mono text-[10px] font-bold transition cursor-pointer">+ COALESCE(SUM, 0)</button>
+                  <button type="button" onclick="quickAddQbAggregate('AVG')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[10px] font-bold transition cursor-pointer">+ AVG(col)</button>
+                  <button type="button" onclick="quickAddQbAggregate('ROUND_AVG')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[10px] font-bold transition cursor-pointer">+ ROUND(AVG, 2)</button>
+                  <button type="button" onclick="quickAddQbAggregate('MIN')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[10px] font-bold transition cursor-pointer">+ MIN(col)</button>
+                  <button type="button" onclick="quickAddQbAggregate('MAX')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[10px] font-bold transition cursor-pointer">+ MAX(col)</button>
+                  <button type="button" onclick="quickAddQbAggregate('GROUP_CONCAT')" class="px-2 py-0.5 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-700 font-mono text-[10px] font-bold transition cursor-pointer">+ GROUP_CONCAT(col)</button>
+                </div>
+
+                <div id="qbAggregatesContainer" class="space-y-2">
+                  <div id="qbEmptyAggregatesNotice" class="text-xs text-slate-400 italic py-1">No aggregate functions added. Query returns raw column values.</div>
                 </div>
               </div>
 
@@ -1670,13 +1701,49 @@
                     </label>
                     <p class="text-[10px] text-slate-400">Connect this table with data from other tables using matching keys (LEFT, INNER, or RIGHT JOIN).</p>
                   </div>
-                  <button type="button" onclick="addQbJoinRow()" class="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs transition flex items-center space-x-1 cursor-pointer border border-indigo-200">
-                    <i class="fa-solid fa-plus text-[10px]"></i>
-                    <span>Add JOIN</span>
-                  </button>
+                  <div class="flex items-center space-x-1.5">
+                    <button type="button" onclick="autoDetectQbJoins()" class="px-2.5 py-1.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs transition flex items-center space-x-1 cursor-pointer border border-purple-200" title="Scan foreign keys (like user_id, chapter_id) and auto-configure nested relations">
+                      <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>
+                      <span>Auto-Detect Relations</span>
+                    </button>
+                    <button type="button" onclick="addQbJoinRow()" class="px-3 py-1.5 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold text-xs transition flex items-center space-x-1 cursor-pointer border border-indigo-200">
+                      <i class="fa-solid fa-plus text-[10px]"></i>
+                      <span>Add JOIN</span>
+                    </button>
+                  </div>
                 </div>
                 <div id="qbJoinsContainer" class="space-y-2.5">
                   <div id="qbEmptyJoinsNotice" class="text-xs text-slate-400 italic py-1">No JOIN configured. Query only fetches from the primary table.</div>
+                </div>
+              </div>
+
+              <!-- GROUP BY & HAVING Section (SELECT only) -->
+              <div id="qbGroupBySection" class="space-y-2.5 bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs">
+                <div class="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <label class="text-xs font-bold text-slate-700 flex items-center space-x-1.5">
+                      <i class="fa-solid fa-diagram-project text-purple-600"></i>
+                      <span>Group By &amp; Having (GROUP BY / HAVING)</span>
+                    </label>
+                    <p class="text-[10px] text-slate-400">Categorize and group records by category, status, date, or foreign key.</p>
+                  </div>
+                  <div class="flex items-center space-x-1.5 text-xs">
+                    <button type="button" onclick="qbClearGroupBy()" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[11px] transition cursor-pointer">Clear Grouping</button>
+                  </div>
+                </div>
+
+                <!-- Group By Column Chips -->
+                <div class="space-y-1.5">
+                  <span class="text-[11px] font-semibold text-slate-600">Group By Column(s):</span>
+                  <div id="qbGroupByContainer" class="flex flex-wrap gap-1.5 p-1.5 bg-slate-50/80 rounded-xl border border-slate-150">
+                    <!-- Column chips injected here -->
+                  </div>
+                </div>
+
+                <!-- HAVING Condition -->
+                <div class="pt-1">
+                  <label class="block text-[11px] font-semibold text-slate-600 mb-1">HAVING Clause (Filter Aggregated Results — Optional):</label>
+                  <input type="text" id="qbHavingInput" oninput="buildSqlFromQb()" placeholder="e.g. `count` &gt; 1 or SUM(`id`) &gt;= 10" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-mono">
                 </div>
               </div>
 
@@ -1938,10 +2005,10 @@
             </div>
             <div class="min-w-0">
               <h3 class="text-sm font-extrabold text-slate-900 truncate">
-                Table Structure &amp; Rules: <span id="inlineSetColName" class="font-mono text-emerald-700">users</span>
+                Table Structure: <span id="inlineSetColName" class="font-mono text-emerald-700">users</span>
                 <button type="button" onclick="handleRenameCurrentCollection()" class="ml-1 p-1 rounded-md text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition" title="Rename table"><i class="fa-solid fa-pen text-[11px]"></i></button>
               </h3>
-              <p class="text-[11px] text-slate-500 truncate">Edit column schema, configure API access rules, and table options.</p>
+              <p class="text-[11px] text-slate-500 truncate">Edit column schema and table configuration options.</p>
             </div>
           </div>
           <button onclick="closeSchemaEditorPage()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition shrink-0" title="Close Drawer (Esc)">
@@ -1957,10 +2024,6 @@
             <button onclick="switchColSettingsTab('fields')" id="colTab_fields" class="w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-2.5 transition shrink-0">
               <i class="fa-solid fa-table-columns w-4 text-center"></i>
               <span class="flex-1 truncate">Structure (<span id="inlineColCountText">0</span>)</span>
-            </button>
-            <button onclick="switchColSettingsTab('rules')" id="colTab_rules" class="w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
-              <i class="fa-solid fa-shield-halved w-4 text-center text-indigo-600"></i>
-              <span class="flex-1 truncate">API Access Rules</span>
             </button>
             <button onclick="switchColSettingsTab('options')" id="colTab_options" class="w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0">
               <i class="fa-solid fa-gear w-4 text-center text-teal-600"></i>
@@ -2030,28 +2093,7 @@
           </div>
         </div>
 
-        <!-- TAB 2: API ACCESS RULES -->
-        <div id="colSettingsPane_rules" class="hidden space-y-4">
-          <div class="flex items-center justify-between border-b pb-3">
-            <div>
-              <h4 class="text-xs font-extrabold uppercase text-slate-700">API Access Permissions</h4>
-              <p class="text-[11px] text-slate-500">Configure who can list, view, create, edit, or delete records.</p>
-            </div>
-            <!-- Quick Presets -->
-            <div class="flex items-center space-x-1.5">
-              <span class="text-[11px] text-slate-400 font-semibold mr-1">Presets:</span>
-              <button type="button" onclick="applyInlineSecurityProfile('recommended')" class="px-2 py-1 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold">Public Read, Auth Write</button>
-              <button type="button" onclick="applyInlineSecurityProfile('public_all')" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-semibold">Public (All Open)</button>
-              <button type="button" onclick="applyInlineSecurityProfile('private_all')" class="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-semibold">Require Auth</button>
-            </div>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3" id="inlineRulesGrid">
-            <!-- Populated via renderInlineCollectionSettings() -->
-          </div>
-        </div>
-
-        <!-- TAB 3: TABLE OPTIONS -->
+        <!-- TAB 2: TABLE OPTIONS -->
         <div id="colSettingsPane_options" class="hidden space-y-4">
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Realtime Toggle Card -->
@@ -2119,7 +2161,7 @@
         </button>
         <button type="button" onclick="saveInlineCollectionSettings()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center space-x-1.5">
           <i class="fa-solid fa-check text-xs"></i>
-          <span>Save Structure &amp; Rules</span>
+          <span>Save Structure</span>
         </button>
       </div>
 
@@ -2264,7 +2306,7 @@
   </div>
 </div>
 
-  <!-- ================= DRAWER 4: API PREVIEW & CODE SNIPPETS (Full-height Right Drawer) ================= -->
+  <!-- ================= DRAWER 4: API ENDPOINTS & ACCESS RULES (Full-height Right Drawer) ================= -->
   <div id="apiPreviewModal" class="hidden fixed inset-0 z-50 overflow-hidden">
     <div class="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity" onclick="closeApiPreviewModal()"></div>
 
@@ -2278,9 +2320,9 @@
             </div>
             <div class="min-w-0">
               <h3 class="text-sm font-extrabold text-slate-900 truncate">
-                API Endpoints Guide: <span id="apiPreviewColName" class="font-mono text-emerald-700">users</span>
+                API Endpoints &amp; Access Rules: <span id="apiPreviewColName" class="font-mono text-emerald-700">users</span>
               </h3>
-              <p class="text-[11px] text-slate-500 truncate">Live REST endpoints, parameters, and copyable SDK snippets.</p>
+              <p class="text-[11px] text-slate-500 truncate">Live REST endpoints, parameters, and API access rules.</p>
             </div>
           </div>
           <div class="flex items-center space-x-2 shrink-0">
@@ -2298,7 +2340,18 @@
         <div class="flex-1 flex min-h-0 overflow-hidden">
           <!-- Left Sidebar Tabs -->
           <div class="w-48 sm:w-56 bg-slate-50 border-r border-slate-200 flex flex-col p-2.5 space-y-1 overflow-y-auto shrink-0 select-none" id="apiPreviewTabs">
-            <div class="px-2 pt-1 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Endpoints</div>
+            <!-- Access Control Group -->
+            <div class="px-2 pt-1 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-indigo-600 flex items-center justify-between">
+              <span>Access Control</span>
+              <i class="fa-solid fa-shield-halved text-[10px] text-indigo-500"></i>
+            </div>
+            <button data-api-tab="rules" onclick="renderApiPreview('rules')" class="w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0">
+              <i class="fa-solid fa-shield-halved text-[11px] w-4 opacity-80 text-indigo-600"></i>
+              <span>Access Rules</span>
+            </button>
+
+            <!-- Endpoints Group -->
+            <div class="px-2 pt-2.5 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 border-t border-slate-200/60 mt-1">Endpoints Guide</div>
             <button data-api-tab="list" onclick="renderApiPreview('list')" class="w-full text-left px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0">
               <i class="fa-solid fa-list text-[11px] w-4 opacity-80"></i>
               <span>GET List</span>
@@ -2426,17 +2479,17 @@
         <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
           <div class="font-extrabold text-slate-900 text-sm flex items-center">
             <span class="w-5 h-5 rounded-md bg-indigo-600 text-white text-[11px] flex items-center justify-center mr-2">2</span>
-            2. Edit Table Schema &amp; Access Rules
+            2. Edit Table Structure
           </div>
-          <p class="pl-7">Click <strong>Edit Table</strong> in the header to add or rename columns, configure foreign keys, or customize API access rules (Public, Auth Required, Admin Only).</p>
+          <p class="pl-7">Click <strong>Structure</strong> in the header to add or rename columns, configure foreign keys, or customize table options.</p>
         </div>
 
         <div class="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1.5">
           <div class="font-extrabold text-slate-900 text-sm flex items-center">
             <span class="w-5 h-5 rounded-md bg-amber-500 text-slate-950 text-[11px] flex items-center justify-center mr-2">3</span>
-            3. API Preview &amp; Custom API
+            3. API Endpoints &amp; Access Rules
           </div>
-          <p class="pl-7">Click <strong>API Preview</strong> to see curl and JS SDK snippets for the active table. Or use <strong>Custom API</strong> in the left rail to create custom dynamic queries.</p>
+          <p class="pl-7">Click <strong>API Endpoints &amp; Rules</strong> to see live REST endpoints, copy curl &amp; JS SDK snippets, and configure access permissions (Public, Auth Required, Admin Only).</p>
         </div>
       </div>
       <div class="px-5 py-3 border-t border-slate-200 bg-slate-50 flex justify-end">
@@ -2675,6 +2728,44 @@
     </div>
   </div>
 
-  <script src="/dashboard/app.js?v=24"></script>
+  <!-- ================= MODAL 11: GLOBAL CUSTOM CONFIRMATION MODAL ================= -->
+  <div id="padiConfirmModal" class="hidden fixed inset-0 z-[9999] overflow-y-auto" aria-labelledby="padiConfirmTitle" role="dialog" aria-modal="true">
+    <!-- Backdrop with blur -->
+    <div id="padiConfirmBackdrop" class="fixed inset-0 bg-slate-950/60 backdrop-blur-xs transition-opacity duration-150"></div>
+
+    <div class="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
+      <div id="padiConfirmCard" class="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-md border border-slate-200">
+        <div class="p-5 sm:p-6">
+          <div class="flex items-start space-x-3.5">
+            <!-- Icon Badge -->
+            <div id="padiConfirmIconBg" class="w-10 h-10 rounded-xl bg-teal-50 border border-teal-200 text-teal-600 flex items-center justify-center text-lg shrink-0">
+              <i id="padiConfirmIcon" class="fa-solid fa-circle-question"></i>
+            </div>
+            <!-- Title & Body -->
+            <div class="min-w-0 flex-1 pt-0.5">
+              <h3 class="text-sm font-extrabold text-slate-900" id="padiConfirmTitle">Confirmation</h3>
+              <div class="mt-1.5 text-xs text-slate-600 leading-relaxed break-words whitespace-pre-line" id="padiConfirmMessage">
+                Are you sure you want to proceed?
+              </div>
+            </div>
+            <button type="button" id="padiConfirmCloseBtn" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer shrink-0 -mr-1 -mt-1">
+              <i class="fa-solid fa-xmark text-sm"></i>
+            </button>
+          </div>
+        </div>
+        <!-- Modal Footer Buttons -->
+        <div class="bg-slate-50 px-5 py-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+          <button type="button" id="padiConfirmCancelBtn" class="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 rounded-xl transition cursor-pointer">
+            <span id="padiConfirmCancelText">Cancel</span>
+          </button>
+          <button type="button" id="padiConfirmOkBtn" class="px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer bg-emerald-600 hover:bg-emerald-700">
+            <span id="padiConfirmOkText">Confirm</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/dashboard/app.js?v=29"></script>
 </body>
 </html>

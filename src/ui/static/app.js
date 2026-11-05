@@ -248,6 +248,136 @@ let currentCollection = "users";
       setTimeout(() => el.remove(), 3200);
     }
 
+    function showConfirm(options) {
+      return new Promise((resolve) => {
+        let opts = typeof options === 'string' ? { message: options } : (options || {});
+
+        const rawMsg = opts.message || 'Are you sure you want to proceed?';
+        let title = opts.title;
+        let confirmText = opts.confirmText;
+        let cancelText = opts.cancelText || 'Cancel';
+        let type = opts.type;
+        let icon = opts.icon;
+
+        // Auto-detect type, title, icon and button text if not specified
+        const lowerMsg = rawMsg.toLowerCase();
+        if (!type) {
+          if (lowerMsg.includes('delete') || lowerMsg.includes('remove') || lowerMsg.includes('destroy') || lowerMsg.includes('lose access')) {
+            type = 'danger';
+          } else if (lowerMsg.includes('restore') || lowerMsg.includes('warning') || lowerMsg.includes('unverified')) {
+            type = 'warning';
+          } else if (lowerMsg.includes('email') || lowerMsg.includes('send') || lowerMsg.includes('verification')) {
+            type = 'info';
+          } else {
+            type = 'primary';
+          }
+        }
+
+        if (!title) {
+          if (type === 'danger') title = 'Confirm Deletion';
+          else if (type === 'warning') title = 'Warning';
+          else if (type === 'info') title = 'Confirm Action';
+          else title = 'Confirmation';
+        }
+
+        if (!confirmText) {
+          if (type === 'danger') confirmText = 'Delete';
+          else if (type === 'warning') confirmText = 'Proceed';
+          else if (type === 'info') confirmText = 'Send';
+          else confirmText = 'Confirm';
+        }
+
+        const modal = document.getElementById('padiConfirmModal');
+        const backdrop = document.getElementById('padiConfirmBackdrop');
+        const titleEl = document.getElementById('padiConfirmTitle');
+        const msgEl = document.getElementById('padiConfirmMessage');
+        const iconBgEl = document.getElementById('padiConfirmIconBg');
+        const iconEl = document.getElementById('padiConfirmIcon');
+        const okBtn = document.getElementById('padiConfirmOkBtn');
+        const okTextEl = document.getElementById('padiConfirmOkText');
+        const cancelBtn = document.getElementById('padiConfirmCancelBtn');
+        const cancelTextEl = document.getElementById('padiConfirmCancelText');
+        const closeBtn = document.getElementById('padiConfirmCloseBtn');
+
+        if (!modal) {
+          return resolve(window.confirm(rawMsg));
+        }
+
+        titleEl.textContent = title;
+        if (rawMsg.includes('<') && rawMsg.includes('>')) {
+          msgEl.innerHTML = rawMsg;
+        } else {
+          msgEl.textContent = rawMsg;
+        }
+        okTextEl.textContent = confirmText;
+        cancelTextEl.textContent = cancelText;
+
+        if (type === 'danger') {
+          iconBgEl.className = 'w-10 h-10 rounded-xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center text-lg shrink-0';
+          iconEl.className = icon || 'fa-solid fa-trash-can';
+          okBtn.className = 'px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer bg-rose-600 hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500/40';
+        } else if (type === 'warning') {
+          iconBgEl.className = 'w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center text-lg shrink-0';
+          iconEl.className = icon || 'fa-solid fa-triangle-exclamation';
+          okBtn.className = 'px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer bg-amber-600 hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500/40';
+        } else if (type === 'info') {
+          iconBgEl.className = 'w-10 h-10 rounded-xl bg-teal-50 border border-teal-200 text-teal-600 flex items-center justify-center text-lg shrink-0';
+          iconEl.className = icon || 'fa-solid fa-envelope-circle-check';
+          okBtn.className = 'px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer bg-teal-600 hover:bg-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-500/40';
+        } else {
+          iconBgEl.className = 'w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center text-lg shrink-0';
+          iconEl.className = icon || 'fa-solid fa-circle-question';
+          okBtn.className = 'px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer bg-emerald-600 hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/40';
+        }
+
+        modal.classList.remove('hidden');
+
+        let settled = false;
+        function finish(result) {
+          if (settled) return;
+          settled = true;
+          document.removeEventListener('keydown', handleKey);
+          backdrop.removeEventListener('click', onCancel);
+          cancelBtn.removeEventListener('click', onCancel);
+          if (closeBtn) closeBtn.removeEventListener('click', onCancel);
+          okBtn.removeEventListener('click', onOk);
+          modal.classList.add('hidden');
+          resolve(result);
+        }
+
+        function onOk(e) {
+          if (e) e.preventDefault();
+          finish(true);
+        }
+
+        function onCancel(e) {
+          if (e) e.preventDefault();
+          finish(false);
+        }
+
+        function handleKey(e) {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            onCancel(e);
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            onOk(e);
+          }
+        }
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        if (closeBtn) closeBtn.addEventListener('click', onCancel);
+        backdrop.addEventListener('click', onCancel);
+        document.addEventListener('keydown', handleKey);
+
+        setTimeout(() => {
+          okBtn.focus();
+        }, 50);
+      });
+    }
+    window.padiConfirm = showConfirm;
+
     function openQuickGuideModal() {
       document.getElementById('quickGuideModal').classList.remove('hidden');
     }
@@ -618,12 +748,17 @@ let currentCollection = "users";
       updateCustomEpUrlPreview();
     }
 
-    function deleteCurrentSelectedPrefix() {
+    async function deleteCurrentSelectedPrefix() {
       const sel = document.getElementById('epPrefixSelect');
       if (!sel) return;
       const val = sel.value;
       if (!val || val === '/' || val === '__custom__') return;
-      if (!confirm(`Delete saved prefix "${val}"?`)) return;
+      if (!await showConfirm({
+        title: 'Delete Prefix',
+        message: `Delete saved prefix <strong>"${escapeHtml(val)}"</strong>?`,
+        confirmText: 'Delete Prefix',
+        type: 'danger'
+      })) return;
       deleteCustomPrefix(val);
       if (typeof showToast === 'function') {
         showToast(`Prefix "${val}" deleted.`);
@@ -1235,6 +1370,8 @@ let currentCollection = "users";
     let qbCurrentAction = 'SELECT'; // 'SELECT' | 'INSERT' | 'UPDATE' | 'DELETE' | 'COUNT'
     let qbSelectedTable = '';
     let qbSelectedColumns = new Set();
+    let qbAggregates = []; // Array of { id, fn, col, alias }
+    let qbGroupByCols = []; // Array of column names e.g. ['is_active']
     let qbFilterConditions = []; // Array of { logic: 'AND', col: '', op: '=', val: ':val' }
     let qbJoins = []; // Array of { id, type: 'LEFT JOIN'|'INNER JOIN'|'RIGHT JOIN', table, mainCol, joinCol, selectedCols: Set() }
     let qbExtraTables = []; // Array of { id, table, selectedCols: Set(), whereCol, whereVal }
@@ -1302,6 +1439,8 @@ let currentCollection = "users";
         onQbTableChange(qbSelectedTable, false);
       } else {
         renderQbColumns();
+        renderQbAggregates();
+        renderQbGroupBy();
         populateQbOrderByOptions();
         renderQbFilters();
         renderQbJoins();
@@ -1354,6 +1493,15 @@ let currentCollection = "users";
       }
 
       renderQbColumns();
+
+      // Reset aggregates & group by on primary table change
+      qbAggregates = [];
+      renderQbAggregates();
+      qbGroupByCols = [];
+      renderQbGroupBy();
+      const havingInput = document.getElementById('qbHavingInput');
+      if (havingInput) havingInput.value = '';
+
       populateQbOrderByOptions();
 
       // Clear or adapt filters to new table
@@ -1384,6 +1532,8 @@ let currentCollection = "users";
       });
 
       const colsSec = document.getElementById('qbColumnsSection');
+      const aggSec = document.getElementById('qbAggregatesSection');
+      const groupBySec = document.getElementById('qbGroupBySection');
       const orderSec = document.getElementById('qbOrderLimitSection');
       const colsLabel = document.getElementById('qbColumnsLabel');
       const joinSec = document.getElementById('qbJoinSection');
@@ -1404,6 +1554,16 @@ let currentCollection = "users";
             if (colsLabel) colsLabel.textContent = 'Columns to Update (SET)';
           }
         }
+      }
+
+      if (aggSec) {
+        if (action === 'SELECT') aggSec.classList.remove('hidden');
+        else aggSec.classList.add('hidden');
+      }
+
+      if (groupBySec) {
+        if (action === 'SELECT') groupBySec.classList.remove('hidden');
+        else groupBySec.classList.add('hidden');
       }
 
       if (joinSec) {
@@ -1513,8 +1673,201 @@ let currentCollection = "users";
       if (!sel) return;
       const current = sel.value;
       const fields = getTableFieldsList(qbSelectedTable);
-      sel.innerHTML = '<option value="">(None - Natural)</option>' +
-        fields.map(f => `<option value="${f.name}" ${f.name === current ? 'selected' : ''}>${f.name}</option>`).join('');
+      let html = '<option value="">(None - Natural)</option>';
+      if (fields.length > 0) {
+        html += '<optgroup label="Table Columns">';
+        fields.forEach(f => {
+          html += `<option value="${f.name}" ${f.name === current ? 'selected' : ''}>${f.name} (${f.type})</option>`;
+        });
+        html += '</optgroup>';
+      }
+      if (qbAggregates && qbAggregates.length > 0) {
+        html += '<optgroup label="Aggregate / Calculated Aliases">';
+        qbAggregates.forEach(agg => {
+          if (agg.alias) {
+            html += `<option value="${agg.alias}" ${agg.alias === current ? 'selected' : ''}>${agg.alias} (${agg.fn})</option>`;
+          }
+        });
+        html += '</optgroup>';
+      }
+      sel.innerHTML = html;
+    }
+
+    // ================= AGGREGATE FUNCTIONS & GROUP BY BUILDER =================
+    function addQbAggregateRow(presetFn = 'COUNT', presetCol = '') {
+      const fields = getTableFieldsList(qbSelectedTable);
+      const defaultCol = presetCol || (presetFn === 'COUNT_ALL' ? '*' : (fields.find(f => f.type === 'number')?.name || fields[0]?.name || '*'));
+
+      let defaultAlias = '';
+      if (presetFn === 'COUNT_ALL') defaultAlias = 'count';
+      else if (presetFn === 'COUNT') defaultAlias = `${defaultCol}_count`;
+      else if (presetFn === 'COUNT_DISTINCT') defaultAlias = `unique_${defaultCol}`;
+      else if (presetFn === 'SUM' || presetFn === 'COALESCE_SUM') defaultAlias = `total_${defaultCol}`;
+      else if (presetFn === 'AVG' || presetFn === 'ROUND_AVG') defaultAlias = `avg_${defaultCol}`;
+      else if (presetFn === 'MIN') defaultAlias = `min_${defaultCol}`;
+      else if (presetFn === 'MAX') defaultAlias = `max_${defaultCol}`;
+      else if (presetFn === 'GROUP_CONCAT') defaultAlias = `${defaultCol}_list`;
+      else defaultAlias = 'calc_val';
+
+      qbAggregates.push({
+        id: 'agg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+        fn: presetFn,
+        col: defaultCol,
+        alias: defaultAlias
+      });
+
+      renderQbAggregates();
+      populateQbOrderByOptions();
+      buildSqlFromQb();
+    }
+
+    function quickAddQbAggregate(fn, col = '') {
+      addQbAggregateRow(fn, col);
+      if (typeof showToast === 'function') {
+        showToast(`Added ${fn} aggregate function`);
+      }
+    }
+
+    function removeQbAggregateRow(idx) {
+      qbAggregates.splice(idx, 1);
+      renderQbAggregates();
+      populateQbOrderByOptions();
+      buildSqlFromQb();
+    }
+
+    function onQbAggregateChange(idx, field, val) {
+      if (qbAggregates[idx]) {
+        qbAggregates[idx][field] = val;
+
+        if (field === 'fn' || field === 'col') {
+          const fn = qbAggregates[idx].fn;
+          const col = qbAggregates[idx].col;
+          if (fn === 'COUNT_ALL') qbAggregates[idx].alias = 'count';
+          else if (fn === 'COUNT') qbAggregates[idx].alias = `${col}_count`;
+          else if (fn === 'COUNT_DISTINCT') qbAggregates[idx].alias = `unique_${col}`;
+          else if (fn === 'SUM' || fn === 'COALESCE_SUM') qbAggregates[idx].alias = `total_${col}`;
+          else if (fn === 'AVG' || fn === 'ROUND_AVG') qbAggregates[idx].alias = `avg_${col}`;
+          else if (fn === 'MIN') qbAggregates[idx].alias = `min_${col}`;
+          else if (fn === 'MAX') qbAggregates[idx].alias = `max_${col}`;
+          else if (fn === 'GROUP_CONCAT') qbAggregates[idx].alias = `${col}_list`;
+        }
+
+        renderQbAggregates();
+        populateQbOrderByOptions();
+        buildSqlFromQb();
+      }
+    }
+
+    function renderQbAggregates() {
+      const container = document.getElementById('qbAggregatesContainer');
+      if (!container) return;
+
+      if (qbAggregates.length === 0) {
+        container.innerHTML = '<div id="qbEmptyAggregatesNotice" class="text-xs text-slate-400 italic py-1">No aggregate functions added. Query returns raw column values.</div>';
+        return;
+      }
+
+      const fields = getTableFieldsList(qbSelectedTable);
+      let colOptions = '<option value="*">* (All / Any)</option>';
+      fields.forEach(f => {
+        colOptions += `<option value="${f.name}">${f.name} (${f.type})</option>`;
+      });
+
+      qbJoins.forEach(j => {
+        const jFields = getTableFieldsList(j.table);
+        jFields.forEach(jf => {
+          colOptions += `<option value="${j.table}.${jf.name}">${j.table}.${jf.name}</option>`;
+        });
+      });
+
+      const fnOptions = [
+        { val: 'COUNT_ALL', label: 'COUNT(*) — Count all rows' },
+        { val: 'COUNT', label: 'COUNT(col) — Count non-null' },
+        { val: 'COUNT_DISTINCT', label: 'COUNT(DISTINCT col) — Unique count' },
+        { val: 'SUM', label: 'SUM(col) — Sum total' },
+        { val: 'COALESCE_SUM', label: 'COALESCE(SUM(col), 0) — Safe sum (no null)' },
+        { val: 'AVG', label: 'AVG(col) — Average value' },
+        { val: 'ROUND_AVG', label: 'ROUND(AVG(col), 2) — Rounded average' },
+        { val: 'MIN', label: 'MIN(col) — Minimum value' },
+        { val: 'MAX', label: 'MAX(col) — Maximum value' },
+        { val: 'GROUP_CONCAT', label: 'GROUP_CONCAT(col) — Joined text list' }
+      ];
+
+      container.innerHTML = qbAggregates.map((agg, idx) => {
+        return `
+          <div class="flex items-center space-x-2 bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs flex-wrap sm:flex-nowrap gap-y-2">
+            <div class="w-full sm:w-48 shrink-0">
+              <select onchange="onQbAggregateChange(${idx}, 'fn', this.value)" class="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono font-bold text-amber-900 focus:outline-none">
+                ${fnOptions.map(opt => `<option value="${opt.val}" ${agg.fn === opt.val ? 'selected' : ''}>${opt.label}</option>`).join('')}
+              </select>
+            </div>
+
+            <div class="w-full sm:w-40 shrink-0">
+              <select onchange="onQbAggregateChange(${idx}, 'col', this.value)" class="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono text-slate-800 focus:outline-none">
+                ${colOptions.replace(`value="${agg.col}"`, `value="${agg.col}" selected`)}
+              </select>
+            </div>
+
+            <div class="flex items-center space-x-1 flex-1 min-w-[120px]">
+              <span class="text-[10px] font-bold text-slate-400 font-mono">AS</span>
+              <input type="text" value="${qbEscapeAttr(agg.alias)}" oninput="onQbAggregateChange(${idx}, 'alias', this.value)" placeholder="alias" class="w-full bg-white border border-slate-300 rounded-lg px-2 py-1.5 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-amber-500">
+            </div>
+
+            <button type="button" onclick="removeQbAggregateRow(${idx})" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition shrink-0 cursor-pointer" title="Remove aggregate function">
+              <i class="fa-solid fa-trash-can text-xs"></i>
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderQbGroupBy() {
+      const container = document.getElementById('qbGroupByContainer');
+      if (!container) return;
+
+      if (!qbSelectedTable) {
+        container.innerHTML = '<span class="text-xs text-slate-400 italic">Please select a target table above.</span>';
+        return;
+      }
+
+      const fields = getTableFieldsList(qbSelectedTable);
+      if (fields.length === 0) {
+        container.innerHTML = '<span class="text-xs text-slate-400 italic">No columns available to group by.</span>';
+        return;
+      }
+
+      container.innerHTML = fields.map(f => {
+        const isSelected = qbGroupByCols.includes(f.name);
+        return `
+          <button type="button" onclick="qbToggleGroupByCol('${f.name}')" class="px-2.5 py-1 rounded-lg text-xs font-mono font-semibold transition border flex items-center space-x-1.5 cursor-pointer ${
+            isSelected 
+              ? 'bg-purple-100 border-purple-400 text-purple-900 font-bold shadow-2xs' 
+              : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300'
+          }">
+            <i class="fa-solid ${isSelected ? 'fa-check text-purple-700' : 'fa-plus text-slate-300'} text-[10px]"></i>
+            <span>${f.name}</span>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function qbToggleGroupByCol(colName) {
+      const idx = qbGroupByCols.indexOf(colName);
+      if (idx !== -1) {
+        qbGroupByCols.splice(idx, 1);
+      } else {
+        qbGroupByCols.push(colName);
+      }
+      renderQbGroupBy();
+      buildSqlFromQb();
+    }
+
+    function qbClearGroupBy() {
+      qbGroupByCols = [];
+      const havingInput = document.getElementById('qbHavingInput');
+      if (havingInput) havingInput.value = '';
+      renderQbGroupBy();
+      buildSqlFromQb();
     }
 
     function applyQbOwnCreateFilter() {
@@ -1642,28 +1995,31 @@ let currentCollection = "users";
     }
 
     // ================= TABLE JOINS (SELECT) =================
-    function addQbJoinRow() {
+    function addQbJoinRow(presetTable = '', presetMainCol = '', presetJoinCol = '', presetAsKey = '') {
       const otherCols = collections.filter(c => c.name !== qbSelectedTable);
       if (otherCols.length === 0) {
         showToast('No other table available to JOIN', 'warning');
         return;
       }
-      const candTable = otherCols[0].name;
+      const candTable = presetTable || otherCols[0].name;
       const mainFields = getTableFieldsList(qbSelectedTable);
       const candFields = getTableFieldsList(candTable);
 
-      const guessMain = mainFields.find(f => 
+      const guessMain = presetMainCol || mainFields.find(f => 
         f.name === `${candTable}_id` || 
         f.name === `${candTable}Id` ||
+        f.name === `${candTable.replace(/s$/, '')}_id` ||
         (candTable === 'users' && (f.name === 'user_id' || f.name === 'author_id' || f.name === 'customer_id'))
       )?.name || 'id';
 
-      const guessJoin = candFields.find(f => f.name === 'id')?.name || (candFields[0]?.name || 'id');
+      const guessJoin = presetJoinCol || candFields.find(f => f.name === 'id')?.name || (candFields[0]?.name || 'id');
 
+      const repCol = candFields.find(f => ['username', 'title', 'name', 'nama', 'label'].includes(f.name))?.name;
       const selectedCols = new Set();
-      candFields.filter(f => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'updated_at')
-        .slice(0, 2)
-        .forEach(f => selectedCols.add(f.name));
+      selectedCols.add('id');
+      if (repCol) selectedCols.add(repCol);
+
+      const defaultAsKey = presetAsKey || candTable.replace(/s$/, '');
 
       qbJoins.push({
         id: 'join_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
@@ -1671,11 +2027,68 @@ let currentCollection = "users";
         table: candTable,
         mainCol: guessMain,
         joinCol: guessJoin,
-        selectedCols
+        selectedCols,
+        outputFormat: 'nested', // 'nested' | 'flat'
+        asKey: defaultAsKey
       });
 
       renderQbJoins();
       buildSqlFromQb();
+    }
+
+    function autoDetectQbJoins() {
+      if (!qbSelectedTable) {
+        showToast('Please select a target table first', 'warning');
+        return;
+      }
+
+      const mainFields = getTableFieldsList(qbSelectedTable);
+      let addedCount = 0;
+
+      mainFields.forEach(f => {
+        let baseName = '';
+        if (f.name.endsWith('_id')) baseName = f.name.replace(/_id$/, '');
+        else if (f.name.endsWith('Id')) baseName = f.name.replace(/Id$/, '');
+        if (!baseName || baseName === 'created_by' || baseName === 'updated_by') return;
+
+        // Find candidate table
+        const targetCol = collections.find(c => 
+          c.name.toLowerCase() === baseName.toLowerCase() ||
+          c.name.toLowerCase() === `${baseName.toLowerCase()}s` ||
+          c.name.toLowerCase() === `${baseName.toLowerCase()}es`
+        );
+
+        if (targetCol && targetCol.name !== qbSelectedTable) {
+          const already = qbJoins.some(j => j.table === targetCol.name && j.mainCol === f.name);
+          if (!already) {
+            const candFields = getTableFieldsList(targetCol.name);
+            const repCol = candFields.find(cf => ['username', 'title', 'name', 'nama', 'label'].includes(cf.name))?.name;
+            const selectedCols = new Set();
+            selectedCols.add('id');
+            if (repCol) selectedCols.add(repCol);
+
+            qbJoins.push({
+              id: 'join_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+              type: 'LEFT JOIN',
+              table: targetCol.name,
+              mainCol: f.name,
+              joinCol: 'id',
+              selectedCols,
+              outputFormat: 'nested',
+              asKey: baseName
+            });
+            addedCount++;
+          }
+        }
+      });
+
+      if (addedCount > 0) {
+        renderQbJoins();
+        buildSqlFromQb();
+        showToast(`Auto-detected and configured ${addedCount} relation(s)!`, 'success');
+      } else {
+        showToast('No new foreign key relations found to auto-detect.', 'info');
+      }
     }
 
     function removeQbJoinRow(id) {
@@ -1691,10 +2104,11 @@ let currentCollection = "users";
       if (key === 'table') {
         const fields = getTableFieldsList(val);
         j.selectedCols = new Set();
-        fields.filter(f => f.name !== 'id' && f.name !== 'created_at' && f.name !== 'updated_at')
-          .slice(0, 2)
-          .forEach(f => j.selectedCols.add(f.name));
+        j.selectedCols.add('id');
+        const rep = fields.find(f => ['username', 'title', 'name', 'nama', 'label'].includes(f.name))?.name;
+        if (rep) j.selectedCols.add(rep);
         j.joinCol = fields.find(f => f.name === 'id')?.name || fields[0]?.name || 'id';
+        j.asKey = val.replace(/s$/, '');
       }
       renderQbJoins();
       buildSqlFromQb();
@@ -1740,11 +2154,13 @@ let currentCollection = "users";
         const joinFields = getTableFieldsList(j.table);
         const joinColOptions = joinFields.map(f => `<option value="${f.name}" ${f.name === j.joinCol ? 'selected' : ''}>\`${f.name}\`</option>`).join('');
         const mainColOptions = mainFields.map(f => `<option value="${f.name}" ${f.name === j.mainCol ? 'selected' : ''}>\`${f.name}\`</option>`).join('');
+        const isNested = (j.outputFormat || 'nested') === 'nested';
+        const asKeyVal = j.asKey || j.table.replace(/s$/, '');
 
         return `
           <div class="bg-indigo-50/40 border border-indigo-200/80 rounded-xl p-3 space-y-2.5 text-xs shadow-2xs">
             <div class="flex items-center justify-between flex-wrap gap-2">
-              <div class="flex items-center space-x-2 flex-wrap">
+              <div class="flex items-center space-x-2 flex-wrap gap-y-1">
                 <span class="px-2 py-0.5 rounded bg-indigo-600 text-white font-mono font-bold text-[10px]">
                   JOIN #${idx + 1}
                 </span>
@@ -1759,9 +2175,21 @@ let currentCollection = "users";
                 </select>
               </div>
 
-              <button type="button" onclick="removeQbJoinRow('${j.id}')" class="p-1 text-slate-400 hover:text-rose-600 transition rounded-lg hover:bg-rose-50 cursor-pointer" title="Remove JOIN">
-                <i class="fa-solid fa-trash-can text-xs"></i>
-              </button>
+              <!-- Output Format Toggle: Nested Object vs Flat Columns -->
+              <div class="flex items-center space-x-2">
+                <div class="flex items-center bg-white border border-indigo-200 rounded-lg p-0.5 text-[11px] font-bold">
+                  <button type="button" onclick="onQbJoinChange('${j.id}', 'outputFormat', 'nested')" class="px-2 py-0.5 rounded transition ${isNested ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'} cursor-pointer" title="Output as nested JSON object: 'user': { id, username }">
+                    <i class="fa-solid fa-box text-[9px] mr-1"></i>Nested Object
+                  </button>
+                  <button type="button" onclick="onQbJoinChange('${j.id}', 'outputFormat', 'flat')" class="px-2 py-0.5 rounded transition ${!isNested ? 'bg-indigo-600 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'} cursor-pointer" title="Output as flat columns: 'users_username'">
+                    <i class="fa-solid fa-table-columns text-[9px] mr-1"></i>Flat Columns
+                  </button>
+                </div>
+
+                <button type="button" onclick="removeQbJoinRow('${j.id}')" class="p-1 text-slate-400 hover:text-rose-600 transition rounded-lg hover:bg-rose-50 cursor-pointer" title="Remove JOIN">
+                  <i class="fa-solid fa-trash-can text-xs"></i>
+                </button>
+              </div>
             </div>
 
             <!-- ON Condition -->
@@ -1778,10 +2206,22 @@ let currentCollection = "users";
               </select>
             </div>
 
+            <!-- Nested Object Key Alias -->
+            ${isNested ? `
+              <div class="flex items-center space-x-2 bg-amber-50/80 border border-amber-200 rounded-lg p-2 text-xs">
+                <span class="text-amber-800 font-bold shrink-0 flex items-center space-x-1">
+                  <i class="fa-solid fa-tag text-amber-600 text-[10px]"></i>
+                  <span>JSON Object Key (Alias):</span>
+                </span>
+                <input type="text" value="${qbEscapeAttr(asKeyVal)}" oninput="onQbJoinChange('${j.id}', 'asKey', this.value)" placeholder="e.g. user or chapter" class="bg-white border border-amber-300 rounded px-2.5 py-1 text-xs font-mono font-bold text-slate-800 flex-1 max-w-[200px] focus:outline-none focus:border-amber-500">
+                <span class="text-slate-500 text-[11px] font-mono">➔ "${asKeyVal}": { ... }</span>
+              </div>
+            ` : ''}
+
             <!-- Column chips from joined table -->
             <div>
               <div class="flex items-center justify-between mb-1.5 text-[11px]">
-                <span class="font-bold text-slate-700">Columns to include from \`${j.table}\`:</span>
+                <span class="font-bold text-slate-700">Fields to include in ${isNested ? `\`${asKeyVal}\` object` : `\`${j.table}\``}:</span>
                 <div class="space-x-1.5">
                   <button type="button" onclick="toggleQbJoinAllCols('${j.id}', true)" class="text-[10px] text-indigo-600 font-bold hover:underline cursor-pointer">Select All</button>
                   <span class="text-slate-300">|</span>
@@ -2096,34 +2536,132 @@ let currentCollection = "users";
 
       if (qbCurrentAction === 'SELECT') {
         const hasJoins = qbJoins.length > 0;
-        let colsList = '*';
+        const isDistinct = document.getElementById('qbDistinctCheckbox')?.checked;
+        const selectKeyword = isDistinct ? 'SELECT DISTINCT' : 'SELECT';
 
+        let selectExpressions = [];
+
+        // 1. Regular columns
         if (hasJoins) {
-          const mainCols = (qbSelectedColumns.size > 0 && qbSelectedColumns.size < allFields.length)
-            ? Array.from(qbSelectedColumns).map(c => `\`${table}\`.\`${c}\``).join(', ')
-            : `\`${table}\`.*`;
-
-          const joinCols = [];
+          if (qbSelectedColumns.size > 0 && qbSelectedColumns.size < allFields.length) {
+            selectExpressions.push(Array.from(qbSelectedColumns).map(c => `\`${table}\`.\`${c}\``).join(', '));
+          } else if (qbSelectedColumns.size >= allFields.length || (qbSelectedColumns.size === 0 && qbAggregates.length === 0)) {
+            selectExpressions.push(`\`${table}\`.*`);
+          }
           qbJoins.forEach(j => {
-            j.selectedCols.forEach(c => {
-              joinCols.push(`\`${j.table}\`.\`${c}\` AS \`${j.table}_${c}\``);
-            });
+            const cols = Array.from(j.selectedCols || []);
+            if (cols.length === 0) return;
+            const outputFmt = j.outputFormat || 'nested';
+            if (outputFmt === 'nested') {
+              const objKey = j.asKey || j.table.replace(/s$/, '');
+              const kvPairs = cols.map(c => `'${c}', \`${j.table}\`.\`${c}\``).join(', ');
+              selectExpressions.push(`JSON_OBJECT(${kvPairs}) AS \`${objKey}\``);
+            } else {
+              cols.forEach(c => {
+                selectExpressions.push(`\`${j.table}\`.\`${c}\` AS \`${j.table}_${c}\``);
+              });
+            }
           });
-
-          colsList = [mainCols, ...joinCols].join(',\n  ');
         } else {
           if (qbSelectedColumns.size > 0 && qbSelectedColumns.size < allFields.length) {
-            colsList = Array.from(qbSelectedColumns).map(c => `\`${c}\``).join(', ');
+            selectExpressions.push(Array.from(qbSelectedColumns).map(c => `\`${c}\``).join(', '));
+          } else if (qbSelectedColumns.size >= allFields.length && qbAggregates.length === 0) {
+            selectExpressions.push('*');
+          } else if (qbSelectedColumns.size === 0 && qbAggregates.length === 0) {
+            selectExpressions.push('*');
+          } else if (qbSelectedColumns.size >= allFields.length && qbAggregates.length > 0) {
+            // When user selected all fields by default and added aggregates, keep primary fields
+            selectExpressions.push(`\`${table}\`.*`);
           }
         }
 
+        // 2. Aggregate functions (COUNT, SUM, AVG, MIN, MAX, COALESCE, etc.)
+        qbAggregates.forEach(agg => {
+          let colRef = '*';
+          if (agg.col && agg.col !== '*') {
+            colRef = agg.col.includes('.')
+              ? agg.col.split('.').map(p => `\`${p}\``).join('.')
+              : (hasJoins ? `\`${table}\`.\`${agg.col}\`` : `\`${agg.col}\``);
+          }
+          const aliasPart = agg.alias ? ` AS \`${agg.alias}\`` : '';
+
+          switch (agg.fn) {
+            case 'COUNT_ALL':
+              selectExpressions.push(`COUNT(*) AS \`${agg.alias || 'count'}\``);
+              break;
+            case 'COUNT':
+              selectExpressions.push(`COUNT(${colRef})${aliasPart}`);
+              break;
+            case 'COUNT_DISTINCT':
+              selectExpressions.push(`COUNT(DISTINCT ${colRef})${aliasPart}`);
+              break;
+            case 'SUM':
+              selectExpressions.push(`SUM(${colRef})${aliasPart}`);
+              break;
+            case 'COALESCE_SUM':
+              selectExpressions.push(`COALESCE(SUM(${colRef}), 0)${aliasPart}`);
+              break;
+            case 'AVG':
+              selectExpressions.push(`AVG(${colRef})${aliasPart}`);
+              break;
+            case 'ROUND_AVG':
+              selectExpressions.push(`ROUND(AVG(${colRef}), 2)${aliasPart}`);
+              break;
+            case 'MIN':
+              selectExpressions.push(`MIN(${colRef})${aliasPart}`);
+              break;
+            case 'MAX':
+              selectExpressions.push(`MAX(${colRef})${aliasPart}`);
+              break;
+            case 'GROUP_CONCAT':
+              selectExpressions.push(`GROUP_CONCAT(${colRef})${aliasPart}`);
+              break;
+            default:
+              selectExpressions.push(`COUNT(${colRef})${aliasPart}`);
+              break;
+          }
+        });
+
+        if (selectExpressions.length === 0) {
+          selectExpressions.push('*');
+        }
+
+        const colsList = selectExpressions.join(',\n  ');
+
+        let joinClauses = '';
+        if (hasJoins) {
+          joinClauses = qbJoins.map(j => {
+            return `\n${j.type} \`${j.table}\` ON \`${table}\`.\`${j.mainCol}\` = \`${j.table}\`.\`${j.joinCol}\``;
+          }).join('');
+        }
+
+        // GROUP BY clause
+        let groupByClause = '';
+        if (qbGroupByCols.length > 0) {
+          const groupCols = qbGroupByCols.map(c => hasJoins ? `\`${table}\`.\`${c}\`` : `\`${c}\``).join(', ');
+          groupByClause = `\nGROUP BY ${groupCols}`;
+        }
+
+        // HAVING clause
+        let havingClause = '';
+        const havingVal = document.getElementById('qbHavingInput')?.value?.trim();
+        if (havingVal) {
+          havingClause = `\nHAVING ${havingVal}`;
+        }
+
+        // ORDER BY clause
         const orderByCol = document.getElementById('qbOrderByCol')?.value;
         const orderDir = document.getElementById('qbOrderDir')?.value || 'DESC';
         let orderClause = '';
         if (orderByCol) {
-          orderClause = hasJoins
-            ? `\nORDER BY \`${table}\`.\`${orderByCol}\` ${orderDir}`
-            : `\nORDER BY \`${orderByCol}\` ${orderDir}`;
+          const isAggAlias = qbAggregates.some(a => a.alias === orderByCol);
+          if (isAggAlias) {
+            orderClause = `\nORDER BY \`${orderByCol}\` ${orderDir}`;
+          } else {
+            orderClause = hasJoins
+              ? `\nORDER BY \`${table}\`.\`${orderByCol}\` ${orderDir}`
+              : `\nORDER BY \`${orderByCol}\` ${orderDir}`;
+          }
         }
 
         const limitVal = document.getElementById('qbLimitInput')?.value?.trim();
@@ -2138,14 +2676,7 @@ let currentCollection = "users";
           if (offsetVal.startsWith(':')) paramsObj[offsetVal.replace(/^:/, '')] = 0;
         }
 
-        let joinClauses = '';
-        if (hasJoins) {
-          joinClauses = qbJoins.map(j => {
-            return `\n${j.type} \`${j.table}\` ON \`${table}\`.\`${j.mainCol}\` = \`${j.table}\`.\`${j.joinCol}\``;
-          }).join('');
-        }
-
-        sql = `SELECT\n  ${colsList}\nFROM \`${table}\`${joinClauses}${whereClause}${orderClause}${limitClause};`;
+        sql = `${selectKeyword}\n  ${colsList}\nFROM \`${table}\`${joinClauses}${whereClause}${groupByClause}${havingClause}${orderClause}${limitClause};`;
 
       } else if (qbCurrentAction === 'INSERT') {
         const hasExtra = qbExtraTables.length > 0;
@@ -2400,6 +2931,8 @@ let currentCollection = "users";
       qbFilterConditions = [];
       qbJoins = [];
       qbExtraTables = [];
+      qbAggregates = [];
+      qbGroupByCols = [];
       qbSelectedTable = '';
       const sel = document.getElementById('qbTableSelect');
       if (sel) {
@@ -2409,6 +2942,10 @@ let currentCollection = "users";
       if (limitInput) limitInput.value = ':limit';
       const offsetInput = document.getElementById('qbOffsetInput');
       if (offsetInput) offsetInput.value = '';
+      const havingInput = document.getElementById('qbHavingInput');
+      if (havingInput) havingInput.value = '';
+      const distinctCb = document.getElementById('qbDistinctCheckbox');
+      if (distinctCb) distinctCb.checked = false;
       setQbAction('SELECT');
       onQbTableChange('', true);
       const resContainer = document.getElementById('qbResultContainer');
@@ -3031,7 +3568,12 @@ let currentCollection = "users";
 
     async function deleteCurrentCustomEndpoint() {
       if (!currentCustomEpId) return;
-      if (!confirm('Delete this custom API endpoint?')) return;
+      if (!await showConfirm({
+        title: 'Delete Custom Endpoint',
+        message: 'Are you sure you want to permanently delete this custom API endpoint?',
+        confirmText: 'Delete Endpoint',
+        type: 'danger'
+      })) return;
       const res = await fetch(`/api/endpoints/${currentCustomEpId}`, { method: 'DELETE' });
       if (res.ok) {
         deleteEndpointPathMeta(currentCustomEpId);
@@ -3422,7 +3964,7 @@ let currentCollection = "users";
       updateOptionsFieldNotices();
 
       const rulesConfig = [
-        { key: 'listRule', label: '1. List Records (GET List)', desc: 'Who is allowed to list & search records?', defaultVal: 'public' },
+        { key: 'listRule', label: '1. List & All Records (GET List & All)', desc: 'Who is allowed to list and fetch records (/api/... & /api/.../all)?', defaultVal: 'public' },
         { key: 'viewRule', label: '2. View Single Record (GET Single)', desc: 'Who is allowed to view a single record detail?', defaultVal: 'public' },
         { key: 'createRule', label: '3. Create New Record (POST Create)', desc: 'Who is allowed to insert new records?', defaultVal: '@request.auth.id != ""' },
         { key: 'updateRule', label: '4. Update Record (PATCH Update)', desc: 'Who is allowed to edit existing records?', defaultVal: '@request.auth.id != ""' },
@@ -3432,64 +3974,66 @@ let currentCollection = "users";
       const ownerExpr = currentCollection === 'users' ? 'id = @request.auth.id' : 'user_id = @request.auth.id';
 
       const rulesGrid = document.getElementById('inlineRulesGrid');
-      rulesGrid.innerHTML = rulesConfig.map((rc, i) => {
-        const rawVal = (col[rc.key] && String(col[rc.key]).trim() !== '') ? col[rc.key] : rc.defaultVal;
-        const inputId = `inlineInput_${rc.key}`;
-        return `
-          <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5 ${i === 4 ? 'md:col-span-2' : ''}">
-            <div class="flex flex-wrap items-center justify-between gap-1.5">
-              <div>
-                <div class="text-xs font-extrabold text-slate-800">${rc.label}</div>
-                <div class="text-[11px] text-slate-500">${rc.desc}</div>
-              </div>
-              <div class="flex items-center flex-wrap gap-1 text-[10px]">
-                <button type="button" onclick="applyRulePreset('${inputId}', 'public', 'set')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 text-emerald-700 font-bold hover:border-emerald-300 transition" title="Public (Anyone allowed)">
-                  Public
-                </button>
-                <button type="button" onclick="applyRulePreset('${inputId}', '@request.auth.id != \\'\\'', 'set')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 font-semibold transition" title="Require Logged In User">
-                  Require Auth
-                </button>
-                <button type="button" onclick="applyRulePreset('${inputId}', '${ownerExpr}', 'append')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 text-indigo-700 font-bold hover:border-indigo-300 transition" title="Append Creator/Owner (${ownerExpr})">
-                  Creator / Owner
-                </button>
-
-                <!-- Role Multi-Select Dropdown -->
-                <div class="relative inline-block" id="roleDropdownWrapper_${inputId}">
-                  <button type="button" onclick="toggleRoleDropdown('${inputId}')" id="roleBtn_${inputId}" class="px-2 py-0.5 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-100 text-amber-800 font-bold hover:border-amber-300 transition flex items-center space-x-1" title="Select one or more authorized roles">
-                    <i class="fa-solid fa-crown text-[9px] text-amber-600"></i>
-                    <span id="roleBtnLabel_${inputId}">Role ▾</span>
+      if (rulesGrid) {
+        rulesGrid.innerHTML = rulesConfig.map((rc, i) => {
+          const rawVal = (col[rc.key] && String(col[rc.key]).trim() !== '') ? col[rc.key] : rc.defaultVal;
+          const inputId = `inlineInput_${rc.key}`;
+          return `
+            <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5 ${i === 4 ? 'md:col-span-2' : ''}">
+              <div class="flex flex-wrap items-center justify-between gap-1.5">
+                <div>
+                  <div class="text-xs font-extrabold text-slate-800">${rc.label}</div>
+                  <div class="text-[11px] text-slate-500">${rc.desc}</div>
+                </div>
+                <div class="flex items-center flex-wrap gap-1 text-[10px]">
+                  <button type="button" onclick="applyRulePreset('${inputId}', 'public', 'set')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 text-emerald-700 font-bold hover:border-emerald-300 transition" title="Public (Anyone allowed)">
+                    Public
                   </button>
-                  <div id="roleDropdownMenu_${inputId}" class="hidden absolute right-0 top-7 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl p-2.5 z-50 space-y-1">
-                    <div class="px-2 py-1 text-[10px] font-extrabold uppercase text-slate-400 flex items-center justify-between">
-                      <span>Authorized Roles</span>
-                      <span class="text-[9px] text-slate-400 font-normal">Multi-select</span>
-                    </div>
-                    <div id="roleOptionsList_${inputId}" class="space-y-0.5 max-h-48 overflow-y-auto"></div>
-                    <div class="pt-2 border-t border-slate-100 flex items-center space-x-1">
-                      <input type="text" id="customRoleInput_${inputId}" placeholder="Custom role..." class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-mono focus:outline-none focus:border-amber-500" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomRoleToRule('${inputId}');}">
-                      <button type="button" onclick="addCustomRoleToRule('${inputId}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-[10px] rounded-lg transition">
-                        Add
-                      </button>
+                  <button type="button" onclick="applyRulePreset('${inputId}', '@request.auth.id != \\'\\'', 'set')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 font-semibold transition" title="Require Logged In User">
+                    Require Auth
+                  </button>
+                  <button type="button" onclick="applyRulePreset('${inputId}', '${ownerExpr}', 'append')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 text-indigo-700 font-bold hover:border-indigo-300 transition" title="Append Creator/Owner (${ownerExpr})">
+                    Creator / Owner
+                  </button>
+
+                  <!-- Role Multi-Select Dropdown -->
+                  <div class="relative inline-block" id="roleDropdownWrapper_${inputId}">
+                    <button type="button" onclick="toggleRoleDropdown('${inputId}')" id="roleBtn_${inputId}" class="px-2 py-0.5 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-100 text-amber-800 font-bold hover:border-amber-300 transition flex items-center space-x-1" title="Select one or more authorized roles">
+                      <i class="fa-solid fa-crown text-[9px] text-amber-600"></i>
+                      <span id="roleBtnLabel_${inputId}">Role ▾</span>
+                    </button>
+                    <div id="roleDropdownMenu_${inputId}" class="hidden absolute right-0 top-7 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl p-2.5 z-50 space-y-1">
+                      <div class="px-2 py-1 text-[10px] font-extrabold uppercase text-slate-400 flex items-center justify-between">
+                        <span>Authorized Roles</span>
+                        <span class="text-[9px] text-slate-400 font-normal">Multi-select</span>
+                      </div>
+                      <div id="roleOptionsList_${inputId}" class="space-y-0.5 max-h-48 overflow-y-auto"></div>
+                      <div class="pt-2 border-t border-slate-100 flex items-center space-x-1">
+                        <input type="text" id="customRoleInput_${inputId}" placeholder="Custom role..." class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-mono focus:outline-none focus:border-amber-500" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomRoleToRule('${inputId}');}">
+                        <button type="button" onclick="addCustomRoleToRule('${inputId}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-[10px] rounded-lg transition">
+                          Add
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <button type="button" onclick="applyRulePreset('${inputId}', '', 'set')" class="px-1.5 py-0.5 rounded-lg text-slate-400 hover:text-rose-600 transition" title="Clear expression">
-                  <i class="fa-solid fa-xmark"></i>
-                </button>
+                  <button type="button" onclick="applyRulePreset('${inputId}', '', 'set')" class="px-1.5 py-0.5 rounded-lg text-slate-400 hover:text-rose-600 transition" title="Clear expression">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+              </div>
+              <div>
+                <input type="text" id="${inputId}" value="${rawVal.replace(/"/g, '&quot;')}" oninput="updateRoleDropdownUI('${inputId}')" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-emerald-600 shadow-2xs transition" placeholder='e.g. user_id = @request.auth.id || @request.auth.role = "admin"'>
               </div>
             </div>
-            <div>
-              <input type="text" id="${inputId}" value="${rawVal.replace(/"/g, '&quot;')}" oninput="updateRoleDropdownUI('${inputId}')" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-emerald-600 shadow-2xs transition" placeholder='e.g. user_id = @request.auth.id || @request.auth.role = "admin"'>
-            </div>
-          </div>
-        `;
-      }).join('');
+          `;
+        }).join('');
 
-      // Initialize role dropdown labels and checks
-      rulesConfig.forEach(rc => {
-        updateRoleDropdownUI(`inlineInput_${rc.key}`);
-      });
+        // Initialize role dropdown labels and checks
+        rulesConfig.forEach(rc => {
+          updateRoleDropdownUI(`inlineInput_${rc.key}`);
+        });
+      }
 
       // Initialize and render inline schema fields
       inlineSchemaFields = col && col.schema ? JSON.parse(JSON.stringify(col.schema)) : [];
@@ -3802,7 +4346,12 @@ let currentCollection = "users";
     }
 
     function switchColSettingsTab(tab) {
-      ['fields', 'rules', 'options'].forEach(t => {
+      if (tab === 'rules') {
+        closeSchemaEditorPage();
+        openApiPreviewModal('rules');
+        return;
+      }
+      ['fields', 'options'].forEach(t => {
         const pane = document.getElementById(`colSettingsPane_${t}`);
         const btn = document.getElementById(`colTab_${t}`);
         if (pane) pane.classList.toggle('hidden', t !== tab);
@@ -3820,6 +4369,7 @@ let currentCollection = "users";
       const map = {
         recommended: {
           listRule: 'public',
+          allRule: 'public',
           viewRule: 'public',
           createRule: '@request.auth.id != ""',
           updateRule: '@request.auth.id != ""',
@@ -3827,6 +4377,7 @@ let currentCollection = "users";
         },
         public_all: {
           listRule: 'public',
+          allRule: 'public',
           viewRule: 'public',
           createRule: 'public',
           updateRule: 'public',
@@ -3834,6 +4385,7 @@ let currentCollection = "users";
         },
         private_all: {
           listRule: '@request.auth.id != ""',
+          allRule: '@request.auth.id != ""',
           viewRule: '@request.auth.id != ""',
           createRule: '@request.auth.id != ""',
           updateRule: '@request.auth.id != ""',
@@ -3849,7 +4401,7 @@ let currentCollection = "users";
           updateRoleDropdownUI(inputId);
         }
       });
-      showToast('Access preset applied — click "Save Structure & Rules" to save');
+      showToast('Access preset applied — click "Save Access Rules" to save');
     }
 
     function updateOptionsFieldNotices() {
@@ -3993,18 +4545,26 @@ let currentCollection = "users";
         }
       }
 
+      const listRuleInp = document.getElementById('inlineInput_listRule');
+      const allRuleInp = document.getElementById('inlineInput_allRule');
+      const viewRuleInp = document.getElementById('inlineInput_viewRule');
+      const createRuleInp = document.getElementById('inlineInput_createRule');
+      const updateRuleInp = document.getElementById('inlineInput_updateRule');
+      const deleteRuleInp = document.getElementById('inlineInput_deleteRule');
+
       const payload = {
         name: col.name,
         type: col.type,
         schema: cleanSchema,
-        realtime: document.getElementById('inlineRealtimeToggle').checked,
-        autoLoadRelations: document.getElementById('inlineAutoRelationsToggle').checked,
+        realtime: document.getElementById('inlineRealtimeToggle')?.checked !== false,
+        autoLoadRelations: document.getElementById('inlineAutoRelationsToggle')?.checked === true,
         blameable: isBlameable,
-        listRule: document.getElementById('inlineInput_listRule')?.value.trim() || 'public',
-        viewRule: document.getElementById('inlineInput_viewRule')?.value.trim() || 'public',
-        createRule: document.getElementById('inlineInput_createRule')?.value.trim() || '@request.auth.id != ""',
-        updateRule: document.getElementById('inlineInput_updateRule')?.value.trim() || '@request.auth.id != ""',
-        deleteRule: document.getElementById('inlineInput_deleteRule')?.value.trim() || '@request.auth.id != ""'
+        listRule: listRuleInp ? listRuleInp.value.trim() : (col.listRule || 'public'),
+        allRule: allRuleInp ? allRuleInp.value.trim() : (col.allRule || col.listRule || 'public'),
+        viewRule: viewRuleInp ? viewRuleInp.value.trim() : (col.viewRule || 'public'),
+        createRule: createRuleInp ? createRuleInp.value.trim() : (col.createRule || '@request.auth.id != ""'),
+        updateRule: updateRuleInp ? updateRuleInp.value.trim() : (col.updateRule || '@request.auth.id != ""'),
+        deleteRule: deleteRuleInp ? deleteRuleInp.value.trim() : (col.deleteRule || '@request.auth.id != ""')
       };
 
       try {
@@ -4015,7 +4575,7 @@ let currentCollection = "users";
         });
         if (res.ok) {
           closeSchemaEditorPage();
-          showToast(`Table "${currentCollection}" structure & rules saved successfully!`);
+          showToast(`Table "${currentCollection}" structure saved successfully!`);
           await loadCollections(currentCollection);
         } else {
           const d = await res.json();
@@ -4023,6 +4583,56 @@ let currentCollection = "users";
         }
       } catch (e) {
         showToast(e.message, 'error');
+      }
+    }
+
+    async function saveAccessRulesOnly() {
+      const col = collections.find(c => c.name === currentCollection);
+      if (!col) return;
+
+      const btn = document.getElementById('saveAccessRulesBtn');
+      const originalHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1.5"></i><span>Saving...</span>';
+      }
+
+      const updated = JSON.parse(JSON.stringify(col));
+      const listRuleInp = document.getElementById('inlineInput_listRule');
+      const allRuleInp = document.getElementById('inlineInput_allRule');
+      const viewRuleInp = document.getElementById('inlineInput_viewRule');
+      const createRuleInp = document.getElementById('inlineInput_createRule');
+      const updateRuleInp = document.getElementById('inlineInput_updateRule');
+      const deleteRuleInp = document.getElementById('inlineInput_deleteRule');
+
+      if (listRuleInp) updated.listRule = listRuleInp.value.trim() || 'public';
+      if (allRuleInp) updated.allRule = allRuleInp.value.trim() || 'public';
+      if (viewRuleInp) updated.viewRule = viewRuleInp.value.trim() || 'public';
+      if (createRuleInp) updated.createRule = createRuleInp.value.trim() || '@request.auth.id != ""';
+      if (updateRuleInp) updated.updateRule = updateRuleInp.value.trim() || '@request.auth.id != ""';
+      if (deleteRuleInp) updated.deleteRule = deleteRuleInp.value.trim() || '@request.auth.id != ""';
+
+      try {
+        const res = await fetch(`/api/collections/${currentCollection}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updated)
+        });
+        if (res.ok) {
+          showToast(`Access rules for table "${currentCollection}" saved successfully!`);
+          await loadCollections(currentCollection);
+          renderApiPane();
+        } else {
+          const d = await res.json();
+          showToast(d.message || 'Failed to save access rules', 'error');
+        }
+      } catch (e) {
+        showToast(e.message, 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalHtml;
+        }
       }
     }
 
@@ -4097,18 +4707,21 @@ let currentCollection = "users";
       const updated = JSON.parse(JSON.stringify(col));
       if (profile === 'public_all') {
         updated.listRule = 'public';
+        updated.allRule = 'public';
         updated.viewRule = 'public';
         updated.createRule = 'public';
         updated.updateRule = 'public';
         updated.deleteRule = 'public';
       } else if (profile === 'private_all') {
         updated.listRule = '@request.auth.id != ""';
+        updated.allRule = '@request.auth.id != ""';
         updated.viewRule = '@request.auth.id != ""';
         updated.createRule = '@request.auth.id != ""';
         updated.updateRule = '@request.auth.id != ""';
         updated.deleteRule = '@request.auth.id != ""';
       } else {
         updated.listRule = 'public';
+        updated.allRule = 'public';
         updated.viewRule = 'public';
         updated.createRule = '@request.auth.id != ""';
         updated.updateRule = '@request.auth.id != ""';
@@ -4311,18 +4924,18 @@ let currentCollection = "users";
         tbody.innerHTML = items.map(item => {
           const checked = selectedRecordIds.has(item.id) ? 'checked' : '';
           return `
-            <tr onclick="openRecordDrawer('${item.id}')" class="hover:bg-emerald-50/40 cursor-pointer transition group">
-              <td onclick="event.stopPropagation()" class="py-2.5 px-3 border-r border-slate-100 text-center">
+            <tr class="hover:bg-emerald-50/30 transition group">
+              <td class="py-2.5 px-3 border-r border-slate-100 text-center">
                 <input type="checkbox" ${checked} onchange="toggleSelectRecord('${item.id}', this.checked)" class="rounded border-slate-300">
               </td>
-              <td onclick="event.stopPropagation()" class="py-2.5 px-3 border-r border-slate-100 text-center whitespace-nowrap">
+              <td class="py-2.5 px-3 border-r border-slate-100 text-center whitespace-nowrap">
                 <button type="button" onclick="openRecordDrawer('${item.id}')" class="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-500 active:scale-95 text-slate-900 font-bold text-[11px] shadow-xs hover:shadow transition inline-flex items-center space-x-1.5 cursor-pointer border border-amber-300" title="Edit Record">
                   <i class="fa-solid fa-pen-to-square text-[10px] text-amber-950"></i>
                   <span>Edit</span>
                 </button>
               </td>
-              <td onclick="event.stopPropagation(); copyToClipboard('${item.id}')" class="py-2.5 px-4 border-r border-slate-100 whitespace-nowrap">
-                <span class="px-2.5 py-0.5 rounded-lg bg-emerald-50 group-hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 font-semibold text-[11px] inline-flex items-center">
+              <td onclick="copyToClipboard('${item.id}')" class="py-2.5 px-4 border-r border-slate-100 whitespace-nowrap cursor-pointer">
+                <span class="px-2.5 py-0.5 rounded-lg bg-emerald-50 group-hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 font-semibold text-[11px] inline-flex items-center" title="Click to copy ID">
                   ${item.id} <i class="fa-regular fa-copy ml-1.5 text-[9px] opacity-50"></i>
                 </span>
               </td>
@@ -4462,7 +5075,12 @@ let currentCollection = "users";
     }
 
     async function deleteSelectedRecords() {
-      if (!confirm(`Delete ${selectedRecordIds.size} selected record(s)?`)) return;
+      if (!await showConfirm({
+        title: 'Delete Selected Records',
+        message: `Are you sure you want to delete <strong>${selectedRecordIds.size}</strong> selected record(s)? This action cannot be undone.`,
+        confirmText: 'Delete Selected',
+        type: 'danger'
+      })) return;
       for (const id of selectedRecordIds) {
         await fetch(`/api/${currentCollection}/${id}`, { method: 'DELETE' });
       }
@@ -4837,7 +5455,12 @@ let currentCollection = "users";
 
     async function deleteCurrentRecordFile(fieldName, filename) {
       if (!editingRecordId) return;
-      if (!confirm(`Delete file "${filename}"?`)) return;
+      if (!await showConfirm({
+        title: 'Delete Attached File',
+        message: `Are you sure you want to delete file <strong>"${escapeHtml(filename)}"</strong>?`,
+        confirmText: 'Delete File',
+        type: 'danger'
+      })) return;
       try {
         const res = await fetch(`/api/files/${currentCollection}/${editingRecordId}/${filename}`, {
           method: 'DELETE',
@@ -4859,10 +5482,16 @@ let currentCollection = "users";
 
     async function quickToggleUserVerification(userId, isCurrentlyVerified) {
       const nextState = !isCurrentlyVerified;
-      const confirmMsg = nextState
-        ? 'Manually verify this user account now?'
-        : 'Remove verification status from this user account?';
-      if (!confirm(confirmMsg)) return;
+      const confirmed = await showConfirm({
+        title: nextState ? 'Verify User Account' : 'Remove Verification',
+        message: nextState
+          ? 'Manually mark this user account as <strong>verified</strong>?'
+          : 'Remove verification status from this user account?',
+        confirmText: nextState ? 'Verify Account' : 'Remove Verification',
+        type: nextState ? 'info' : 'warning',
+        icon: nextState ? 'fa-solid fa-user-check' : 'fa-solid fa-user-xmark'
+      });
+      if (!confirmed) return;
 
       try {
         const res = await fetch(`/api/${currentCollection}/records/${userId}/verify`, {
@@ -4886,7 +5515,15 @@ let currentCollection = "users";
     }
 
     async function sendVerificationEmailForRecord(userId, email) {
-      if (!confirm(`Send email verification link to "${email}"?`)) return;
+      const confirmed = await showConfirm({
+        title: 'Send Verification Email',
+        message: `Send email verification link to <strong class="text-slate-800 font-mono">${escapeHtml(email)}</strong>?`,
+        confirmText: 'Send Verification Link',
+        cancelText: 'Cancel',
+        type: 'info',
+        icon: 'fa-solid fa-envelope-circle-check'
+      });
+      if (!confirmed) return;
 
       try {
         const res = await fetch(`/api/${currentCollection}/records/${userId}/send-verification`, {
@@ -4969,7 +5606,12 @@ let currentCollection = "users";
 
     async function deleteRecordFromDrawer() {
       if (!editingRecordId) return;
-      if (!confirm(`Delete record ${editingRecordId}?`)) return;
+      if (!await showConfirm({
+        title: 'Delete Record',
+        message: `Are you sure you want to delete record <strong>#${escapeHtml(editingRecordId)}</strong>? This cannot be undone.`,
+        confirmText: 'Delete Record',
+        type: 'danger'
+      })) return;
       const res = await fetch(`/api/${currentCollection}/${editingRecordId}`, { method: 'DELETE' });
       if (res.ok) {
         closeRecordEditorPage();
@@ -4979,7 +5621,7 @@ let currentCollection = "users";
     }
 
     // ================= ROLE BASED ACCESS CONTROL (RBAC) & ACCESS RULES =================
-    let AVAILABLE_ROLES = ['admin', 'manager', 'editor', 'moderator', 'staff', 'creator', 'user'];
+    let AVAILABLE_ROLES = ['admin', 'user'];
 
     function getRolesFromRuleText(ruleText) {
       const roles = [];
@@ -5594,7 +6236,12 @@ let currentCollection = "users";
 
     async function handleDeleteCurrentCollection() {
       if (currentCollection === 'users') return showToast('System table "users" cannot be deleted', 'error');
-      if (!confirm(`Are you sure you want to delete table "${currentCollection}" and all its records?`)) return;
+      if (!await showConfirm({
+        title: 'Delete Table',
+        message: `Are you sure you want to delete table <strong>"${escapeHtml(currentCollection)}"</strong> and all its records? This cannot be undone.`,
+        confirmText: 'Delete Table',
+        type: 'danger'
+      })) return;
 
       const res = await fetch(`/api/collections/${currentCollection}`, { method: 'DELETE' });
       if (res.ok) {
@@ -5614,7 +6261,10 @@ let currentCollection = "users";
       switchWorkspaceSubView('api');
     }
 
-    function openApiPreviewModal() {
+    function openApiPreviewModal(initialTab = null) {
+      if (initialTab) {
+        currentSelectedApiTab = initialTab;
+      }
       renderApiPane();
       const modal = document.getElementById('apiPreviewModal');
       if (modal) modal.classList.remove('hidden');
@@ -5651,7 +6301,7 @@ let currentCollection = "users";
       if (!isAuthCol && ['register', 'auth', 'forgot', 'reset', 'change_pw', 'me'].includes(currentSelectedApiTab)) {
         currentSelectedApiTab = 'list';
       }
-      renderApiPreview(currentSelectedApiTab || 'list');
+      renderApiPreview(currentSelectedApiTab || 'rules');
     }
 
     let currentApiPreviewUrl = "";
@@ -5692,13 +6342,174 @@ let currentCollection = "users";
         const tabName = btn.getAttribute('data-api-tab');
         const isHidden = btn.classList.contains('hidden');
         if (tabName === action) {
-          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
+          if (tabName === 'rules') {
+            btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-indigo-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
+          } else {
+            btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
+          }
+        } else if (tabName === 'rules') {
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-indigo-700 bg-indigo-50/70 hover:bg-indigo-100 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         } else if (['register', 'auth', 'forgot', 'reset', 'change_pw', 'me'].includes(tabName)) {
           btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-teal-800 hover:bg-teal-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         } else {
           btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         }
       });
+
+      // Special View: Access Rules Management within API Endpoints & Rules Modal
+      if (action === 'rules') {
+        const rulesConfig = [
+          { 
+            key: 'listRule', 
+            label: '1. List Records (GET List - Paginated)', 
+            desc: `Who is allowed to list & search paginated records from /api/${cName}?`, 
+            endpoints: [`/api/${cName}`],
+            defaultVal: 'public' 
+          },
+          { 
+            key: 'allRule', 
+            label: '2. All Records (GET All - Unpaginated)', 
+            desc: `Who is allowed to fetch all records without pagination from /api/${cName}/all?`, 
+            endpoints: [`/api/${cName}/all`],
+            defaultVal: (col.allRule || col.listRule || 'public') 
+          },
+          { 
+            key: 'viewRule', 
+            label: '3. View Single Record (GET Single)', 
+            desc: `Who is allowed to view single record detail from /api/${cName}/:id?`, 
+            endpoints: [`/api/${cName}/:id`],
+            defaultVal: 'public' 
+          },
+          { 
+            key: 'createRule', 
+            label: '4. Create New Record (POST Create)', 
+            desc: `Who is allowed to insert new records into /api/${cName}?`, 
+            endpoints: [`/api/${cName}`],
+            defaultVal: '@request.auth.id != ""' 
+          },
+          { 
+            key: 'updateRule', 
+            label: '5. Update Record (PATCH Update)', 
+            desc: `Who is allowed to modify existing records in /api/${cName}/:id?`, 
+            endpoints: [`/api/${cName}/:id`],
+            defaultVal: '@request.auth.id != ""' 
+          },
+          { 
+            key: 'deleteRule', 
+            label: '6. Delete Record (DELETE Remove)', 
+            desc: `Who is allowed to delete records from /api/${cName}/:id?`, 
+            endpoints: [`/api/${cName}/:id`],
+            defaultVal: '@request.auth.id != ""' 
+          }
+        ];
+
+        const ownerExpr = cName === 'users' ? 'id = @request.auth.id' : 'user_id = @request.auth.id';
+
+        const rulesCardsHtml = rulesConfig.map((rc, i) => {
+          const rawVal = (col[rc.key] && String(col[rc.key]).trim() !== '') 
+            ? col[rc.key] 
+            : (rc.key === 'allRule' && col.listRule ? col.listRule : rc.defaultVal);
+          const inputId = `inlineInput_${rc.key}`;
+          const endpointsBadges = rc.endpoints ? `
+            <div class="flex items-center flex-wrap gap-1 mt-1">
+              ${rc.endpoints.map(ep => `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200/80 font-mono text-[9px] font-bold">${ep}</span>`).join('')}
+            </div>
+          ` : '';
+          return `
+            <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+              <div class="flex flex-wrap items-center justify-between gap-1.5">
+                <div>
+                  <div class="text-xs font-extrabold text-slate-800">${rc.label}</div>
+                  <div class="text-[11px] text-slate-500">${rc.desc}</div>
+                  ${endpointsBadges}
+                </div>
+                <div class="flex items-center flex-wrap gap-1 text-[10px]">
+                  <button type="button" onclick="applyRulePreset('${inputId}', 'public', 'set')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 text-emerald-700 font-bold hover:border-emerald-300 transition cursor-pointer" title="Public (Anyone allowed)">
+                    Public
+                  </button>
+                  <button type="button" onclick="applyRulePreset('${inputId}', '@request.auth.id != \\'\\'', 'set')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 font-semibold transition cursor-pointer" title="Require Logged In User">
+                    Require Auth
+                  </button>
+                  <button type="button" onclick="applyRulePreset('${inputId}', '${ownerExpr}', 'append')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 text-indigo-700 font-bold hover:border-indigo-300 transition cursor-pointer" title="Append Creator/Owner (${ownerExpr})">
+                    Creator / Owner
+                  </button>
+
+                  <!-- Role Multi-Select Dropdown -->
+                  <div class="relative inline-block" id="roleDropdownWrapper_${inputId}">
+                    <button type="button" onclick="toggleRoleDropdown('${inputId}')" id="roleBtn_${inputId}" class="px-2 py-0.5 rounded-lg border border-amber-200 bg-amber-50/70 hover:bg-amber-100 text-amber-800 font-bold hover:border-amber-300 transition flex items-center space-x-1 cursor-pointer" title="Select one or more authorized roles">
+                      <i class="fa-solid fa-crown text-[9px] text-amber-600"></i>
+                      <span id="roleBtnLabel_${inputId}">Role ▾</span>
+                    </button>
+                    <div id="roleDropdownMenu_${inputId}" class="hidden absolute right-0 top-7 w-56 bg-white border border-slate-200 rounded-2xl shadow-xl p-2.5 z-50 space-y-1">
+                      <div class="px-2 py-1 text-[10px] font-extrabold uppercase text-slate-400 flex items-center justify-between">
+                        <span>Authorized Roles</span>
+                        <span class="text-[9px] text-slate-400 font-normal">Multi-select</span>
+                      </div>
+                      <div id="roleOptionsList_${inputId}" class="space-y-0.5 max-h-48 overflow-y-auto"></div>
+                      <div class="pt-2 border-t border-slate-100 flex items-center space-x-1">
+                        <input type="text" id="customRoleInput_${inputId}" placeholder="Custom role..." class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-[11px] font-mono focus:outline-none focus:border-amber-500" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomRoleToRule('${inputId}');}">
+                        <button type="button" onclick="addCustomRoleToRule('${inputId}')" class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-[10px] rounded-lg transition">
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button type="button" onclick="applyRulePreset('${inputId}', '', 'set')" class="px-1.5 py-0.5 rounded-lg text-slate-400 hover:text-rose-600 transition cursor-pointer" title="Clear expression">
+                    <i class="fa-solid fa-xmark"></i>
+                  </button>
+                </div>
+              </div>
+              <div>
+                <input type="text" id="${inputId}" value="${rawVal.replace(/"/g, '&quot;')}" oninput="updateRoleDropdownUI('${inputId}')" class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs font-mono text-slate-800 focus:outline-none focus:border-emerald-600 shadow-2xs transition" placeholder='e.g. user_id = @request.auth.id || @request.auth.role = "admin"'>
+              </div>
+            </div>
+          `;
+        }).join('');
+
+        content.innerHTML = `
+          <div class="space-y-5">
+            <div class="flex flex-wrap items-center justify-between border-b border-slate-200 pb-3 gap-2">
+              <div>
+                <h4 class="text-sm font-extrabold text-slate-900 flex items-center space-x-2">
+                  <i class="fa-solid fa-shield-halved text-indigo-600"></i>
+                  <span>API Access Rules (RBAC)</span>
+                </h4>
+                <p class="text-[11px] text-slate-500 mt-0.5">Configure access rules and authorization filters for table <span class="font-mono font-bold text-emerald-700">${cName}</span>. Evaluated automatically on every live request.</p>
+              </div>
+              <!-- Quick Presets -->
+              <div class="flex items-center flex-wrap gap-1.5">
+                <span class="text-[11px] text-slate-400 font-semibold mr-1">Presets:</span>
+                <button type="button" onclick="applyInlineSecurityProfile('recommended')" class="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold transition cursor-pointer">Public Read, Auth Write</button>
+                <button type="button" onclick="applyInlineSecurityProfile('public_all')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-semibold transition cursor-pointer">Public (All Open)</button>
+                <button type="button" onclick="applyInlineSecurityProfile('private_all')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-semibold transition cursor-pointer">Require Auth</button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3" id="inlineRulesGrid">
+              ${rulesCardsHtml}
+            </div>
+
+            <!-- Save Action -->
+            <div class="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-200">
+              <div class="text-[11px] text-slate-500 flex items-center space-x-1.5">
+                <i class="fa-solid fa-circle-check text-emerald-600"></i>
+                <span>Rules are enforced immediately on live API calls without server restart.</span>
+              </div>
+              <button type="button" id="saveAccessRulesBtn" onclick="saveAccessRulesOnly()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center space-x-1.5 cursor-pointer">
+                <i class="fa-solid fa-check"></i>
+                <span>Save Access Rules</span>
+              </button>
+            </div>
+          </div>
+        `;
+
+        // Initialize role dropdown labels and checks
+        rulesConfig.forEach(rc => {
+          updateRoleDropdownUI(`inlineInput_${rc.key}`);
+        });
+        return;
+      }
 
       const sampleObj = {};
       if (col.type === 'auth') {
@@ -5740,7 +6551,7 @@ let currentCollection = "users";
         },
         all: {
           title: `Fetch All Records Without Pagination (${cName})`,
-          desc: `Retrieve rows from ${cName} via standard clean Padi Rust route (/api/${cName}/all). Capped at 5,000 max records. Optional query: ?limit=500 (max: 5000), ?offset=0, ?sort_by=id&order=desc.`,
+          desc: `Retrieve rows from ${cName} via standard clean Padi Rust route (/api/${cName}/all). Capped at 5,000 max records. Optional query: ?limit=500 (max: 5000), ?offset=0, ?sort_by=id&order=desc. Evaluated by dedicated allRule.`,
           method: 'GET',
           badge: 'bg-emerald-100 text-emerald-800',
           path: `/api/${cName}/all?limit=5000&sort_by=id&order=desc`,
@@ -6197,11 +7008,60 @@ let currentCollection = "users";
 
       currentApiPreviewResponseJson = JSON.stringify(samplePadiResponse, null, 2);
 
+      let ruleKeyForAction = null;
+      let ruleLabelForAction = 'Active Rule:';
+      if (action === 'list') {
+        ruleKeyForAction = 'listRule';
+        ruleLabelForAction = 'Active Rule (List):';
+      } else if (action === 'all') {
+        ruleKeyForAction = 'allRule';
+        ruleLabelForAction = 'Active Rule (All):';
+      } else if (action === 'view') {
+        ruleKeyForAction = 'viewRule';
+        ruleLabelForAction = 'Active Rule (Single View):';
+      } else if (action === 'create') {
+        ruleKeyForAction = 'createRule';
+        ruleLabelForAction = 'Active Rule (Create):';
+      } else if (action === 'update') {
+        ruleKeyForAction = 'updateRule';
+        ruleLabelForAction = 'Active Rule (Update):';
+      } else if (action === 'delete') {
+        ruleKeyForAction = 'deleteRule';
+        ruleLabelForAction = 'Active Rule (Delete):';
+      }
+
+      let ruleBadgeHtml = '';
+      if (ruleKeyForAction) {
+        let ruleVal = col[ruleKeyForAction];
+        if (!ruleVal && action === 'all') {
+          ruleVal = col.listRule || 'public';
+        } else if (!ruleVal) {
+          ruleVal = (action === 'list' || action === 'view' ? 'public' : '@request.auth.id != ""');
+        }
+        const isPub = ruleVal === 'public';
+        ruleBadgeHtml = `
+          <div class="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+            <div class="flex items-center space-x-2 min-w-0">
+              <span class="inline-flex items-center space-x-1 text-[11px] font-bold ${isPub ? 'text-emerald-700' : 'text-indigo-700'}">
+                <i class="fa-solid fa-shield-halved text-[10px]"></i>
+                <span>${ruleLabelForAction}</span>
+              </span>
+              <code class="px-2 py-0.5 rounded ${isPub ? 'bg-emerald-100/80 text-emerald-900 border border-emerald-200' : 'bg-indigo-100/80 text-indigo-900 border border-indigo-200'} font-mono text-[11px] font-bold truncate max-w-[280px] sm:max-w-md">${ruleVal}</code>
+            </div>
+            <button type="button" onclick="renderApiPreview('rules')" class="ml-2 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline shrink-0 flex items-center space-x-1 cursor-pointer" title="Configure rule in Access Rules tab">
+              <span>Edit Rule</span>
+              <i class="fa-solid fa-arrow-right text-[9px]"></i>
+            </button>
+          </div>
+        `;
+      }
+
       content.innerHTML = `
         <div>
           <h4 class="text-sm font-extrabold text-slate-900">${d.title}</h4>
           <p class="text-slate-500 mt-0.5">${d.desc}</p>
         </div>
+        ${ruleBadgeHtml}
         <div class="flex flex-wrap items-center justify-between bg-emerald-50/60 p-3 rounded-2xl font-mono gap-2 border border-emerald-200/80">
           <div class="flex items-center space-x-2.5 min-w-0">
             <span class="px-2.5 py-1 rounded-lg font-extrabold text-[10px] shrink-0 ${d.badge}">${d.method}</span>
@@ -6395,7 +7255,12 @@ let currentCollection = "users";
         showToast('Core system roles (admin, user) cannot be deleted', 'error');
         return;
       }
-      if (!confirm(`Delete role "${role}"? Records created or updated with this role will be rejected.`)) return;
+      if (!await showConfirm({
+        title: 'Delete Role',
+        message: `Delete role <strong>"${escapeHtml(role)}"</strong>? Records created or updated with this role will be rejected.`,
+        confirmText: 'Delete Role',
+        type: 'danger'
+      })) return;
       AVAILABLE_ROLES = AVAILABLE_ROLES.filter(r => r !== role);
       await saveRolesToSettings();
     }
@@ -6920,14 +7785,18 @@ let currentCollection = "users";
     window.createDatabaseBackup = handleCreateBackup;
 
     async function handleRestoreBackup(key) {
-      const isConfirmed = confirm(
-        `⚠️ RESTORE BACKUP WARNING!\n\n` +
-        `Are you sure you want to restore the entire system from "${key}"?\n\n` +
-        `• Current database data will be REPLACED by the backup snapshot.\n` +
-        `• Stored physical files in "storage/" will be unpacked and updated.\n` +
-        `• Active connections will be re-checkpointed.\n\n` +
-        `This operation cannot be undone. Click OK to proceed.`
-      );
+      const isConfirmed = await showConfirm({
+        title: 'Restore Backup Snapshot',
+        message: `Are you sure you want to restore the entire system from <strong>"${escapeHtml(key)}"</strong>?\n\n` +
+          `• Current database data will be <strong>REPLACED</strong> by the backup snapshot.\n` +
+          `• Stored physical files in "storage/" will be unpacked and updated.\n` +
+          `• Active connections will be re-checkpointed.\n\n` +
+          `This operation cannot be undone.`,
+        confirmText: 'Restore System',
+        cancelText: 'Cancel',
+        type: 'warning',
+        icon: 'fa-solid fa-clock-rotate-left'
+      });
       if (!isConfirmed) return;
 
       showToast(`Restoring system from "${key}"... please wait.`);
@@ -6948,7 +7817,12 @@ let currentCollection = "users";
     }
 
     async function handleDeleteBackup(key) {
-      if (!confirm(`Permanently delete backup file "${key}"?`)) return;
+      if (!await showConfirm({
+        title: 'Delete Backup File',
+        message: `Permanently delete backup snapshot <strong>"${escapeHtml(key)}"</strong>? This cannot be undone.`,
+        confirmText: 'Delete Backup',
+        type: 'danger'
+      })) return;
       try {
         const res = await fetch(`/api/backups/${encodeURIComponent(key)}`, { method: 'DELETE' });
         if (res.ok || res.status === 204) {
@@ -7009,7 +7883,12 @@ let currentCollection = "users";
     }
 
     async function handleDeleteAdmin(id) {
-      if (!confirm('Delete this superuser account?')) return;
+      if (!await showConfirm({
+        title: 'Delete Superuser Account',
+        message: 'Are you sure you want to delete this superuser account? This action cannot be undone.',
+        confirmText: 'Delete Superuser',
+        type: 'danger'
+      })) return;
       const res = await fetch(`/api/admins/${id}`, { method: 'DELETE' });
       if (res.ok) {
         showToast('Superuser deleted');
@@ -7963,7 +8842,12 @@ let currentCollection = "users";
       const item = cronJobsList.find(j => (j.job ? j.job.id : j.id) === id);
       const name = item ? (item.job ? item.job.name : item.name) : 'this task';
 
-      if (!confirm(`Are you sure you want to delete the scheduled task "${name}"?`)) {
+      if (!await showConfirm({
+        title: 'Delete Scheduled Task',
+        message: `Are you sure you want to delete the scheduled task <strong>"${escapeHtml(name)}"</strong>?`,
+        confirmText: 'Delete Task',
+        type: 'danger'
+      })) {
         return;
       }
 

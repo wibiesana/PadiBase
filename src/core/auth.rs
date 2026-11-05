@@ -351,6 +351,7 @@ pub async fn require_admin(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordAction {
     List,
+    All,
     View,
     Create,
     Update,
@@ -496,10 +497,8 @@ pub fn has_role_constraint(rule: &str) -> bool {
         || lower.contains("role:")
         || lower.contains("roles:")
         || lower.starts_with("roles ")
-        || lower == "creator"
-        || lower.contains("creator")
-        || lower.contains("editor")
-        || lower.contains("moderator")
+        || lower.contains("admin")
+        || lower.contains("user")
 }
 
 pub fn check_permission(
@@ -518,6 +517,7 @@ pub fn check_permission(
     // 2. Determine applicable rule for this action
     let rule_opt = match action {
         RecordAction::List => col.list_rule.as_deref(),
+        RecordAction::All => col.all_rule.as_deref().or(col.list_rule.as_deref()),
         RecordAction::View => col.view_rule.as_deref(),
         RecordAction::Create => col.create_rule.as_deref(),
         RecordAction::Update => col.update_rule.as_deref(),
@@ -534,8 +534,8 @@ pub fn check_permission(
         }
     }
 
-    // 3. For List and View: default is public unless rule explicitly specifies otherwise
-    if matches!(action, RecordAction::List | RecordAction::View) {
+    // 3. For List, All, and View: default is public unless rule explicitly specifies otherwise
+    if matches!(action, RecordAction::List | RecordAction::All | RecordAction::View) {
         match rule_trimmed {
             None | Some("public") | Some("*") | Some("anyone") => return Ok(()),
             Some("admin") | Some("locked") => {
@@ -613,10 +613,12 @@ pub fn check_permission(
         }
 
         let action_name = match action {
+            RecordAction::List => "list",
+            RecordAction::All => "fetch all",
+            RecordAction::View => "view",
             RecordAction::Create => "create",
             RecordAction::Update => "update",
             RecordAction::Delete => "delete",
-            _ => "modify",
         };
 
         // User must be logged in for non-public actions
@@ -702,10 +704,12 @@ pub fn check_permission(
     // Requires authenticated logged-in user!
     if auth.is_none() {
         let action_name = match action {
+            RecordAction::List => "list",
+            RecordAction::All => "fetch all",
+            RecordAction::View => "view",
             RecordAction::Create => "create",
             RecordAction::Update => "update",
             RecordAction::Delete => "delete",
-            _ => "modify",
         };
         return Err((
             StatusCode::UNAUTHORIZED,

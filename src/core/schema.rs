@@ -81,6 +81,8 @@ pub struct Collection {
     // API Rules (PocketBase rules)
     #[serde(rename = "listRule", default)]
     pub list_rule: Option<String>,
+    #[serde(rename = "allRule", default)]
+    pub all_rule: Option<String>,
     #[serde(rename = "viewRule", default)]
     pub view_rule: Option<String>,
     #[serde(rename = "createRule", default)]
@@ -109,6 +111,7 @@ impl Collection {
             auto_load_relations: false,
             blameable: true,
             list_rule: None,
+            all_rule: None,
             view_rule: None,
             create_rule: Some("@request.auth.id != \"\"".to_string()),
             update_rule: Some("@request.auth.id != \"\"".to_string()),

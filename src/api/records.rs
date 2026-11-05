@@ -430,7 +430,7 @@ pub async fn all(
         })?;
 
     let auth = authenticate_headers(&headers)?;
-    check_permission(RecordAction::List, &col, auth.as_ref(), None)?;
+    check_permission(RecordAction::All, &col, auth.as_ref(), None)?;
 
     let (sort_clause, filter_clause) = resolve_all_sort_and_filter(&params);
     let with_vec = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
@@ -1073,7 +1073,7 @@ pub async fn export_records(
 
     // Exporting dumps the whole table, so it needs at least the collection's list permission.
     let auth = authenticate_headers(&headers)?;
-    check_permission(RecordAction::List, &col, auth.as_ref(), None)?;
+    check_permission(RecordAction::All, &col, auth.as_ref(), None)?;
 
     let items = get_all_records_with_limit(
         &state.db,

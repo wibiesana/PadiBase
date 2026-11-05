@@ -478,7 +478,9 @@ pub fn compile_custom_sql(
 }
 
 fn is_select_statement(sql: &str) -> bool {
-    sql.split_whitespace()
+    let uncommented = strip_sql_comments(sql);
+    uncommented
+        .split_whitespace()
         .next()
         .map(|w| {
             w.eq_ignore_ascii_case("SELECT")
@@ -488,7 +490,7 @@ fn is_select_statement(sql: &str) -> bool {
                 || w.eq_ignore_ascii_case("EXPLAIN")
         })
         .unwrap_or(false)
-        || sql.to_uppercase().contains(" RETURNING ")
+        || uncommented.to_uppercase().contains(" RETURNING ")
 }
 
 fn strip_sql_comments(sql: &str) -> String {
