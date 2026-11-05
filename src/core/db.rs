@@ -2978,4 +2978,49 @@ mod tests {
         assert_eq!(drv, DbDriver::Sqlite);
         assert_eq!(url, "sqlite://./test.db");
     }
+
+    #[test]
+    fn test_parse_json_str_or_val() {
+        let raw_obj = r#"{"id": 1, "username": "admin"}"#.to_string();
+        let val = parse_json_str_or_val(raw_obj);
+        assert!(val.is_object());
+        assert_eq!(val["id"], 1);
+        assert_eq!(val["username"], "admin");
+
+        let raw_arr = r#"[1, 2, "three"]"#.to_string();
+        let val2 = parse_json_str_or_val(raw_arr);
+        assert!(val2.is_array());
+        assert_eq!(val2[0], 1);
+
+        let normal_str = "hello world".to_string();
+        let val3 = parse_json_str_or_val(normal_str);
+        assert_eq!(val3, Value::String("hello world".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_json_object_parse() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        let db_pool = DbPool {
+            driver_pool: DbDriverPool::Sqlite(pool),
+            cache: Arc::new(SchemaCache::default()),
+        };
+
+        let rows = db_pool
+            .fetch_all("SELECT 1 AS id, JSON_OBJECT('id', 4, 'username', 'alina') AS user;", &[])
+            .await
+            .unwrap();
+
+        assert_eq!(rows.len(), 1);
+        let row = &rows[0];
+        assert_eq!(row["id"], 1);
+        // Ensure user is parsed as an Object, NOT an escaped string!
+        assert!(row["user"].is_object(), "Expected user to be an Object, got: {:?}", row["user"]);
+        assert_eq!(row["user"]["id"], 4);
+        assert_eq!(row["user"]["username"], "alina");
+    }
 }
