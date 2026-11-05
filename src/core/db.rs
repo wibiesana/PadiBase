@@ -179,15 +179,44 @@ tokio::task_local! {
     pub static REQUEST_QUERIES: std::sync::Arc<std::sync::Mutex<Vec<QueryLog>>>;
 }
 
+/// Max profiled queries kept per request (bounds memory for large batch/transaction calls).
+const MAX_PROFILED_QUERIES: usize = 200;
+/// Max characters of a single binding kept in the profiler output.
+const MAX_PROFILED_BINDING_CHARS: usize = 200;
+
+/// Mask secrets (password hashes, JWTs) and truncate huge values before they enter the
+/// debug profiler, which is serialized into API responses.
+fn redact_binding(v: Value) -> Value {
+    match v {
+        Value::String(s) => {
+            if s.starts_with("$argon2") || s.starts_with("$2") || s.starts_with("eyJ") {
+                Value::String("[redacted]".to_string())
+            } else if s.chars().count() > MAX_PROFILED_BINDING_CHARS {
+                let cut: String = s.chars().take(MAX_PROFILED_BINDING_CHARS).collect();
+                Value::String(format!("{}… (truncated)", cut))
+            } else {
+                Value::String(s)
+            }
+        }
+        other => other,
+    }
+}
+
 pub fn record_query(sql: &str, params: &[Val], start: std::time::Instant) {
-    let duration = start.elapsed();
-    let ms = (duration.as_secs_f64() * 1000.0 * 100.0).round() / 100.0;
-    let clean_sql = sql.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Profiling is only active inside a request scope with debug enabled; skip all work otherwise.
     let _ = REQUEST_QUERIES.try_with(|cell| {
+        let duration = start.elapsed();
+        let ms = (duration.as_secs_f64() * 1000.0 * 100.0).round() / 100.0;
         if let Ok(mut logs) = cell.lock() {
+            if logs.len() >= MAX_PROFILED_QUERIES {
+                return;
+            }
             logs.push(QueryLog {
-                sql: clean_sql,
-                bindings: params.iter().map(Value::from).collect(),
+                sql: sql.split_whitespace().collect::<Vec<_>>().join(" "),
+                bindings: params
+                    .iter()
+                    .map(|p| redact_binding(Value::from(p)))
+                    .collect(),
                 duration: format!("{:.2}ms", ms),
             });
         }
@@ -1465,6 +1494,49 @@ pub async fn delete_collection(pool: &DbPool, name_or_id: &str) -> Result<bool> 
     .await?;
 
     Ok(true)
+}
+
+/// Rename a collection's physical table and metadata. Relation fields in other
+/// collections that point to the old name (`options.targetTable`) are re-pointed.
+/// `new_name` must already be validated by the caller.
+pub async fn rename_collection(pool: &DbPool, name_or_id: &str, new_name: &str) -> Result<Collection> {
+    let mut col = get_collection_by_name_or_id(pool, name_or_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+    let old_name = col.name.clone();
+    if old_name == new_name {
+        return Ok(col);
+    }
+
+    let sql = format!("ALTER TABLE `{}` RENAME TO `{}`;", old_name, new_name);
+    pool.execute(&sql, &[]).await?;
+
+    col.name = new_name.to_string();
+    col.updated = chrono::Utc::now().to_rfc3339();
+    save_collection_metadata(pool, &col).await?;
+
+    // Re-point relation fields in other collections.
+    pool.clear_all_schema_cache();
+    for mut other in list_collections(pool).await? {
+        if other.id == col.id {
+            continue;
+        }
+        let mut changed = false;
+        for f in other.schema.iter_mut() {
+            if let Some(obj) = f.options.as_object_mut() {
+                if obj.get("targetTable").and_then(|v| v.as_str()) == Some(old_name.as_str()) {
+                    obj.insert("targetTable".into(), serde_json::Value::String(new_name.to_string()));
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            save_collection_metadata(pool, &other).await?;
+        }
+    }
+
+    pool.clear_all_schema_cache();
+    Ok(col)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

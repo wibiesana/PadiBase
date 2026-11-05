@@ -7,6 +7,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
+use crate::api::custom::compile_custom_sql;
 use crate::core::app::AppState;
 use crate::core::auth::{
     authenticate_headers, check_permission, check_session, require_admin, Claims, RecordAction,
@@ -76,7 +77,7 @@ pub struct TransactionRequest {
 pub struct RawSqlRequest {
     pub sql: String,
     #[serde(default)]
-    pub params: Vec<Value>,
+    pub params: Value,
     /// Optional flag to run inside a transaction
     #[serde(default)]
     pub transaction: bool,
@@ -497,8 +498,79 @@ pub async fn execute_custom_sql(
         ));
     }
 
-    let bind_vals: Vec<Val> = payload.params.iter().map(Val::from).collect();
-    let is_select = raw_sql
+    let non_comment_content: String = raw_sql
+        .lines()
+        .filter(|line| !line.trim().starts_with("--"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let trimmed_clean = non_comment_content.trim().trim_end_matches(';').trim();
+
+    // 1. Direct Static JSON Response (e.g. { "message": "hello" } or ["hello", "world"])
+    if (trimmed_clean.starts_with('{') && trimmed_clean.ends_with('}'))
+        || (trimmed_clean.starts_with('[') && trimmed_clean.ends_with(']'))
+    {
+        if let Ok(json_val) = serde_json::from_str::<Value>(trimmed_clean) {
+            let items = if json_val.is_array() { json_val } else { json!([json_val]) };
+            let total = items.as_array().map(|a| a.len()).unwrap_or(1);
+            return Ok(Json(json!({
+                "items": items,
+                "totalItems": total
+            })));
+        }
+    }
+
+    // 2. Direct Quoted String Literal (e.g. 'hello' or "hello")
+    if (trimmed_clean.starts_with('\'') && trimmed_clean.ends_with('\'') && trimmed_clean.len() >= 2)
+        || (trimmed_clean.starts_with('"') && trimmed_clean.ends_with('"') && trimmed_clean.len() >= 2)
+    {
+        let inner = &trimmed_clean[1..trimmed_clean.len() - 1];
+        return Ok(Json(json!({
+            "items": [
+                { "result": inner }
+            ],
+            "totalItems": 1
+        })));
+    }
+
+    // 3. Direct Plain Text / Mock String without SQL keywords (e.g. "hello", "pong", "OK")
+    let first_word_check = trimmed_clean
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_uppercase();
+
+    let sql_keywords = [
+        "SELECT", "INSERT", "UPDATE", "DELETE", "WITH", "PRAGMA", "SHOW", "EXPLAIN",
+        "CREATE", "DROP", "ALTER", "REPLACE", "CALL", "DESCRIBE", "DESC", "BEGIN", "COMMIT", "ROLLBACK",
+    ];
+
+    if !trimmed_clean.is_empty() && !sql_keywords.contains(&first_word_check.as_str()) && !trimmed_clean.contains(';') {
+        return Ok(Json(json!({
+            "items": [
+                { "result": trimmed_clean }
+            ],
+            "totalItems": 1
+        })));
+    }
+
+    let auth = authenticate_headers(&headers).ok().flatten();
+    let mut named_params = Map::new();
+    let mut positional_params = Vec::new();
+
+    match &payload.params {
+        Value::Object(map) => {
+            named_params = map.clone();
+        }
+        Value::Array(arr) => {
+            positional_params = arr.clone();
+        }
+        _ => {}
+    }
+
+    let (compiled_sql, bind_vals) =
+        compile_custom_sql(raw_sql, &named_params, &positional_params, auth.as_ref());
+
+    let is_select = compiled_sql
         .split_whitespace()
         .next()
         .map(|w| {
@@ -519,7 +591,7 @@ pub async fn execute_custom_sql(
         })?;
 
         if is_select {
-            let rows = tx.fetch_all(&state.db, raw_sql, &bind_vals).await.map_err(|e| {
+            let rows = tx.fetch_all(&state.db, &compiled_sql, &bind_vals).await.map_err(|e| {
                 (
                     StatusCode::BAD_REQUEST,
                     Json(json!({ "code": 400, "message": e.to_string() })),
@@ -537,7 +609,7 @@ pub async fn execute_custom_sql(
             })));
         } else {
             let (rows_affected, last_insert_id) =
-                tx.execute(&state.db, raw_sql, &bind_vals).await.map_err(|e| {
+                tx.execute(&state.db, &compiled_sql, &bind_vals).await.map_err(|e| {
                     (
                         StatusCode::BAD_REQUEST,
                         Json(json!({ "code": 400, "message": e.to_string() })),
@@ -559,7 +631,7 @@ pub async fn execute_custom_sql(
     if is_select {
         let rows = state
             .db
-            .fetch_all(raw_sql, &bind_vals)
+            .fetch_all(&compiled_sql, &bind_vals)
             .await
             .map_err(|e| {
                 (
@@ -574,7 +646,7 @@ pub async fn execute_custom_sql(
     } else {
         let (rows_affected, last_insert_id) = state
             .db
-            .execute(raw_sql, &bind_vals)
+            .execute(&compiled_sql, &bind_vals)
             .await
             .map_err(|e| {
                 (

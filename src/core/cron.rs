@@ -374,6 +374,7 @@ pub async fn execute_cron_job(pool: &DbPool, job_id: &str) -> Result<CronExecuti
                 let method_str = job.http_method.as_deref().unwrap_or("GET").to_uppercase();
                 let client = reqwest::Client::builder()
                     .timeout(std::time::Duration::from_secs(60))
+                    .redirect(reqwest::redirect::Policy::limited(3))
                     .build();
 
                 match client {
@@ -406,11 +407,22 @@ pub async fn execute_cron_job(pool: &DbPool, job_id: &str) -> Result<CronExecuti
                         }
 
                         match req_builder.send().await {
-                            Ok(resp) => {
+                            Ok(mut resp) => {
                                 let status_code = resp.status();
-                                let resp_text = resp.text().await.unwrap_or_default();
-                                let preview = if resp_text.len() > 500 {
-                                    format!("{}... (truncated)", &resp_text[..500])
+                                // Read at most 8 KiB so a huge/endless response can't exhaust memory.
+                                const MAX_PREVIEW_BYTES: usize = 8 * 1024;
+                                let mut buf: Vec<u8> = Vec::new();
+                                while buf.len() < MAX_PREVIEW_BYTES {
+                                    match resp.chunk().await {
+                                        Ok(Some(chunk)) => buf.extend_from_slice(&chunk),
+                                        _ => break,
+                                    }
+                                }
+                                let resp_text = String::from_utf8_lossy(&buf).into_owned();
+                                // Truncate on a char boundary (byte slicing can panic on UTF-8).
+                                let preview = if resp_text.chars().count() > 500 {
+                                    let cut: String = resp_text.chars().take(500).collect();
+                                    format!("{}... (truncated)", cut)
                                 } else {
                                     resp_text
                                 };

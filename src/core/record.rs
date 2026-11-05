@@ -309,6 +309,24 @@ pub async fn update_record(
                 }
             }
         }
+        if let Some(v) = payload.get("verified") {
+            let is_verified = match v {
+                Value::Bool(b) => *b,
+                Value::Number(n) => n.as_i64().unwrap_or(0) == 1,
+                Value::String(s) => s == "1" || s.eq_ignore_ascii_case("true"),
+                _ => false,
+            };
+            if is_verified {
+                if meta.has_column("email_verified_at") && !payload.contains_key("email_verified_at") {
+                    payload.insert(
+                        "email_verified_at".to_string(),
+                        Value::Number(chrono::Utc::now().timestamp_millis().into()),
+                    );
+                }
+            } else if meta.has_column("email_verified_at") && !payload.contains_key("email_verified_at") {
+                payload.insert("email_verified_at".to_string(), Value::Null);
+            }
+        }
     }
 
     let mut set_clauses = Vec::new();
@@ -548,6 +566,24 @@ pub async fn update_record_tx(
                         payload.insert("password".to_string(), Value::String(hash));
                     }
                 }
+            }
+        }
+        if let Some(v) = payload.get("verified") {
+            let is_verified = match v {
+                Value::Bool(b) => *b,
+                Value::Number(n) => n.as_i64().unwrap_or(0) == 1,
+                Value::String(s) => s == "1" || s.eq_ignore_ascii_case("true"),
+                _ => false,
+            };
+            if is_verified {
+                if meta.has_column("email_verified_at") && !payload.contains_key("email_verified_at") {
+                    payload.insert(
+                        "email_verified_at".to_string(),
+                        Value::Number(chrono::Utc::now().timestamp_millis().into()),
+                    );
+                }
+            } else if meta.has_column("email_verified_at") && !payload.contains_key("email_verified_at") {
+                payload.insert("email_verified_at".to_string(), Value::Null);
             }
         }
     }

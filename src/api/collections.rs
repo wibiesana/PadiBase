@@ -10,7 +10,7 @@ use crate::core::app::AppState;
 use crate::core::auth::require_admin;
 use crate::core::db::{
     create_or_update_collection_table, delete_collection, get_collection_by_name_or_id,
-    is_safe_identifier, list_collections, save_collection_metadata,
+    is_safe_identifier, list_collections, rename_collection, save_collection_metadata,
 };
 use crate::core::schema::{generate_id, Collection};
 
@@ -167,6 +167,47 @@ pub async fn update(
         .map_err(|e| internal("Failed to save metadata", e))?;
 
     Ok(Json(payload))
+}
+
+#[derive(serde::Deserialize)]
+pub struct RenamePayload {
+    pub name: String,
+}
+
+pub async fn rename(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(name_or_id): Path<String>,
+    Json(payload): Json<RenamePayload>,
+) -> Result<impl IntoResponse, ApiError> {
+    require_admin(&state, &headers).await?;
+    let existing = get_collection_by_name_or_id(&state.db, &name_or_id)
+        .await
+        .map_err(|e| internal("Failed to load collection", e))?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "Collection not found." })),
+            )
+        })?;
+    if existing.name.starts_with('_') || existing.name == "users" {
+        return Err(bad_request("System tables cannot be renamed."));
+    }
+
+    let mut probe = existing.clone();
+    probe.name = payload.name.trim().to_lowercase();
+    validate_collection(&probe)?;
+    if probe.name == existing.name {
+        return Ok(Json(existing));
+    }
+    if let Ok(Some(_)) = get_collection_by_name_or_id(&state.db, &probe.name).await {
+        return Err(bad_request("Collection name already exists."));
+    }
+
+    let renamed = rename_collection(&state.db, &existing.id, &probe.name)
+        .await
+        .map_err(|e| internal("Failed to rename table", e))?;
+    Ok(Json(renamed))
 }
 
 pub async fn delete(

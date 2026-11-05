@@ -352,6 +352,14 @@ pub async fn test_email(
             &app_name,
             &app_url,
         ),
+        "verification" | "verify" => crate::core::email::render_verification_email(
+            config.templates.verification.as_ref(),
+            to,
+            "demo_verification_token_123456",
+            &format!("{}/api/auth/confirm-verification?token=demo_token", app_url.trim_end_matches('/')),
+            &app_name,
+            &app_url,
+        ),
         _ => crate::core::email::render_test_email(to, &app_name, &app_url),
     };
 

@@ -1,7 +1,7 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{Html, IntoResponse},
     Json,
 };
 use serde::Deserialize;
@@ -10,7 +10,7 @@ use serde_json::{json, Map, Value};
 use crate::core::app::AppState;
 use crate::core::auth::{
     authenticate_headers, burn_dummy_verify, check_permission, check_session, create_jwt_with_key,
-    generate_token_key, hash_password, verify_password, RecordAction,
+    generate_token_key, hash_password, require_admin, verify_jwt, verify_password, RecordAction,
 };
 use crate::core::db::{get_collection_by_name_or_id, get_table_metadata, json_get_str, Val};
 use crate::core::env::Env;
@@ -78,6 +78,39 @@ pub struct ChangePasswordRequest {
     pub password_confirm: Option<String>,
     #[serde(default)]
     pub collection: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct RequestVerificationRequest {
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub identity: String,
+    #[serde(default)]
+    pub collection: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct ConfirmVerificationRequest {
+    pub token: String,
+    #[serde(default)]
+    pub collection: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
+pub struct ConfirmVerificationQuery {
+    #[serde(default)]
+    pub token: String,
+}
+
+fn default_manual_verify_true() -> bool {
+    true
+}
+
+#[derive(Deserialize)]
+pub struct ManualVerifyRequest {
+    #[serde(default = "default_manual_verify_true")]
+    pub verified: bool,
 }
 
 async fn resolve_auth_collection(
@@ -1214,4 +1247,661 @@ async fn handle_update_profile(
         "record": record,
         "message": "Profile updated successfully."
     })))
+}
+
+// =========================================================================
+// EMAIL VERIFICATION (REQUEST, CONFIRM, MANUAL SUPERADMIN VERIFICATION)
+// =========================================================================
+
+/// Request email verification: `POST /api/{collection}/request-verification`
+pub async fn request_verification(
+    State(state): State<AppState>,
+    Path(collection_name): Path<String>,
+    Json(payload): Json<RequestVerificationRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    handle_request_verification(state, &collection_name, payload).await
+}
+
+/// Shortcut request verification: `POST /api/auth/request-verification`
+pub async fn request_verification_default(
+    State(state): State<AppState>,
+    Json(payload): Json<RequestVerificationRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    let col_name = payload
+        .collection
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "users".to_string());
+    handle_request_verification(state, &col_name, payload).await
+}
+
+async fn handle_request_verification(
+    state: AppState,
+    collection_name: &str,
+    payload: RequestVerificationRequest,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let col = resolve_auth_collection(&state, collection_name).await?;
+    let identity = if !payload.email.trim().is_empty() {
+        payload.email.trim()
+    } else {
+        payload.identity.trim()
+    };
+
+    if identity.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": "Email or identity is required." })),
+        ));
+    }
+
+    let find_sql = format!(
+        "SELECT * FROM `{}` WHERE `email` = ? OR `username` = ? LIMIT 1;",
+        col.name
+    );
+    let row = state
+        .db
+        .fetch_optional(&find_sql, &[Val::from(identity), Val::from(identity)])
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "Account with that email/identity was not found." })),
+            )
+        })?;
+
+    let user_id = json_get_str(&row, "id");
+    let email = json_get_str(&row, "email");
+    let token_key = json_get_str(&row, "tokenKey");
+
+    // Check if already verified
+    let already_verified = row
+        .get("verified")
+        .map(|v| match v {
+            Value::Bool(b) => *b,
+            Value::Number(n) => n.as_i64().unwrap_or(0) == 1,
+            Value::String(s) => s == "1" || s.eq_ignore_ascii_case("true"),
+            _ => false,
+        })
+        .unwrap_or(false);
+
+    if already_verified {
+        return Ok(Json(json!({
+            "message": "This account is already verified.",
+            "email": email,
+            "verified": true
+        })));
+    }
+
+    // Generate verification JWT token valid for 7 days
+    let verify_token = create_jwt_with_key(
+        &user_id,
+        &email,
+        "verification",
+        Some(col.name.clone()),
+        7,
+        Some(&token_key),
+    )
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "code": 500, "message": format!("Failed to generate verification token: {}", e) })),
+        )
+    })?;
+
+    let (_app_name, app_url) = crate::core::email::get_app_meta(&state.db).await;
+    let base_url = app_url.trim_end_matches('/');
+    let verify_url = format!("{}/api/auth/confirm-verification?token={}", base_url, verify_token);
+
+    // Asynchronously dispatch verification email if SMTP enabled
+    if !email.is_empty() && email.contains('@') {
+        let recipient_email = email.clone();
+        let token_str = verify_token.clone();
+        let verify_url_str = verify_url.clone();
+        let db_clone = state.db.clone();
+        tokio::spawn(async move {
+            let config = crate::core::email::get_smtp_config(&db_clone).await;
+            if config.enabled && config.events.verification {
+                let (app_name, app_url) = crate::core::email::get_app_meta(&db_clone).await;
+                let (subject, html) = crate::core::email::render_verification_email(
+                    config.templates.verification.as_ref(),
+                    &recipient_email,
+                    &token_str,
+                    &verify_url_str,
+                    &app_name,
+                    &app_url,
+                );
+                let _ = crate::core::email::send_email_with_config(&config, &recipient_email, &subject, &html).await;
+            }
+        });
+    }
+
+    if Env::is_production() {
+        return Ok(Json(json!({
+            "message": "If the account exists and is not verified, verification instructions have been sent to your email."
+        })));
+    }
+
+    Ok(Json(json!({
+        "message": "Verification instructions generated and sent successfully.",
+        "email": email,
+        "token": verify_token,
+        "verify_url": verify_url
+    })))
+}
+
+/// Confirm verification via POST API: `POST /api/{collection}/confirm-verification`
+pub async fn confirm_verification(
+    State(state): State<AppState>,
+    Path(collection_name): Path<String>,
+    Json(payload): Json<ConfirmVerificationRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    handle_confirm_verification(state, Some(&collection_name), &payload.token).await
+}
+
+/// Shortcut confirm verification via POST API: `POST /api/auth/confirm-verification`
+pub async fn confirm_verification_default(
+    State(state): State<AppState>,
+    Json(payload): Json<ConfirmVerificationRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    handle_confirm_verification(state, payload.collection.as_deref(), &payload.token).await
+}
+
+/// Direct click verification from email in web browser: `GET /api/auth/confirm-verification?token=...`
+pub async fn confirm_verification_get(
+    State(state): State<AppState>,
+    Query(query): Query<ConfirmVerificationQuery>,
+) -> impl IntoResponse {
+    let (app_name, app_url) = crate::core::email::get_app_meta(&state.db).await;
+    let token = query.token.trim();
+    if token.is_empty() {
+        return Html(render_verification_result_page(
+            false,
+            "Verification Token Missing",
+            "No verification token was provided in the request link. Please check your verification email.",
+            &app_name,
+            &app_url,
+        ));
+    }
+
+    match handle_confirm_verification(state, None, token).await {
+        Ok(json_res) => {
+            let email = json_res.0.get("email").and_then(|v| v.as_str()).unwrap_or("");
+            let msg = if !email.is_empty() {
+                format!("Your email address (<strong>{}</strong>) has been successfully verified! You may now sign in and access all features.", email)
+            } else {
+                "Your account email has been successfully verified! You may now sign in and access all features.".to_string()
+            };
+            Html(render_verification_result_page(
+                true,
+                "Email Successfully Verified! 🎉",
+                &msg,
+                &app_name,
+                &app_url,
+            ))
+        }
+        Err((_, err_json)) => {
+            let err_msg = err_json.0.get("message").and_then(|v| v.as_str()).unwrap_or("Failed to verify account.");
+            Html(render_verification_result_page(
+                false,
+                "Verification Failed",
+                err_msg,
+                &app_name,
+                &app_url,
+            ))
+        }
+    }
+}
+
+async fn handle_confirm_verification(
+    state: AppState,
+    collection_hint: Option<&str>,
+    token: &str,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let claims = verify_jwt(token).map_err(|e| {
+        (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": format!("Invalid or expired verification token: {}", e) })),
+        )
+    })?;
+
+    if claims.role != "verification" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": "Invalid token type. Verification token required." })),
+        ));
+    }
+
+    let col_name = collection_hint
+        .or_else(|| claims.collection_id.as_deref())
+        .unwrap_or("users");
+
+    let col = resolve_auth_collection(&state, col_name).await?;
+    let meta = get_table_metadata(&state.db, &col.name).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "code": 500, "message": e.to_string() })),
+        )
+    })?;
+
+    // Find the record by id (sub)
+    let find_sql = format!("SELECT * FROM `{}` WHERE `{}` = ? LIMIT 1;", col.name, meta.pk_column);
+    let row = state
+        .db
+        .fetch_optional(&find_sql, &[Val::from(&claims.sub)])
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "User record was not found." })),
+            )
+        })?;
+
+    if let Some(ref expected_tk) = claims.tk {
+        if meta.has_column("tokenKey") {
+            let actual_tk = json_get_str(&row, "tokenKey");
+            if !actual_tk.is_empty() && &actual_tk != expected_tk {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "code": 400, "message": "Verification token is no longer valid." })),
+                ));
+            }
+        }
+    }
+
+    let now_iso = chrono::Utc::now().to_rfc3339();
+    let now_epoch_ms = chrono::Utc::now().timestamp_millis();
+
+    let mut set_clauses = vec!["`verified` = 1".to_string()];
+    let mut params = Vec::new();
+
+    if meta.has_column("email_verified_at") {
+        set_clauses.push("`email_verified_at` = ?".to_string());
+        params.push(Val::from(now_epoch_ms));
+    }
+    if meta.has_updated {
+        set_clauses.push("`updated` = ?".to_string());
+        params.push(Val::from(&now_iso));
+    }
+    if meta.has_updated_at {
+        set_clauses.push("`updated_at` = ?".to_string());
+        params.push(Val::from(&now_iso));
+    }
+
+    params.push(Val::from(&claims.sub));
+    let update_sql = format!(
+        "UPDATE `{}` SET {} WHERE `{}` = ?;",
+        col.name,
+        set_clauses.join(", "),
+        meta.pk_column
+    );
+
+    state.db.execute(&update_sql, &params).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "code": 500, "message": format!("Failed to update verification status: {}", e) })),
+        )
+    })?;
+
+    // Fetch updated record
+    let updated_record = get_record(&state.db, &col, &claims.sub).await.ok().flatten();
+
+    if col.realtime {
+        if let Some(ref rec) = updated_record {
+            if let Ok(val) = serde_json::to_value(rec) {
+                state.realtime.broadcast(RealtimeMessage::new("update", &col.name, val));
+            }
+        }
+    }
+
+    Ok(Json(json!({
+        "code": 200,
+        "message": "Account email successfully verified.",
+        "id": claims.sub,
+        "email": claims.email,
+        "verified": true,
+        "record": updated_record
+    })))
+}
+
+/// Manual verify or unverify user by superadmin:
+/// `POST /api/{collection}/records/{id}/verify` or `POST /api/admins/users/{id}/verify`
+pub async fn manual_verify_user(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection_name, id)): Path<(String, String)>,
+    Json(payload): Json<ManualVerifyRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    handle_manual_verify_user(state, &collection_name, &id, payload.verified).await
+}
+
+/// Shortcut manual verify for `users` collection by superadmin: `POST /api/admins/users/{id}/verify`
+pub async fn manual_verify_user_default(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(payload): Json<ManualVerifyRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    handle_manual_verify_user(state, "users", &id, payload.verified).await
+}
+
+async fn handle_manual_verify_user(
+    state: AppState,
+    collection_name: &str,
+    id: &str,
+    verified: bool,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let col = resolve_auth_collection(&state, collection_name).await?;
+    let meta = get_table_metadata(&state.db, &col.name).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "code": 500, "message": e.to_string() })),
+        )
+    })?;
+
+    // Check user exists
+    let find_sql = format!("SELECT * FROM `{}` WHERE `{}` = ? LIMIT 1;", col.name, meta.pk_column);
+    let row = state
+        .db
+        .fetch_optional(&find_sql, &[Val::from(id)])
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "User not found." })),
+            )
+        })?;
+
+    let email = json_get_str(&row, "email");
+    let now_iso = chrono::Utc::now().to_rfc3339();
+    let now_epoch_ms = chrono::Utc::now().timestamp_millis();
+
+    let mut set_clauses = vec![format!("`verified` = {}", if verified { 1 } else { 0 })];
+    let mut params = Vec::new();
+
+    if meta.has_column("email_verified_at") {
+        if verified {
+            set_clauses.push("`email_verified_at` = ?".to_string());
+            params.push(Val::from(now_epoch_ms));
+        } else {
+            set_clauses.push("`email_verified_at` = NULL".to_string());
+        }
+    }
+    if meta.has_updated {
+        set_clauses.push("`updated` = ?".to_string());
+        params.push(Val::from(&now_iso));
+    }
+    if meta.has_updated_at {
+        set_clauses.push("`updated_at` = ?".to_string());
+        params.push(Val::from(&now_iso));
+    }
+
+    params.push(Val::from(id));
+    let update_sql = format!(
+        "UPDATE `{}` SET {} WHERE `{}` = ?;",
+        col.name,
+        set_clauses.join(", "),
+        meta.pk_column
+    );
+
+    state.db.execute(&update_sql, &params).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "code": 500, "message": format!("Failed to update user verification: {}", e) })),
+        )
+    })?;
+
+    let updated_record = get_record(&state.db, &col, id).await.ok().flatten();
+    if col.realtime {
+        if let Some(ref rec) = updated_record {
+            if let Ok(val) = serde_json::to_value(rec) {
+                state.realtime.broadcast(RealtimeMessage::new("update", &col.name, val));
+            }
+        }
+    }
+
+    Ok(Json(json!({
+        "code": 200,
+        "message": if verified { "User verified successfully by administrator." } else { "User verification removed." },
+        "id": id,
+        "email": email,
+        "verified": verified,
+        "record": updated_record
+    })))
+}
+
+/// Send verification email triggered manually by superadmin:
+/// `POST /api/{collection}/records/{id}/send-verification` or `POST /api/admins/users/{id}/send-verification`
+pub async fn admin_send_verification_email(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((collection_name, id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    handle_admin_send_verification(state, &collection_name, &id).await
+}
+
+/// Shortcut send verification email by superadmin for `users` collection
+pub async fn admin_send_verification_email_default(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<Value>)> {
+    require_admin(&state, &headers).await?;
+    handle_admin_send_verification(state, "users", &id).await
+}
+
+async fn handle_admin_send_verification(
+    state: AppState,
+    collection_name: &str,
+    id: &str,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    let col = resolve_auth_collection(&state, collection_name).await?;
+    let meta = get_table_metadata(&state.db, &col.name).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "code": 500, "message": e.to_string() })),
+        )
+    })?;
+
+    let find_sql = format!("SELECT * FROM `{}` WHERE `{}` = ? LIMIT 1;", col.name, meta.pk_column);
+    let row = state
+        .db
+        .fetch_optional(&find_sql, &[Val::from(id)])
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "code": 404, "message": "User not found." })),
+            )
+        })?;
+
+    let email = json_get_str(&row, "email");
+    if email.is_empty() || !email.contains('@') {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": "User does not have a valid email address." })),
+        ));
+    }
+
+    let token_key = json_get_str(&row, "tokenKey");
+    let verify_token = create_jwt_with_key(
+        id,
+        &email,
+        "verification",
+        Some(col.name.clone()),
+        7,
+        Some(&token_key),
+    )
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "code": 500, "message": format!("Failed to generate verification token: {}", e) })),
+        )
+    })?;
+
+    let (app_name, app_url) = crate::core::email::get_app_meta(&state.db).await;
+    let base_url = app_url.trim_end_matches('/');
+    let verify_url = format!("{}/api/auth/confirm-verification?token={}", base_url, verify_token);
+
+    // Send email via SMTP
+    let config = crate::core::email::get_smtp_config(&state.db).await;
+    let (subject, html) = crate::core::email::render_verification_email(
+        config.templates.verification.as_ref(),
+        &email,
+        &verify_token,
+        &verify_url,
+        &app_name,
+        &app_url,
+    );
+    let email_sent = if config.enabled {
+        crate::core::email::send_email_with_config(&config, &email, &subject, &html).await.is_ok()
+    } else {
+        false
+    };
+
+    Ok(Json(json!({
+        "code": 200,
+        "message": if email_sent {
+            format!("Verification email dispatched successfully to {}.", email)
+        } else {
+            format!("Verification link generated. (SMTP is disabled or not configured; link: {})", verify_url)
+        },
+        "email": email,
+        "email_sent": email_sent,
+        "token": verify_token,
+        "verify_url": verify_url
+    })))
+}
+
+fn render_verification_result_page(
+    success: bool,
+    title: &str,
+    description: &str,
+    app_name: &str,
+    app_url: &str,
+) -> String {
+    let icon_bg = if success { "#ecfdf5" } else { "#fff1f2" };
+    let icon_svg = if success {
+        r#"<svg style="width: 48px; height: 48px; color: #10b981;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>"#
+    } else {
+        r#"<svg style="width: 48px; height: 48px; color: #f43f5e;" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>"#
+    };
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{title} - {app_name}</title>
+  <style>
+    body {{
+      margin: 0;
+      padding: 0;
+      background-color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: #1e293b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }}
+    .card {{
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 24px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+      max-width: 480px;
+      width: 90%;
+      margin: 20px;
+      padding: 40px 32px;
+      text-align: center;
+      box-sizing: border-box;
+    }}
+    .icon-wrapper {{
+      width: 80px;
+      height: 80px;
+      margin: 0 auto 24px;
+      border-radius: 50%;
+      background-color: {icon_bg};
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }}
+    h1 {{
+      font-size: 24px;
+      font-weight: 800;
+      margin: 0 0 12px;
+      color: #0f172a;
+    }}
+    p {{
+      font-size: 14px;
+      line-height: 1.6;
+      color: #64748b;
+      margin: 0 0 32px;
+    }}
+    .btn {{
+      display: inline-block;
+      background-color: #059669;
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 14px;
+      text-decoration: none;
+      padding: 12px 28px;
+      border-radius: 12px;
+      transition: background-color 0.15s ease;
+    }}
+    .btn:hover {{
+      background-color: #047857;
+    }}
+    .footer {{
+      margin-top: 32px;
+      font-size: 12px;
+      color: #94a3b8;
+    }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon-wrapper">
+      {icon_svg}
+    </div>
+    <h1>{title}</h1>
+    <p>{description}</p>
+    <div>
+      <a href="{app_url}" class="btn">Return to {app_name} &rarr;</a>
+    </div>
+    <div class="footer">
+      Powered by {app_name}
+    </div>
+  </div>
+</body>
+</html>"#
+    )
 }

@@ -20,6 +20,27 @@ pub async fn serve_admin_ui(
         &file_path
     };
 
+    // In local development, prioritize live files from disk so UI updates are instant
+    let disk_file = std::path::Path::new("src/ui/static").join(target);
+    if disk_file.is_file() {
+        if let Ok(bytes) = std::fs::read(&disk_file) {
+            let mime = mime_guess::from_path(target).first_or_octet_stream();
+            let builder = Response::builder()
+                .header(
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_str(mime.as_ref())
+                        .unwrap_or(HeaderValue::from_static("text/html")),
+                )
+                .header(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-cache, no-store, must-revalidate"),
+                );
+            return builder
+                .body(Body::from(bytes))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        }
+    }
+
     let (resolved, content) = match Asset::get(target) {
         Some(c) => (target, c),
         None => match Asset::get("index.html") {

@@ -183,6 +183,12 @@ pub async fn run_cli() -> Result<()> {
                 );
             }
 
+            if Env::is_debug() && !Env::get_or("APP_HOST", "127.0.0.1").starts_with("127.") && Env::get_or("APP_HOST", "127.0.0.1") != "localhost" {
+                tracing::warn!(
+                    "⚠️  APP_DEBUG is enabled while listening on a public interface: API responses include a SQL profiler block. Set APP_DEBUG=false (or APP_ENV=production)."
+                );
+            }
+
             let state = AppState::new_with_db_url(&data_dir, db_url.as_deref()).await?;
             let db_driver = state.db.driver_name();
             let app_env = Env::get_or("APP_ENV", "development");

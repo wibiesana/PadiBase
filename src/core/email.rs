@@ -27,6 +27,8 @@ pub struct SmtpEvents {
     pub password_changed: bool,
     #[serde(default = "default_true")]
     pub admin_created: bool,
+    #[serde(default = "default_true")]
+    pub verification: bool,
 }
 
 fn default_true() -> bool {
@@ -44,6 +46,7 @@ impl Default for SmtpEvents {
             forgot_password: true,
             password_changed: true,
             admin_created: true,
+            verification: true,
         }
     }
 }
@@ -66,6 +69,8 @@ pub struct SmtpTemplates {
     pub password_changed: Option<EmailTemplate>,
     #[serde(default)]
     pub admin_created: Option<EmailTemplate>,
+    #[serde(default)]
+    pub verification: Option<EmailTemplate>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -542,6 +547,74 @@ pub fn default_admin_created_template() -> EmailTemplate {
 
 <p style="color: #64748b; font-size: 13px; margin-top: 25px;">Please ensure your administrator credentials are stored securely and never shared.</p>"#.to_string(),
     }
+}
+
+pub fn default_verification_template() -> EmailTemplate {
+    EmailTemplate {
+        subject: "Verify your email address - {appName}".to_string(),
+        body: r#"<h2 style="margin-top: 0; color: #0f172a; font-size: 22px; font-weight: 800;">Verify Your Email Address ✉️</h2>
+<p>Thank you for signing up for <strong>{appName}</strong>. Please confirm your email address (<strong>{email}</strong>) to activate your account features.</p>
+
+<div style="text-align: center; margin: 30px 0;">
+  <a href="{verifyUrl}" class="btn">Verify Email Address &rarr;</a>
+</div>
+
+<p>Or use the following verification token directly in your application:</p>
+
+<div class="token-box">
+  {token}
+</div>
+
+<p style="font-size: 13px; color: #64748b; margin-top: 20px;">If the button above does not work, copy and paste this link into your browser:<br/><a href="{verifyUrl}" style="color: #059669; word-break: break-all;">{verifyUrl}</a></p>
+
+<div style="margin-top: 30px; padding: 14px; background-color: #f8fafc; border-left: 4px solid #64748b; border-radius: 8px; font-size: 13px; color: #475569;">
+  If you did not create an account on {appName}, you can safely ignore this email.
+</div>"#.to_string(),
+    }
+}
+
+/// Template: Email Verification
+pub fn render_verification_email(
+    custom_tmpl: Option<&EmailTemplate>,
+    email: &str,
+    verify_token: &str,
+    verify_url: &str,
+    app_name: &str,
+    app_url: &str,
+) -> (String, String) {
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let (raw_subj, raw_body) = if let Some(tmpl) = custom_tmpl {
+        if !tmpl.subject.trim().is_empty() && !tmpl.body.trim().is_empty() {
+            (tmpl.subject.clone(), tmpl.body.clone())
+        } else {
+            let def = default_verification_template();
+            (def.subject, def.body)
+        }
+    } else {
+        let def = default_verification_template();
+        (def.subject, def.body)
+    };
+
+    let pairs = [
+        ("{email}", email),
+        ("{token}", verify_token),
+        ("{verifyUrl}", verify_url),
+        ("{appName}", app_name),
+        ("{appUrl}", app_url),
+        ("{date}", &now),
+    ];
+
+    let subject = replace_placeholders(&raw_subj, &pairs);
+    let body = replace_placeholders(&raw_body, &pairs);
+
+    let html = if body.contains("<!DOCTYPE") || body.contains("<html") {
+        body
+    } else {
+        render_html_layout(&subject, &body, app_name, app_url)
+    };
+
+    (subject, html)
 }
 
 /// Template: Welcome Email on User Registration

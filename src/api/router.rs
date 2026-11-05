@@ -77,6 +77,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/admins/auth-with-password", post(admins::auth_with_password))
         .route("/api/admins", get(admins::list_admins).post(admins::create_admin))
         .route("/api/admins/{id}", delete(admins::delete_admin))
+        .route("/api/admins/users/{id}/verify", post(auth_records::manual_verify_user_default))
+        .route("/api/admins/users/{id}/send-verification", post(auth_records::admin_send_verification_email_default))
         .route("/api/settings", get(admins::get_settings).patch(admins::update_settings).post(admins::update_settings))
         .route("/api/settings/test-email", post(admins::test_email))
         // Cron & Background Tasks
@@ -93,6 +95,8 @@ pub fn create_router(state: AppState) -> Router {
                 .patch(collections::update)
                 .delete(collections::delete),
         )
+        .route("/api/collections/{name_or_id}/rename", post(collections::rename).patch(collections::rename))
+        .route("/api/tables/{name_or_id}/rename", post(collections::rename).patch(collections::rename))
         .route("/api/tables", get(collections::list).post(collections::create))
         .route("/api/tables/sync", post(collections::sync).get(collections::sync))
         .route("/api/tables/import", put(collections::import_collections))
@@ -212,6 +216,22 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/api/{collection}/confirm-password-reset",
             post(auth_records::reset_password),
+        )
+        .route(
+            "/api/{collection}/request-verification",
+            post(auth_records::request_verification),
+        )
+        .route(
+            "/api/{collection}/confirm-verification",
+            post(auth_records::confirm_verification),
+        )
+        .route(
+            "/api/{collection}/records/{id}/verify",
+            post(auth_records::manual_verify_user),
+        )
+        .route(
+            "/api/{collection}/records/{id}/send-verification",
+            post(auth_records::admin_send_verification_email),
         )
         .route(
             "/api/{collection}/change-password",
@@ -374,6 +394,22 @@ pub fn create_router(state: AppState) -> Router {
             post(auth_records::reset_password),
         )
         .route(
+            "/api/collections/{collection}/request-verification",
+            post(auth_records::request_verification),
+        )
+        .route(
+            "/api/collections/{collection}/confirm-verification",
+            post(auth_records::confirm_verification),
+        )
+        .route(
+            "/api/collections/{collection}/records/{id}/verify",
+            post(auth_records::manual_verify_user),
+        )
+        .route(
+            "/api/collections/{collection}/records/{id}/send-verification",
+            post(auth_records::admin_send_verification_email),
+        )
+        .route(
             "/api/collections/{collection}/change-password",
             post(auth_records::change_password),
         )
@@ -421,6 +457,22 @@ pub fn create_router(state: AppState) -> Router {
             post(auth_records::reset_password),
         )
         .route(
+            "/api/tables/{collection}/request-verification",
+            post(auth_records::request_verification),
+        )
+        .route(
+            "/api/tables/{collection}/confirm-verification",
+            post(auth_records::confirm_verification),
+        )
+        .route(
+            "/api/tables/{collection}/records/{id}/verify",
+            post(auth_records::manual_verify_user),
+        )
+        .route(
+            "/api/tables/{collection}/records/{id}/send-verification",
+            post(auth_records::admin_send_verification_email),
+        )
+        .route(
             "/api/tables/{collection}/change-password",
             post(auth_records::change_password),
         )
@@ -440,6 +492,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/auth/register", post(auth_records::register_default))
         .route("/api/auth/forgot-password", post(auth_records::forgot_password_default))
         .route("/api/auth/reset-password", post(auth_records::reset_password_default))
+        .route("/api/auth/request-verification", post(auth_records::request_verification_default))
+        .route("/api/auth/confirm-verification", post(auth_records::confirm_verification_default).get(auth_records::confirm_verification_get))
+        .route("/api/auth/verify-user/{id}", post(auth_records::manual_verify_user_default))
+        .route("/api/auth/send-verification/{id}", post(auth_records::admin_send_verification_email_default))
         .route("/api/auth/change-password", post(auth_records::change_password_default))
         .route(
             "/api/auth/me",

@@ -296,7 +296,7 @@ pub fn format_padi_json(
     }
 
     // Attach `debug` block in development / debug mode (matching Padi Rust Api Framework)
-    if Env::is_debug() || Env::is_development() {
+    if Env::is_debug() {
         let app_env = if Env::is_production() {
             "production"
         } else {
@@ -397,7 +397,7 @@ pub async fn padi_response_middleware(
         }
     }
 
-    let debug_enabled = Env::is_debug() || Env::is_development();
+    let debug_enabled = Env::is_debug();
     let start = std::time::Instant::now();
     let override_match = super::db::match_override_endpoint(
         &state.db,

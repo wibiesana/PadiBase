@@ -253,10 +253,11 @@ let currentCollection = "users";
     }
 
     // Automatically attach admin superuser JWT token to all API requests made within the Dashboard
+    // Stored strictly in sessionStorage so closing the browser immediately logs out superadmin
     const _originalFetch = window.fetch;
     window.fetch = async function (url, options = {}) {
       const opts = Object.assign({}, options);
-      const token = localStorage.getItem('padi_admin_token');
+      const token = sessionStorage.getItem('padi_admin_token');
       if (token && typeof url === 'string' && url.startsWith('/api/')) {
         const headers = new Headers(opts.headers || {});
         if (!headers.has('Authorization')) {
@@ -267,8 +268,9 @@ let currentCollection = "users";
       const res = await _originalFetch(url, opts);
       // A 401 on an authenticated dashboard call means the admin session was revoked or expired.
       if (res.status === 401 && token && typeof url === 'string' && url.startsWith('/api/') && !url.includes('auth-with-password')) {
-        localStorage.removeItem('padi_admin_token');
-        localStorage.removeItem('padi_admin_email');
+        sessionStorage.removeItem('padi_admin_token');
+        sessionStorage.removeItem('padi_admin_email');
+        try { localStorage.clear(); } catch (_) {}
         location.reload();
       }
       return res;
@@ -276,7 +278,7 @@ let currentCollection = "users";
 
     // Query-string token for resources the browser loads itself (<img>, EventSource).
     function fileTokenQuery() {
-      const t = localStorage.getItem('padi_admin_token');
+      const t = sessionStorage.getItem('padi_admin_token');
       return t ? '?token=' + encodeURIComponent(t) : '';
     }
 
@@ -299,8 +301,13 @@ let currentCollection = "users";
     }
 
     async function init() {
-      const token = localStorage.getItem('padi_admin_token');
-      const email = localStorage.getItem('padi_admin_email');
+      // Ensure zero credentials or sensitive data are left in localStorage
+      try {
+        localStorage.clear();
+      } catch (_) {}
+
+      const token = sessionStorage.getItem('padi_admin_token');
+      const email = sessionStorage.getItem('padi_admin_email');
 
       if (token && email) {
         showDashboard(email);
@@ -414,8 +421,9 @@ let currentCollection = "users";
         const data = await res.json();
         const authData = data.item || data;
         if (res.ok && authData.token) {
-          localStorage.setItem('padi_admin_token', authData.token);
-          localStorage.setItem('padi_admin_email', authData.admin.email);
+          sessionStorage.setItem('padi_admin_token', authData.token);
+          sessionStorage.setItem('padi_admin_email', authData.admin.email);
+          try { localStorage.clear(); } catch (_) {}
           showDashboard(authData.admin.email);
         } else {
           showAuthAlert(data.message || 'Invalid email or password');
@@ -438,9 +446,12 @@ let currentCollection = "users";
     }
 
     function handleLogout() {
-      localStorage.removeItem('padi_admin_token');
-      localStorage.removeItem('padi_admin_email');
-      if (sseSource) sseSource.close();
+      sessionStorage.removeItem('padi_admin_token');
+      sessionStorage.removeItem('padi_admin_email');
+      try { sessionStorage.clear(); localStorage.clear(); } catch (_) {}
+      if (sseSource) { sseSource.close(); sseSource = null; }
+      if (typeof sseReconnectTimer !== 'undefined' && sseReconnectTimer) { clearTimeout(sseReconnectTimer); sseReconnectTimer = null; }
+      if (typeof realtimeEvents !== 'undefined') { realtimeEvents = []; pausedRealtimeQueue = []; }
       checkHasAdmins();
     }
 
@@ -462,7 +473,7 @@ let currentCollection = "users";
       }
     }
 
-    function switchMainView(view) {
+    function switchMainView(view, options = {}) {
       if (view !== 'collections' && window.innerWidth < 1024) {
         toggleMobileSidebar(false);
       }
@@ -482,7 +493,9 @@ let currentCollection = "users";
 
       if (view === 'endpoints') {
         updateCustomEpUrlPreview();
-        loadCustomEndpoints();
+        if (!options.skipLoad) {
+          loadCustomEndpoints(options.selectIdOrPath);
+        }
         populateQbTables();
       } else if (view === 'settings') {
         loadAppSettings();
@@ -549,7 +562,7 @@ let currentCollection = "users";
 
     function getSavedCustomPrefixes() {
       try {
-        const raw = localStorage.getItem('padibase_custom_prefixes');
+        const raw = sessionStorage.getItem('padibase_custom_prefixes');
         if (raw) {
           const arr = JSON.parse(raw);
           if (Array.isArray(arr)) {
@@ -583,7 +596,7 @@ let currentCollection = "users";
       if (!list.includes(p)) {
         list.push(p);
         try {
-          localStorage.setItem('padibase_custom_prefixes', JSON.stringify(list));
+          sessionStorage.setItem('padibase_custom_prefixes', JSON.stringify(list));
         } catch (e) {
           console.error('Failed to save custom prefix:', e);
         }
@@ -597,7 +610,7 @@ let currentCollection = "users";
       let list = getSavedCustomPrefixes();
       list = list.filter(p => p !== prefixToDelete);
       try {
-        localStorage.setItem('padibase_custom_prefixes', JSON.stringify(list));
+        sessionStorage.setItem('padibase_custom_prefixes', JSON.stringify(list));
       } catch (e) {
         console.error('Failed to update saved prefixes:', e);
       }
@@ -640,7 +653,7 @@ let currentCollection = "users";
     function getEndpointPathMeta(epId) {
       if (!epId) return null;
       try {
-        const raw = localStorage.getItem('padibase_endpoint_paths_meta');
+        const raw = sessionStorage.getItem('padibase_endpoint_paths_meta');
         if (raw) {
           const map = JSON.parse(raw);
           return map[epId] || null;
@@ -654,10 +667,10 @@ let currentCollection = "users";
     function saveEndpointPathMeta(epId, prefix, subPath) {
       if (!epId) return;
       try {
-        const raw = localStorage.getItem('padibase_endpoint_paths_meta');
+        const raw = sessionStorage.getItem('padibase_endpoint_paths_meta');
         const map = raw ? JSON.parse(raw) : {};
         map[epId] = { prefix: prefix || '', subPath: subPath || '' };
-        localStorage.setItem('padibase_endpoint_paths_meta', JSON.stringify(map));
+        sessionStorage.setItem('padibase_endpoint_paths_meta', JSON.stringify(map));
       } catch (e) {
         console.error('Failed to save endpoint path meta:', e);
       }
@@ -666,11 +679,11 @@ let currentCollection = "users";
     function deleteEndpointPathMeta(epId) {
       if (!epId) return;
       try {
-        const raw = localStorage.getItem('padibase_endpoint_paths_meta');
+        const raw = sessionStorage.getItem('padibase_endpoint_paths_meta');
         if (raw) {
           const map = JSON.parse(raw);
           delete map[epId];
-          localStorage.setItem('padibase_endpoint_paths_meta', JSON.stringify(map));
+          sessionStorage.setItem('padibase_endpoint_paths_meta', JSON.stringify(map));
         }
       } catch (e) {
         console.error('Failed to delete endpoint path meta:', e);
@@ -702,7 +715,7 @@ let currentCollection = "users";
         }
       }
 
-      // 2. Check if it matches any saved custom prefixes from localStorage
+      // 2. Check if it matches any saved custom prefixes from sessionStorage
       const savedList = getSavedCustomPrefixes();
       for (const sp of savedList) {
         const cleanSp = sp.replace(/^\/+/, '');
@@ -975,6 +988,10 @@ let currentCollection = "users";
         if (badge) badge.textContent = customEndpoints.length;
         renderCustomEndpointsList();
 
+        if (selectIdOrPath === '__NEW__') {
+          return;
+        }
+
         if (selectIdOrPath) {
           const found = customEndpoints.find(e => e.id === selectIdOrPath || e.path === selectIdOrPath);
           if (found) {
@@ -1020,23 +1037,23 @@ let currentCollection = "users";
         const isOverride = isOverrideEndpointPath(ep.path);
         const method = ep.method || 'GET';
         return `
-          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-slate-200/90 text-slate-900 border-slate-300 shadow-xs font-bold' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200/60 font-semibold'}">
+          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold'}">
             <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
               <div class="flex items-center space-x-2.5 truncate">
-                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white text-slate-800 shadow-2xs' : 'bg-slate-100 text-slate-600'}">
+                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">
                   <i class="fa-solid fa-code text-[11px]"></i>
                 </span>
                 <div class="text-left truncate">
                   <div class="truncate font-mono">${ep.name || ep.path}</div>
-                  <div class="text-[10px] ${isActive ? 'text-slate-500 font-medium' : 'text-slate-400'}">${fullDisplayPath}</div>
+                  <div class="text-[10px] ${isActive ? 'text-emerald-100 font-medium' : 'text-slate-400'}">${fullDisplayPath}</div>
                 </div>
               </div>
               <div class="flex items-center space-x-1 shrink-0 ml-1">
                 ${isOverride ? `<span class="px-1.5 py-0.5 rounded text-[8px] font-mono font-extrabold tracking-wider ${isActive ? 'bg-amber-400 text-amber-950 shadow-2xs' : 'bg-amber-100 text-amber-900 border border-amber-300'}" title="Overrides Built-in Route">OVERRIDE</span>` : ''}
-                <span class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-extrabold ${isActive ? 'bg-white text-slate-800 shadow-2xs border border-slate-200' : 'bg-slate-100 text-slate-700'}">${method}</span>
+                <span class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-extrabold ${isActive ? 'bg-white/20 text-white' : (methodColors[method] || 'bg-slate-100 text-slate-700')}">${method}</span>
               </div>
             </button>
-            <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="p-2 mr-1 rounded-lg ${isActive ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/60' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'} transition" title="Edit Endpoint">
+            <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="p-2 mr-1 rounded-lg ${isActive ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'} transition cursor-pointer" title="Edit Endpoint">
               <i class="fa-solid fa-sliders text-[11px]"></i>
             </button>
           </div>
@@ -1277,25 +1294,29 @@ let currentCollection = "users";
 
     function initQueryBuilder() {
       populateQbTables();
-      if (!qbSelectedTable && collections.length > 0) {
-        qbSelectedTable = currentCollection || collections[0].name;
-      }
       const sel = document.getElementById('qbTableSelect');
-      if (sel && qbSelectedTable) {
-        sel.value = qbSelectedTable;
-        onQbTableChange(qbSelectedTable, false);
+      if (sel) {
+        sel.value = qbSelectedTable || '';
       }
-      renderQbJoins();
-      renderQbExtraTables();
+      if (qbSelectedTable) {
+        onQbTableChange(qbSelectedTable, false);
+      } else {
+        renderQbColumns();
+        populateQbOrderByOptions();
+        renderQbFilters();
+        renderQbJoins();
+        renderQbExtraTables();
+      }
       buildSqlFromQb(true);
     }
 
     function populateQbTables() {
       const sel = document.getElementById('qbTableSelect');
       if (!sel) return;
-      const current = sel.value || qbSelectedTable || currentCollection;
+      const current = qbSelectedTable || '';
       sel.innerHTML = '<option value="">-- Choose a table --</option>' +
         collections.map(c => `<option value="${c.name}" ${c.name === current ? 'selected' : ''}>${c.name} (${c.type || 'base'})</option>`).join('');
+      sel.value = current;
     }
 
     function getTableFieldsList(tableName) {
@@ -1323,12 +1344,14 @@ let currentCollection = "users";
     }
 
     function onQbTableChange(tableName, shouldBuild = true) {
-      qbSelectedTable = tableName;
+      qbSelectedTable = tableName || '';
       qbSelectedColumns.clear();
 
-      const fields = getTableFieldsList(tableName);
-      // Default: select all fields
-      fields.forEach(f => qbSelectedColumns.add(f.name));
+      if (qbSelectedTable) {
+        const fields = getTableFieldsList(qbSelectedTable);
+        // Default: select all fields
+        fields.forEach(f => qbSelectedColumns.add(f.name));
+      }
 
       renderQbColumns();
       populateQbOrderByOptions();
@@ -1437,9 +1460,14 @@ let currentCollection = "users";
       const container = document.getElementById('qbColumnsContainer');
       if (!container) return;
 
+      if (!qbSelectedTable) {
+        container.innerHTML = '<span class="text-xs text-slate-400 italic">Please select a target table above to select columns.</span>';
+        return;
+      }
+
       const fields = getTableFieldsList(qbSelectedTable);
       if (fields.length === 0) {
-        container.innerHTML = '<span class="text-xs text-slate-400 italic">No table selected or table has no columns.</span>';
+        container.innerHTML = '<span class="text-xs text-slate-400 italic">No columns found in selected table.</span>';
         return;
       }
 
@@ -2025,7 +2053,19 @@ let currentCollection = "users";
       const autoSync = document.getElementById('qbAutoSyncCheckbox')?.checked;
       if (!autoSync && !force) return;
 
-      const table = qbSelectedTable || 'users';
+      if (!qbSelectedTable) {
+        const qbSqlEl = document.getElementById('qbSqlOutput');
+        if (qbSqlEl) {
+          qbSqlEl.value = '-- Please select a target table above to design your query.';
+        }
+        const qbParamsEl = document.getElementById('qbParamsOutput');
+        if (qbParamsEl) {
+          qbParamsEl.value = '{}';
+        }
+        return;
+      }
+
+      const table = qbSelectedTable;
       const allFields = getTableFieldsList(table);
       let sql = '';
       const paramsObj = {};
@@ -2301,41 +2341,42 @@ let currentCollection = "users";
       document.body.removeChild(ta);
     }
 
-    function insertSqlIntoCustomApi() {
+    async function insertSqlIntoCustomApi() {
       const sql = document.getElementById('qbSqlOutput')?.value || '';
-      if (!sql.trim()) {
-        showToast('No SQL query generated to insert into Custom API', 'warning');
+      if (!sql.trim() || sql.trim().startsWith('-- Please select')) {
+        showToast('Please select a target table before inserting into Custom API', 'warning');
         return;
       }
       const rawParams = document.getElementById('qbParamsOutput')?.value || '{}';
 
-      // 1. Switch to Custom API view
-      switchMainView('endpoints');
+      // 1. Switch to Custom API view (skip automatic loading of first endpoint)
+      switchMainView('endpoints', { skipLoad: true });
 
-      // 2. If no endpoint is currently selected, start new endpoint
-      if (!currentCustomEpId) {
-        startNewCustomEndpoint();
-        const table = qbSelectedTable || 'records';
-        const action = qbCurrentAction.toLowerCase();
-        const epNameInput = document.getElementById('epNameInput');
-        const epPathInput = document.getElementById('epPathInput');
-        const epMethodInput = document.getElementById('epMethodInput');
+      // 2. Fetch/refresh endpoints list in the sub-sidebar without selecting any existing endpoint
+      await loadCustomEndpoints('__NEW__');
 
-        if (epNameInput && !epNameInput.value) {
-          epNameInput.value = `${qbCurrentAction} ${table.charAt(0).toUpperCase() + table.slice(1)}`;
-        }
-        if (epPathInput && !epPathInput.value) {
-          epPathInput.value = `${table}/${action}`;
-        }
-        if (epMethodInput) {
-          if (qbCurrentAction === 'SELECT' || qbCurrentAction === 'COUNT') epMethodInput.value = 'GET';
-          else if (qbCurrentAction === 'INSERT') epMethodInput.value = 'POST';
-          else if (qbCurrentAction === 'UPDATE') epMethodInput.value = 'PATCH';
-          else if (qbCurrentAction === 'DELETE') epMethodInput.value = 'DELETE';
-        }
+      // 3. Always start a brand new endpoint (do not overwrite existing endpoint)
+      startNewCustomEndpoint();
+      const table = qbSelectedTable || 'records';
+      const action = qbCurrentAction.toLowerCase();
+      const epNameInput = document.getElementById('epNameInput');
+      const epPathInput = document.getElementById('epPathInput');
+      const epMethodInput = document.getElementById('epMethodInput');
+
+      if (epNameInput) {
+        epNameInput.value = `${qbCurrentAction} ${table.charAt(0).toUpperCase() + table.slice(1)}`;
+      }
+      if (epPathInput) {
+        epPathInput.value = `${table}/${action}`;
+      }
+      if (epMethodInput) {
+        if (qbCurrentAction === 'SELECT' || qbCurrentAction === 'COUNT') epMethodInput.value = 'GET';
+        else if (qbCurrentAction === 'INSERT') epMethodInput.value = 'POST';
+        else if (qbCurrentAction === 'UPDATE') epMethodInput.value = 'PATCH';
+        else if (qbCurrentAction === 'DELETE') epMethodInput.value = 'DELETE';
       }
 
-      // 3. Put SQL and params into the Custom API editor
+      // 4. Put SQL and params into the Custom API editor
       const sqlInput = document.getElementById('epSqlInput');
       if (sqlInput) {
         sqlInput.value = sql;
@@ -2351,7 +2392,7 @@ let currentCollection = "users";
       }
 
       updateCustomEpUrlPreview();
-      showToast('SQL query and parameters inserted into Custom API!', 'success');
+      showToast('SQL query and parameters inserted into new Custom API endpoint!', 'success');
     }
 
     function resetQueryBuilder() {
@@ -2359,17 +2400,17 @@ let currentCollection = "users";
       qbFilterConditions = [];
       qbJoins = [];
       qbExtraTables = [];
-      if (collections.length > 0) {
-        qbSelectedTable = currentCollection || collections[0].name;
-      }
+      qbSelectedTable = '';
       const sel = document.getElementById('qbTableSelect');
-      if (sel && qbSelectedTable) {
-        sel.value = qbSelectedTable;
+      if (sel) {
+        sel.value = '';
       }
+      const limitInput = document.getElementById('qbLimitInput');
+      if (limitInput) limitInput.value = ':limit';
+      const offsetInput = document.getElementById('qbOffsetInput');
+      if (offsetInput) offsetInput.value = '';
       setQbAction('SELECT');
-      if (qbSelectedTable) {
-        onQbTableChange(qbSelectedTable, true);
-      }
+      onQbTableChange('', true);
       const resContainer = document.getElementById('qbResultContainer');
       if (resContainer) resContainer.classList.add('hidden');
       showToast('Visual SQL Builder has been reset', 'info');
@@ -2418,10 +2459,75 @@ let currentCollection = "users";
     }
     window.copyQbResultJson = copyQbResultJson;
 
+    function getCleanSqlResult(data) {
+      if (!data) return data;
+      if (typeof data === 'object') {
+        if (Array.isArray(data.item)) {
+          return data.item;
+        }
+        if (Array.isArray(data.items)) {
+          return data.items;
+        }
+        if (Array.isArray(data.rows)) {
+          return data.rows;
+        }
+        if (Array.isArray(data.data)) {
+          return data.data;
+        }
+        if (Array.isArray(data.results)) {
+          return data.results;
+        }
+        if (data.item && typeof data.item === 'object') {
+          return data.item;
+        }
+      }
+      return data;
+    }
+
+    function getQbColIcon(colName, sampleVal) {
+      const lower = colName.toLowerCase();
+      if (lower === 'id') return 'fa-solid fa-fingerprint';
+      if (lower.startsWith('is_') || lower.startsWith('has_') || typeof sampleVal === 'boolean') {
+        return 'fa-solid fa-toggle-on';
+      }
+      if (lower.includes('date') || lower.includes('time') || lower.endsWith('_at')) {
+        return typeof sampleVal === 'number' ? 'fa-solid fa-hashtag' : 'fa-regular fa-calendar';
+      }
+      if (lower.includes('email')) return 'fa-regular fa-envelope';
+      if (lower.includes('url') || lower.includes('link')) return 'fa-solid fa-link';
+      if (typeof sampleVal === 'number') return 'fa-solid fa-hashtag';
+      return 'fa-solid fa-font';
+    }
+
+    function formatQbCell(val, colName, row) {
+      if (val === null || val === undefined || val === '') {
+        return '<span class="text-slate-300 font-mono">—</span>';
+      }
+      if (colName === 'id') {
+        const idStr = escapeHtml(String(val));
+        return `
+          <span onclick="event.stopPropagation(); copyToClipboard('${idStr}')" class="px-2.5 py-0.5 rounded-lg bg-emerald-50 group-hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 font-semibold text-[11px] font-mono inline-flex items-center cursor-pointer shadow-2xs" title="Click to copy ID">
+            ${idStr} <i class="fa-regular fa-copy ml-1.5 text-[9px] opacity-60"></i>
+          </span>
+        `;
+      }
+      const lower = colName.toLowerCase();
+      if (typeof val === 'boolean' || lower.startsWith('is_') || lower.startsWith('has_')) {
+        const isTrue = val === true || val === 1 || val === 'true' || val === '1';
+        return isTrue
+          ? '<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">TRUE</span>'
+          : '<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold">FALSE</span>';
+      }
+      if (typeof val === 'object') {
+        return `<span class="font-mono text-cyan-700 text-[11px]">${escapeHtml(JSON.stringify(val))}</span>`;
+      }
+      return `<span class="font-mono text-slate-800 text-[11px] whitespace-nowrap">${escapeHtml(String(val))}</span>`;
+    }
+
     async function testGeneratedSqlQuery() {
       const sql = document.getElementById('qbSqlOutput')?.value || '';
-      if (!sql.trim()) {
-        showToast('No SQL query to execute', 'warning');
+      if (!sql.trim() || sql.trim().startsWith('-- Please select')) {
+        showToast('Please select a target table to generate and run a query', 'warning');
         return;
       }
 
@@ -2429,6 +2535,7 @@ let currentCollection = "users";
       const resultStatus = document.getElementById('qbResultStatus');
       const resultJsonPre = document.getElementById('qbResultJsonPre');
       const resultTableWrapper = document.getElementById('qbResultTableWrapper');
+      const subEl = document.getElementById('qbResultSub');
 
       if (resultContainer) {
         resultContainer.classList.remove('hidden');
@@ -2444,20 +2551,18 @@ let currentCollection = "users";
       if (resultTableWrapper) {
         resultTableWrapper.innerHTML = '<div class="p-6 text-center text-xs text-slate-400 font-mono"><i class="fa-solid fa-spinner fa-spin text-cyan-600 mr-2"></i>Running query against database...</div>';
       }
+      if (subEl) {
+        subEl.textContent = 'Executing query...';
+      }
 
       // Default tab is always JSON
       switchQbResultTab('json');
 
-      let params = [];
+      let params = {};
       const rawParams = (document.getElementById('qbParamsOutput')?.value || '').trim();
       if (rawParams && rawParams !== '{}') {
         try {
-          const parsed = JSON.parse(rawParams);
-          if (Array.isArray(parsed)) {
-            params = parsed;
-          } else if (typeof parsed === 'object') {
-            params = Object.values(parsed);
-          }
+          params = JSON.parse(rawParams);
         } catch (e) {
           if (resultStatus) {
             resultStatus.textContent = 'Invalid JSON Params';
@@ -2482,7 +2587,6 @@ let currentCollection = "users";
         });
         const dur = Math.round(performance.now() - t0);
         const data = await res.json();
-        qbLastResultData = data;
 
         if (res.ok) {
           if (resultStatus) {
@@ -2491,6 +2595,7 @@ let currentCollection = "users";
           }
           renderQbQueryResult(data);
         } else {
+          qbLastResultData = data;
           if (resultStatus) {
             resultStatus.textContent = `${res.status} Error (${dur}ms)`;
             resultStatus.className = 'text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-rose-100 text-rose-800';
@@ -2500,7 +2605,18 @@ let currentCollection = "users";
             resultJsonPre.textContent = errMsg;
           }
           if (resultTableWrapper) {
-            resultTableWrapper.innerHTML = `<div class="p-4 text-xs font-mono text-rose-600 bg-rose-50 whitespace-pre-wrap">${escapeHtml(errMsg)}</div>`;
+            resultTableWrapper.innerHTML = `
+              <div class="p-6 bg-rose-50 text-rose-800 text-xs font-mono rounded-xl space-y-2 border border-rose-200">
+                <div class="flex items-center space-x-2 font-bold text-rose-700">
+                  <i class="fa-solid fa-triangle-exclamation"></i>
+                  <span>SQL Execution Failed (${res.status})</span>
+                </div>
+                <div class="whitespace-pre-wrap pl-5">${escapeHtml(errMsg)}</div>
+              </div>
+            `;
+          }
+          if (subEl) {
+            subEl.textContent = `Execution failed with status ${res.status}`;
           }
         }
       } catch (err) {
@@ -2520,39 +2636,75 @@ let currentCollection = "users";
     window.testGeneratedSqlQuery = testGeneratedSqlQuery;
 
     function renderQbQueryResult(data) {
-      qbLastResultData = data;
+      // Extract clean result: strip wrapper fields like "items", "totalItems", etc.
+      const cleanResult = getCleanSqlResult(data);
+      qbLastResultData = cleanResult;
+
       const resultJsonPre = document.getElementById('qbResultJsonPre');
       const resultTableWrapper = document.getElementById('qbResultTableWrapper');
+      const subEl = document.getElementById('qbResultSub');
 
-      // 1. Populate JSON view
-      if (resultJsonPre) {
-        resultJsonPre.textContent = JSON.stringify(data, null, 2);
+      // Update subtitle info
+      if (subEl) {
+        if (Array.isArray(cleanResult)) {
+          subEl.textContent = `${cleanResult.length} record(s) returned by SQL query`;
+        } else if (cleanResult && typeof cleanResult === 'object') {
+          subEl.textContent = cleanResult.rows_affected !== undefined 
+            ? `Statement executed (${cleanResult.rows_affected} row(s) affected)` 
+            : 'Statement executed successfully';
+        }
       }
 
-      // 2. Populate Table view
+      // 1. Populate JSON view with clean result only ([] {} or list [{}])
+      if (resultJsonPre) {
+        resultJsonPre.textContent = JSON.stringify(cleanResult, null, 2);
+      }
+
+      // 2. Populate Table view with executed SQL results (identical to Tables & Data view)
       if (resultTableWrapper) {
-        const items = data?.items || (Array.isArray(data) ? data : null);
-        if (Array.isArray(items)) {
+        let items = null;
+        if (Array.isArray(cleanResult)) {
+          items = cleanResult;
+        } else if (cleanResult && typeof cleanResult === 'object') {
+          const isMutation = cleanResult.rows_affected !== undefined || cleanResult.last_insert_id !== undefined || cleanResult.committed !== undefined;
+          if (!isMutation) {
+            items = [ cleanResult ];
+          }
+        }
+        if (items) {
           if (items.length === 0) {
-            resultTableWrapper.innerHTML = '<div class="p-6 text-center text-xs text-slate-500 italic bg-white">Query returned 0 rows.</div>';
+            resultTableWrapper.innerHTML = `
+              <div class="py-16 text-center text-slate-400 font-sans bg-white">
+                <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3 text-lg">
+                  <i class="fa-solid fa-seedling"></i>
+                </div>
+                <div class="text-sm font-bold text-slate-700 mb-1">No records found</div>
+                <p class="text-xs text-slate-400">The SQL query executed successfully, but 0 rows were returned.</p>
+              </div>
+            `;
           } else {
-            const headers = Object.keys(items[0] || {});
+            const columns = Array.from(new Set(items.flatMap(r => (r && typeof r === 'object') ? Object.keys(r) : [])));
+            const firstRow = items[0] || {};
             let tableHtml = `
-              <table class="w-full text-left text-xs text-slate-700 bg-white border-collapse">
-                <thead class="bg-slate-100 text-slate-800 font-bold sticky top-0 border-b border-slate-200 text-[11px] font-mono">
+              <table class="w-full text-left text-xs bg-white border-collapse">
+                <thead class="bg-slate-50/80 text-slate-700 font-semibold sticky top-0 border-b border-slate-200/80 text-xs z-10 shadow-2xs font-sans">
                   <tr>
-                    ${headers.map(h => `<th class="px-3 py-2 whitespace-nowrap">${escapeHtml(h)}</th>`).join('')}
+                    ${columns.map(c => `
+                      <th class="py-3 px-4 border-r border-slate-200/60 font-semibold text-slate-700 whitespace-nowrap text-left text-xs">
+                        <i class="${getQbColIcon(c, firstRow[c])} text-[11px] text-emerald-600 mr-1.5"></i>
+                        <span>${escapeHtml(c)}</span>
+                      </th>
+                    `).join('')}
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-150 font-mono text-[11px]">
+                <tbody class="divide-y divide-slate-100 font-sans text-xs">
             `;
 
             items.forEach((row, idx) => {
-              tableHtml += `<tr class="${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/60'} hover:bg-slate-100/70 transition">`;
-              headers.forEach(h => {
-                const val = row[h];
-                let displayVal = val === null || val === undefined ? '<span class="text-slate-400 italic">null</span>' : (typeof val === 'object' ? JSON.stringify(val) : String(val));
-                tableHtml += `<td class="px-3 py-1.5 whitespace-nowrap max-w-xs truncate" title="${escapeHtml(String(val))}">${typeof val === 'object' || val === null || val === undefined ? displayVal : escapeHtml(displayVal)}</td>`;
+              tableHtml += `<tr class="hover:bg-emerald-50/40 transition group border-b border-slate-100">`;
+              columns.forEach(col => {
+                const val = row ? row[col] : undefined;
+                tableHtml += `<td class="py-2.5 px-4 border-r border-slate-100 max-w-[280px] truncate">${formatQbCell(val, col, row)}</td>`;
               });
               tableHtml += '</tr>';
             });
@@ -2563,12 +2715,12 @@ let currentCollection = "users";
         } else {
           // Mutation result (e.g. rowsAffected, lastInsertId) or summary object
           let summaryRows = '';
-          if (typeof data === 'object' && data !== null) {
-            for (const [k, v] of Object.entries(data)) {
+          if (typeof cleanResult === 'object' && cleanResult !== null) {
+            for (const [k, v] of Object.entries(cleanResult)) {
               summaryRows += `
                 <tr class="hover:bg-slate-50 border-b border-slate-100 last:border-b-0">
-                  <td class="px-3 py-2 font-bold text-slate-600 bg-slate-50 border-r border-slate-200 w-1/3">${escapeHtml(k)}</td>
-                  <td class="px-3 py-2 text-slate-900">${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}</td>
+                  <td class="px-4 py-2.5 font-bold text-slate-700 bg-slate-50/80 border-r border-slate-200 w-1/3">${escapeHtml(k)}</td>
+                  <td class="px-4 py-2.5 text-slate-900 font-mono">${escapeHtml(typeof v === 'object' ? JSON.stringify(v) : String(v))}</td>
                 </tr>
               `;
             }
@@ -2576,12 +2728,14 @@ let currentCollection = "users";
           resultTableWrapper.innerHTML = `
             <div class="p-4 bg-white space-y-3">
               <div class="flex items-center space-x-2 text-emerald-700 font-bold text-xs">
-                <i class="fa-solid fa-circle-check"></i>
+                <i class="fa-solid fa-circle-check text-sm"></i>
                 <span>Statement Executed Successfully</span>
               </div>
-              <table class="w-full text-left text-xs border border-slate-200 rounded-lg overflow-hidden font-mono">
-                <tbody>${summaryRows || '<tr><td class="p-3 text-slate-500">Success</td></tr>'}</tbody>
-              </table>
+              <div class="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                <table class="w-full text-left text-xs font-mono">
+                  <tbody>${summaryRows || '<tr><td class="p-3 text-slate-500">Statement succeeded</td></tr>'}</tbody>
+                </table>
+              </div>
             </div>
           `;
         }
@@ -3070,7 +3224,7 @@ let currentCollection = "users";
 
         renderCollectionsList();
 
-        const preferred = targetCol || localStorage.getItem('padi_active_col') || currentCollection;
+        const preferred = targetCol || sessionStorage.getItem('padi_active_col') || currentCollection;
         if (collections.some(c => c.name === preferred)) {
           currentCollection = preferred;
         } else if (collections.length > 0) {
@@ -3094,25 +3248,25 @@ let currentCollection = "users";
         const isRel = c.autoLoadRelations === true || c.auto_load_relations === true;
         const fieldCount = (c.schema || []).length;
         return `
-          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-slate-200/90 text-slate-900 border-slate-300 shadow-xs font-bold' : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-200/60 font-semibold'}">
-            <button onclick="selectCollection('${c.name}')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold'}">
+            <button onclick="selectCollection('${c.name}')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0 cursor-pointer">
               <div class="flex items-center space-x-2.5 truncate">
-                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white text-slate-800 shadow-2xs' : 'bg-slate-100 text-slate-600'}">
+                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">
                   <i class="fa-solid ${icon} text-[11px]"></i>
                 </span>
                 <div class="text-left truncate">
                   <div class="truncate font-mono">${c.name}</div>
-                  <div class="text-[10px] ${isActive ? 'text-slate-500 font-medium' : 'text-slate-400'}">${c.type} &bull; ${fieldCount} columns</div>
+                  <div class="text-[10px] ${isActive ? 'text-emerald-100 font-medium' : 'text-slate-400'}">${c.type} &bull; ${fieldCount} columns</div>
                 </div>
               </div>
               <div class="flex items-center space-x-1 shrink-0 ml-1">
-                ${isRel ? `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white text-teal-800 shadow-2xs border border-slate-200' : 'bg-teal-50 text-teal-700'}" title="Auto Relations Active"><i class="fa-solid fa-link"></i></span>` : ''}
+                ${isRel ? `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-700'}" title="Auto Relations Active"><i class="fa-solid fa-link"></i></span>` : ''}
                 ${isRealtime
-                  ? `<span class="px-2 py-1 rounded-lg text-[10px] font-mono ${isActive ? 'bg-white text-emerald-700 shadow-2xs border border-slate-200' : 'bg-emerald-50 text-emerald-700'}" title="Realtime SSE Active"><i class="fa-solid fa-bolt"></i></span>`
-                  : `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-slate-300/80 text-slate-600' : 'bg-slate-100 text-slate-400'}" title="Realtime Inactive">off</span>`}
+                  ? `<span class="px-2 py-1 rounded-lg text-[10px] font-mono ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}" title="Realtime SSE Active"><i class="fa-solid fa-bolt"></i></span>`
+                  : `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/10 text-emerald-200' : 'bg-slate-100 text-slate-400'}" title="Realtime Inactive">off</span>`}
               </div>
             </button>
-            <button onclick="selectCollection('${c.name}'); switchWorkspaceSubView('settings');" class="p-2 mr-1 rounded-lg ${isActive ? 'text-slate-600 hover:text-slate-900 hover:bg-slate-300/60' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'} transition" title="Settings for table ${c.name}">
+            <button onclick="selectCollection('${c.name}'); switchWorkspaceSubView('settings');" class="p-2 mr-1 rounded-lg ${isActive ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'} transition cursor-pointer" title="Settings for table ${c.name}">
               <i class="fa-solid fa-gear text-[11px]"></i>
             </button>
           </div>
@@ -3126,7 +3280,7 @@ let currentCollection = "users";
       }
       currentCollection = name;
       currentSort = "";
-      localStorage.setItem('padi_active_col', name);
+      sessionStorage.setItem('padi_active_col', name);
       selectedRecordIds.clear();
       updateSelectAllCheckboxState();
       updateBulkDeleteBar();
@@ -4172,7 +4326,7 @@ let currentCollection = "users";
                   ${item.id} <i class="fa-regular fa-copy ml-1.5 text-[9px] opacity-50"></i>
                 </span>
               </td>
-              ${schemaCols.map(c => `<td class="py-2.5 px-4 border-r border-slate-100 max-w-[240px] truncate">${formatCell(item[c.name], c.type, item)}</td>`).join('')}
+              ${schemaCols.map(c => `<td class="py-2.5 px-4 border-r border-slate-100 max-w-[240px] truncate">${formatCell(item[c.name], c.type, item, c.name)}</td>`).join('')}
             </tr>
           `;
         }).join('');
@@ -4184,8 +4338,33 @@ let currentCollection = "users";
       document.getElementById('nextPageBtn').disabled = pageNum >= totalPages;
     }
 
-    function formatCell(val, type, item) {
+    function formatCell(val, type, item, colName) {
       if (val === null || val === undefined || val === '') return '<span class="text-slate-300">—</span>';
+      if (colName === 'verified' && item && item.id) {
+        const isVerified = val === true || val === 1 || val === '1' || val === 'true';
+        if (isVerified) {
+          return `
+            <button type="button" onclick="event.stopPropagation(); quickToggleUserVerification('${item.id}', true)" class="px-2.5 py-0.5 rounded-full bg-emerald-100 hover:bg-rose-100 text-emerald-800 hover:text-rose-800 text-[10px] font-extrabold inline-flex items-center space-x-1 cursor-pointer transition border border-emerald-200 hover:border-rose-300" title="Verified account. Click to unverify.">
+              <i class="fa-solid fa-circle-check text-emerald-600 text-[10px]"></i>
+              <span>VERIFIED</span>
+            </button>
+          `;
+        } else {
+          return `
+            <div class="inline-flex items-center space-x-1">
+              <button type="button" onclick="event.stopPropagation(); quickToggleUserVerification('${item.id}', false)" class="px-2.5 py-0.5 rounded-full bg-amber-50 hover:bg-emerald-100 text-amber-800 hover:text-emerald-800 text-[10px] font-extrabold inline-flex items-center space-x-1 cursor-pointer transition border border-amber-300 hover:border-emerald-400" title="Unverified account. Click to manually verify as Superadmin.">
+                <i class="fa-solid fa-clock text-amber-500 text-[10px]"></i>
+                <span>UNVERIFIED</span>
+              </button>
+              ${item.email ? `
+                <button type="button" onclick="event.stopPropagation(); sendVerificationEmailForRecord('${item.id}', '${item.email}')" class="p-1 rounded-md text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition text-[10px]" title="Send verification email to ${item.email}">
+                  <i class="fa-regular fa-envelope"></i>
+                </button>
+              ` : ''}
+            </div>
+          `;
+        }
+      }
       if (type === 'file' || (typeof val === 'string' && /\.(jpg|jpeg|png|gif|webp|svg|pdf|docx|xlsx|zip|mp4|mp3|txt)$/i.test(val))) {
         const isImg = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(String(val));
         const recId = item ? item.id : '';
@@ -4407,10 +4586,18 @@ let currentCollection = "users";
                 <input type="password" id="recField_password" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono focus:outline-none focus:border-emerald-600" placeholder="••••••••">
               </div>
               <div class="flex items-end pb-2">
-                <label class="inline-flex items-center space-x-2 cursor-pointer text-xs font-bold text-slate-700">
-                  <input type="checkbox" id="recField_verified" ${record.verified ? 'checked' : ''} class="rounded border-slate-300">
-                  <span>Verified Account</span>
-                </label>
+                <div class="flex items-center justify-between w-full flex-wrap gap-2">
+                  <label class="inline-flex items-center space-x-2 cursor-pointer text-xs font-bold text-slate-700">
+                    <input type="checkbox" id="recField_verified" ${record.verified ? 'checked' : ''} class="rounded border-slate-300">
+                    <span>Verified Account</span>
+                  </label>
+                  ${editingRecordId && record.email ? `
+                    <button type="button" onclick="sendVerificationEmailForRecord('${record.id}', '${record.email}')" class="px-2.5 py-1 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-[11px] font-bold transition inline-flex items-center space-x-1" title="Send verification email to ${record.email}">
+                      <i class="fa-regular fa-envelope"></i>
+                      <span>Send Email</span>
+                    </button>
+                  ` : ''}
+                </div>
               </div>
             </div>
           </div>
@@ -4605,7 +4792,7 @@ let currentCollection = "users";
 
       let bodyData;
       let headers = {
-        'Authorization': 'Bearer ' + (localStorage.getItem('padi_admin_token') || '')
+        'Authorization': 'Bearer ' + (sessionStorage.getItem('padi_admin_token') || '')
       };
 
       if (!isRecordJsonMode && hasFiles) {
@@ -4655,7 +4842,7 @@ let currentCollection = "users";
         const res = await fetch(`/api/files/${currentCollection}/${editingRecordId}/${filename}`, {
           method: 'DELETE',
           headers: {
-            'Authorization': 'Bearer ' + (localStorage.getItem('padi_admin_token') || '')
+            'Authorization': 'Bearer ' + (sessionStorage.getItem('padi_admin_token') || '')
           }
         });
         if (res.ok) {
@@ -4664,6 +4851,55 @@ let currentCollection = "users";
           loadRecords();
         } else {
           showToast('Failed to delete file', 'error');
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function quickToggleUserVerification(userId, isCurrentlyVerified) {
+      const nextState = !isCurrentlyVerified;
+      const confirmMsg = nextState
+        ? 'Manually verify this user account now?'
+        : 'Remove verification status from this user account?';
+      if (!confirm(confirmMsg)) return;
+
+      try {
+        const res = await fetch(`/api/${currentCollection}/records/${userId}/verify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + (sessionStorage.getItem('padi_admin_token') || '')
+          },
+          body: JSON.stringify({ verified: nextState })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          showToast(data.message || (nextState ? 'User verified successfully' : 'User unverified'));
+          loadRecords();
+        } else {
+          showToast(data.message || 'Failed to update user verification', 'error');
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    async function sendVerificationEmailForRecord(userId, email) {
+      if (!confirm(`Send email verification link to "${email}"?`)) return;
+
+      try {
+        const res = await fetch(`/api/${currentCollection}/records/${userId}/send-verification`, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + (sessionStorage.getItem('padi_admin_token') || '')
+          }
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) {
+          showToast(data.message || `Verification email sent to ${email}`);
+        } else {
+          showToast(data.message || 'Failed to send verification email', 'error');
         }
       } catch (err) {
         showToast(err.message, 'error');
@@ -5303,7 +5539,7 @@ let currentCollection = "users";
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + (localStorage.getItem('padi_admin_token') || '')
+            'Authorization': 'Bearer ' + (sessionStorage.getItem('padi_admin_token') || '')
           },
           body: JSON.stringify(payload)
         });
@@ -5328,6 +5564,34 @@ let currentCollection = "users";
       }
     }
 
+    async function handleRenameCurrentCollection() {
+      const oldName = currentCollection;
+      if (!oldName || oldName === 'users' || oldName.startsWith('_')) {
+        return showToast('System tables cannot be renamed', 'error');
+      }
+      const input = prompt(`Rename table "${oldName}" to:`, oldName);
+      if (input === null) return;
+      const newName = input.trim().toLowerCase();
+      if (!newName || newName === oldName) return;
+
+      try {
+        const res = await fetch(`/api/collections/${encodeURIComponent(oldName)}/rename`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName })
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) return showToast(d.message || 'Failed to rename table', 'error');
+        sessionStorage.setItem('padi_active_col', newName);
+        showToast(`Table renamed to "${newName}"`);
+        await loadCollections(newName);
+        renderInlineCollectionSettings();
+        renderQuickMatrixTable();
+      } catch (e) {
+        showToast(e.message, 'error');
+      }
+    }
+
     async function handleDeleteCurrentCollection() {
       if (currentCollection === 'users') return showToast('System table "users" cannot be deleted', 'error');
       if (!confirm(`Are you sure you want to delete table "${currentCollection}" and all its records?`)) return;
@@ -5335,7 +5599,7 @@ let currentCollection = "users";
       const res = await fetch(`/api/collections/${currentCollection}`, { method: 'DELETE' });
       if (res.ok) {
         closeDrawer('collectionDrawer');
-        localStorage.removeItem('padi_active_col');
+        sessionStorage.removeItem('padi_active_col');
         showToast(`Table "${currentCollection}" deleted`);
         await loadCollections('users');
         renderQuickMatrixTable();
@@ -6052,9 +6316,11 @@ let currentCollection = "users";
           if (evChanged) evChanged.checked = events.password_changed !== false;
           const evAdmin = document.getElementById('settingEventAdminCreated');
           if (evAdmin) evAdmin.checked = events.admin_created !== false;
+          const evVerify = document.getElementById('settingEventVerification');
+          if (evVerify) evVerify.checked = events.verification !== false;
 
           if (settings.smtp.templates) {
-            ['welcome', 'forgot_password', 'password_changed', 'admin_created'].forEach(k => {
+            ['welcome', 'forgot_password', 'password_changed', 'admin_created', 'verification'].forEach(k => {
               if (settings.smtp.templates[k] && settings.smtp.templates[k].subject) {
                 emailTemplates[k] = {
                   subject: settings.smtp.templates[k].subject,
@@ -6065,7 +6331,7 @@ let currentCollection = "users";
               }
             });
           } else {
-            ['welcome', 'forgot_password', 'password_changed', 'admin_created'].forEach(k => {
+            ['welcome', 'forgot_password', 'password_changed', 'admin_created', 'verification'].forEach(k => {
               emailTemplates[k] = { ...DEFAULT_EMAIL_TEMPLATES[k] };
             });
           }
@@ -6208,6 +6474,7 @@ let currentCollection = "users";
       const forgot_password = Boolean(document.getElementById('settingEventForgotPassword')?.checked);
       const password_changed = Boolean(document.getElementById('settingEventPasswordChanged')?.checked);
       const admin_created = Boolean(document.getElementById('settingEventAdminCreated')?.checked);
+      const verification = Boolean(document.getElementById('settingEventVerification')?.checked);
 
       const headers = { 'Content-Type': 'application/json' };
       if (currentToken) {
@@ -6234,7 +6501,8 @@ let currentCollection = "users";
                 welcome,
                 forgot_password,
                 password_changed,
-                admin_created
+                admin_created,
+                verification
               },
               templates: emailTemplates
             }
@@ -6320,6 +6588,27 @@ let currentCollection = "users";
 </div>
 
 <p style="color: #64748b; font-size: 13px; margin-top: 25px;">Please ensure your administrator credentials are stored securely and never shared.</p>`
+      },
+      verification: {
+        subject: "Verify your email address - {appName}",
+        body: `<h2 style="margin-top: 0; color: #0f172a; font-size: 22px; font-weight: 800;">Verify Your Email Address ✉️</h2>
+<p>Thank you for signing up for <strong>{appName}</strong>. Please confirm your email address (<strong>{email}</strong>) to activate your account features.</p>
+
+<div style="text-align: center; margin: 30px 0;">
+  <a href="{verifyUrl}" class="btn">Verify Email Address &rarr;</a>
+</div>
+
+<p>Or use the following verification token directly in your application:</p>
+
+<div class="token-box">
+  {token}
+</div>
+
+<p style="font-size: 13px; color: #64748b; margin-top: 20px;">If the button above does not work, copy and paste this link into your browser:<br/><a href="{verifyUrl}" style="color: #059669; word-break: break-all;">{verifyUrl}</a></p>
+
+<div style="margin-top: 30px; padding: 14px; background-color: #f8fafc; border-left: 4px solid #64748b; border-radius: 8px; font-size: 13px; color: #475569;">
+  If you did not create an account on {appName}, you can safely ignore this email.
+</div>`
       }
     };
 
@@ -6327,7 +6616,7 @@ let currentCollection = "users";
 
     function selectEmailTemplateTab(key) {
       currentSelectedTemplateKey = key;
-      const keys = ['welcome', 'forgot_password', 'password_changed', 'admin_created'];
+      const keys = ['welcome', 'forgot_password', 'password_changed', 'admin_created', 'verification'];
       keys.forEach(k => {
         const btn = document.getElementById(`tmplTab_${k}`);
         if (!btn) return;
@@ -6858,7 +7147,7 @@ let currentCollection = "users";
         sseReconnectTimer = null;
       }
 
-      const token = localStorage.getItem('padi_admin_token') || '';
+      const token = sessionStorage.getItem('padi_admin_token') || '';
       setRealtimeStatus('connecting', 'Connecting...');
 
       try {
@@ -6875,7 +7164,7 @@ let currentCollection = "users";
             const data = JSON.parse(event.data);
             handleIncomingRealtimeEvent(data);
             const targetTable = data.table || data.collection;
-            if (targetTable === currentCollection) loadRecords();
+            if (targetTable === currentCollection) scheduleRealtimeRecordsRefresh();
           } catch (_) {}
         };
 
@@ -6937,7 +7226,28 @@ let currentCollection = "users";
 
       updateRealtimeTableOptions();
       updateRealtimeStats();
-      renderRealtimeEvents();
+      scheduleRealtimeRender();
+    }
+
+    // Coalesce bursts of SSE events: refresh the open table at most once per 400ms and
+    // re-render the monitor at most once per animation frame.
+    let realtimeRefreshTimer = null;
+    function scheduleRealtimeRecordsRefresh() {
+      if (realtimeRefreshTimer) return;
+      realtimeRefreshTimer = setTimeout(() => {
+        realtimeRefreshTimer = null;
+        loadRecords();
+      }, 400);
+    }
+
+    let realtimeRenderScheduled = false;
+    function scheduleRealtimeRender() {
+      if (realtimeRenderScheduled) return;
+      realtimeRenderScheduled = true;
+      requestAnimationFrame(() => {
+        realtimeRenderScheduled = false;
+        renderRealtimeEvents();
+      });
     }
 
     function toggleRealtimePause() {

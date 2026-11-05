@@ -299,7 +299,7 @@ fn split_sql_statements(raw_sql: &str) -> Vec<String> {
 /// - `@request.auth.id`, `@request.auth.email`, `@request.auth.role`
 /// - Named parameters `:param_name` or `{{param_name}}`
 /// - Positional parameters `?`
-fn compile_custom_sql(
+pub fn compile_custom_sql(
     sql: &str,
     named_params: &Map<String, Value>,
     positional_params: &[Value],
@@ -445,7 +445,12 @@ fn compile_custom_sql(
                     }
                     let param_name: String = chars[i + 1..end].iter().collect();
                     out_sql.push('?');
-                    binds.push(resolve_named(&param_name));
+                    let mut val = resolve_named(&param_name);
+                    if val == Val::Null && pos_idx < positional_params.len() {
+                        val = param_value_to_val(&param_name, &positional_params[pos_idx]);
+                        pos_idx += 1;
+                    }
+                    binds.push(val);
                     i = end;
                     continue;
                 }
