@@ -20,15 +20,31 @@ pub fn pascal_case(s: &str) -> String {
 /// Derive singular name heuristically from a plural collection name
 pub fn singular_name(s: &str) -> String {
     let lower = s.to_lowercase();
-    if lower.ends_with("ies") && lower.len() > 3 {
-        format!("{}y", &lower[..lower.len() - 3])
-    } else if lower.ends_with("es") && lower.len() > 2 && (lower.ends_with("shes") || lower.ends_with("ches") || lower.ends_with("xes") || lower.ends_with("sses")) {
-        lower[..lower.len() - 2].to_string()
-    } else if lower.ends_with('s') && !lower.ends_with("ss") && lower.len() > 1 {
-        lower[..lower.len() - 1].to_string()
-    } else {
-        lower
+    if let Some(stem) = lower.strip_suffix("ies") {
+        if !stem.is_empty() {
+            return format!("{}y", stem);
+        }
     }
+    if (lower.ends_with("shes")
+        || lower.ends_with("ches")
+        || lower.ends_with("xes")
+        || lower.ends_with("sses"))
+        && lower.len() > 2
+    {
+        if let Some(stem) = lower.strip_suffix("es") {
+            if !stem.is_empty() {
+                return stem.to_string();
+            }
+        }
+    }
+    if !lower.ends_with("ss") {
+        if let Some(stem) = lower.strip_suffix('s') {
+            if !stem.is_empty() {
+                return stem.to_string();
+            }
+        }
+    }
+    lower
 }
 
 /// Generate realistic sample dummy values for schema fields

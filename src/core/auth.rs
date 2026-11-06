@@ -218,29 +218,33 @@ fn unauthorized(msg: &str) -> (StatusCode, Json<Value>) {
 /// Short-lived cache of `tokenKey` lookups so revocation checks stay cheap.
 static SESSION_CACHE: LazyLock<Mutex<HashMap<String, (Option<String>, Instant)>>> =
     LazyLock::new(|| Mutex::new(HashMap::with_capacity(256)));
-const SESSION_CACHE_TTL: StdDuration = StdDuration::from_secs(3);
+const SESSION_CACHE_TTL: StdDuration = StdDuration::from_secs(15);
 const SESSION_CACHE_MAX: usize = 10_000;
 
-async fn fetch_token_key(state: &AppState, claims: &Claims) -> Option<String> {
+async fn fetch_token_key(state: &AppState, claims: &Claims) -> Result<Option<String>> {
     let sql = if let Some(cid) = &claims.collection_id {
-        let col = get_collection_by_name_or_id(&state.db, cid).await.ok()??;
+        let Some(col) = get_collection_by_name_or_id(&state.db, cid).await? else {
+            return Ok(None);
+        };
         if !is_safe_identifier(&col.name) {
-            return None;
+            return Ok(None);
         }
         format!("SELECT `tokenKey` FROM `{}` WHERE `id` = ? LIMIT 1;", col.name)
     } else {
         "SELECT `tokenKey` FROM `_admins` WHERE `id` = ? LIMIT 1;".to_string()
     };
-    let row = state
+    let Some(row) = state
         .db
         .fetch_optional(&sql, &[Val::from(&claims.sub)])
-        .await
-        .ok()??;
+        .await?
+    else {
+        return Ok(None);
+    };
     let key = json_get_str(&row, "tokenKey");
     if key.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(key)
+        Ok(Some(key))
     }
 }
 
@@ -313,21 +317,41 @@ pub async fn check_claims_session(
     }
 
     // Cache miss or key changed: fetch fresh from database
-    let fresh = fetch_token_key(state, claims).await;
-    {
-        let mut map = SESSION_CACHE.lock().unwrap_or_else(|p| p.into_inner());
-        if map.len() >= SESSION_CACHE_MAX {
-            map.retain(|_, (_, at)| at.elapsed() < SESSION_CACHE_TTL);
-            if map.len() >= SESSION_CACHE_MAX {
-                map.clear();
+    match fetch_token_key(state, claims).await {
+        Ok(fresh) => {
+            {
+                let mut map = SESSION_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+                if map.len() >= SESSION_CACHE_MAX {
+                    map.retain(|_, (_, at)| at.elapsed() < SESSION_CACHE_TTL);
+                    if map.len() >= SESSION_CACHE_MAX {
+                        map.clear();
+                    }
+                }
+                map.insert(cache_key, (fresh.clone(), Instant::now()));
+            }
+
+            match fresh {
+                Some(k) if k == tk => Ok(()),
+                _ => Err(unauthorized("Session expired or revoked. Please sign in again.")),
             }
         }
-        map.insert(cache_key, (fresh.clone(), Instant::now()));
-    }
-
-    match fresh {
-        Some(k) if k == tk => Ok(()),
-        _ => Err(unauthorized("Session expired or revoked. Please sign in again.")),
+        Err(db_err) => {
+            // Do not treat transient DB lock/busy errors as a revoked session, which would
+            // otherwise poison SESSION_CACHE with None and force-logout the active admin.
+            tracing::warn!("Transient DB error while checking session tokenKey: {}", db_err);
+            let stale_ok = {
+                let map = SESSION_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+                map.get(&cache_key)
+                    .and_then(|(k, _)| k.as_ref())
+                    .map(|k| k == &tk)
+                    .unwrap_or(true)
+            };
+            if stale_ok {
+                Ok(())
+            } else {
+                Err(unauthorized("Session expired or revoked. Please sign in again."))
+            }
+        }
     }
 }
 

@@ -1,10 +1,12 @@
 use axum::{
+    body::Body,
     extract::{DefaultBodyLimit, Path},
-    http::HeaderMap,
+    http::{header, HeaderMap, Response, StatusCode},
     middleware,
     routing::{any, delete, get, patch, post, put},
     Router,
 };
+use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::compression::{
     predicate::{NotForContentType, Predicate, SizeAbove},
     CompressionLayer,
@@ -600,6 +602,26 @@ pub fn create_router(state: AppState) -> Router {
             ),
         )
         .layer(cors)
+        .layer(CatchPanicLayer::custom(|err: Box<dyn std::any::Any + Send + 'static>| {
+            let details = if let Some(s) = err.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = err.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else {
+                "Unknown internal panic".to_string()
+            };
+            tracing::error!("Recovered from HTTP handler panic: {}", details);
+            let body = serde_json::json!({
+                "code": 500,
+                "message": "Internal server error (recovered from unexpected failure)."
+            })
+            .to_string();
+            Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body))
+                .unwrap_or_else(|_| Response::new(Body::from("{\"code\":500}")))
+        }))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

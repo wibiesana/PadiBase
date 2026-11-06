@@ -264,7 +264,7 @@ pub async fn get_record_with(
     if let Some(row) = row_opt {
         let rec = json_row_to_record(&row, col, &meta)?;
         let mut items = vec![rec];
-        let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations).await;
+        let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations, col.resource_relation_fields.as_ref()).await;
         Ok(items.pop())
     } else {
         Ok(None)
@@ -936,12 +936,43 @@ fn build_filter_and_sort_sql(
     Ok((filter_sql, sort_sql))
 }
 
+/// Parses relation specification like "user", "user(id,username,email)", or "user:id,username,email"
+fn parse_relation_token(raw: &str) -> (String, Option<Vec<String>>) {
+    let s = raw.trim();
+    if let Some(open) = s.find('(') {
+        if let Some(close) = s.rfind(')') {
+            if close > open {
+                let rel = s[..open].trim().to_string();
+                let f_str = &s[open + 1..close];
+                let fields: Vec<String> = f_str
+                    .split(',')
+                    .map(|f| f.trim().to_string())
+                    .filter(|f| !f.is_empty())
+                    .collect();
+                return (rel, if fields.is_empty() { None } else { Some(fields) });
+            }
+        }
+    }
+    if let Some(colon) = s.find(':') {
+        let rel = s[..colon].trim().to_string();
+        let f_str = &s[colon + 1..];
+        let fields: Vec<String> = f_str
+            .split([',', ';'])
+            .map(|f| f.trim().to_string())
+            .filter(|f| !f.is_empty())
+            .collect();
+        return (rel, if fields.is_empty() { None } else { Some(fields) });
+    }
+    (s.to_string(), None)
+}
+
 pub async fn eager_load_relations(
     pool: &DbPool,
     table_name: &str,
     auto_load_default: bool,
     records: &mut [Record],
     with_relations: Option<&[&str]>,
+    relation_fields_map: Option<&std::collections::HashMap<String, Vec<String>>>,
 ) -> Result<()> {
     if records.is_empty() {
         return Ok(());
@@ -967,24 +998,31 @@ pub async fn eager_load_relations(
         return Ok(());
     }
 
-    let target_relations: Vec<&super::db::DetectedRelation> = if let Some(with_list) = with_relations {
+    let target_relations: Vec<(&super::db::DetectedRelation, Option<Vec<String>>)> = if let Some(with_list) = with_relations {
         if with_list.iter().any(|w| *w == "*" || w.eq_ignore_ascii_case("all")) {
-            all_relations.iter().collect()
+            // When all relations (*) are loaded, always use default relation fields (id + display column)
+            all_relations.iter().map(|r| (r, None)).collect()
         } else {
-            all_relations
-                .iter()
-                .filter(|r| {
-                    with_list.iter().any(|w| {
-                        w.eq_ignore_ascii_case(&r.relation_name) || w.eq_ignore_ascii_case(&r.column)
-                    })
-                })
-                .collect()
+            let mut matched = Vec::new();
+            for item in with_list {
+                let (spec_name, inline_fields) = parse_relation_token(item);
+                for r in &all_relations {
+                    if spec_name.eq_ignore_ascii_case(&r.relation_name) || spec_name.eq_ignore_ascii_case(&r.column) {
+                        let final_fields = inline_fields.clone().or_else(|| {
+                            relation_fields_map.and_then(|m| m.get(&r.relation_name).or_else(|| m.get(&r.column))).cloned()
+                        });
+                        matched.push((r, final_fields));
+                    }
+                }
+            }
+            matched
         }
     } else {
-        all_relations.iter().collect()
+        // Fallback default relation loading: standard default fields
+        all_relations.iter().map(|r| (r, None)).collect()
     };
 
-    for rel in target_relations {
+    for (rel, requested_fields) in target_relations {
         let mut ids = Vec::new();
         let mut seen = std::collections::HashSet::new();
 
@@ -1014,10 +1052,45 @@ pub async fn eager_load_relations(
         }
 
         let placeholders = vec!["?"; ids.len()].join(", ");
-        let cols_select = if rel.display_col == rel.target_pk {
-            format!("`{}`", rel.target_pk)
+
+        let (cols_select, filter_fields) = if let Some(ref fields) = requested_fields {
+            let target_meta = super::db::get_table_metadata(pool, &rel.target_table).await.ok();
+            let mut selected_cols: Vec<String> = Vec::new();
+            // Always ensure target_pk is included in the SELECT query so foreign rows can be mapped back
+            selected_cols.push(rel.target_pk.clone());
+
+            for f in fields {
+                let clean = f.trim();
+                if clean.is_empty() {
+                    continue;
+                }
+                // Check if valid identifier (alphanumeric and underscore) to protect against injection
+                if !clean.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+                    continue;
+                }
+                if let Some(ref meta) = target_meta {
+                    if !meta.has_column(clean) {
+                        continue;
+                    }
+                }
+                if !selected_cols.iter().any(|c| c.eq_ignore_ascii_case(clean)) {
+                    selected_cols.push(clean.to_string());
+                }
+            }
+
+            let cols_str = selected_cols
+                .iter()
+                .map(|c| format!("`{}`", c))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (cols_str, Some(fields.clone()))
         } else {
-            format!("`{}`, `{}`", rel.target_pk, rel.display_col)
+            let default_str = if rel.display_col == rel.target_pk {
+                format!("`{}`", rel.target_pk)
+            } else {
+                format!("`{}`, `{}`", rel.target_pk, rel.display_col)
+            };
+            (default_str, None)
         };
 
         let sql = format!(
@@ -1039,7 +1112,13 @@ pub async fn eager_load_relations(
             let mut rel_obj = Map::new();
             if let Some(obj) = row.as_object() {
                 for (k, v) in obj {
-                    rel_obj.insert(k.clone(), v.clone());
+                    if let Some(ref allowed) = filter_fields {
+                        if allowed.iter().any(|af| af.eq_ignore_ascii_case(k)) || k.eq_ignore_ascii_case(&rel.target_pk) || k == "id" {
+                            rel_obj.insert(k.clone(), v.clone());
+                        }
+                    } else {
+                        rel_obj.insert(k.clone(), v.clone());
+                    }
                 }
             }
             if !rel_obj.contains_key("id") && !pk_val.is_empty() {
@@ -1125,7 +1204,7 @@ pub async fn get_all_records_with_limit(
         items.push(json_row_to_record(&row, col, &meta)?);
     }
 
-    let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations).await;
+    let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations, col.resource_relation_fields.as_ref()).await;
 
     Ok(items)
 }
@@ -1195,7 +1274,7 @@ pub async fn list_records_with(
         items.push(json_row_to_record(&row, col, &meta)?);
     }
 
-    let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations).await;
+    let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations, col.resource_relation_fields.as_ref()).await;
 
     Ok(PaginatedRecords {
         page,

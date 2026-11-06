@@ -930,7 +930,7 @@ pub async fn init_db_with_url<P: AsRef<Path>>(
                 .create_if_missing(true)
                 .journal_mode(SqliteJournalMode::Wal)
                 .synchronous(SqliteSynchronous::Normal)
-                .busy_timeout(std::time::Duration::from_secs(5));
+                .busy_timeout(std::time::Duration::from_secs(15));
 
             let p = SqlitePoolOptions::new()
                 .max_connections(max_conn)
@@ -975,10 +975,12 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
             `autoLoadRelations` INTEGER DEFAULT 0,
             `blameable` INTEGER DEFAULT 1,
             `listRule` TEXT,
+            `allRule` TEXT,
             `viewRule` TEXT,
             `createRule` TEXT,
             `updateRule` TEXT,
             `deleteRule` TEXT,
+            `options` TEXT,
             `created` VARCHAR(64) NOT NULL,
             `updated` VARCHAR(64) NOT NULL
         );
@@ -1009,6 +1011,22 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
             let _ = pool
                 .execute(
                     "ALTER TABLE `_collections` ADD COLUMN `blameable` INTEGER DEFAULT 1;",
+                    &[],
+                )
+                .await;
+        }
+        if !cols.iter().any(|c| c.eq_ignore_ascii_case("allRule") || c.eq_ignore_ascii_case("all_rule")) {
+            let _ = pool
+                .execute(
+                    "ALTER TABLE `_collections` ADD COLUMN `allRule` TEXT;",
+                    &[],
+                )
+                .await;
+        }
+        if !cols.iter().any(|c| c.eq_ignore_ascii_case("options")) {
+            let _ = pool
+                .execute(
+                    "ALTER TABLE `_collections` ADD COLUMN `options` TEXT;",
                     &[],
                 )
                 .await;
@@ -1155,6 +1173,15 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
             create_rule: Some("".to_string()),
             update_rule: Some("id = @request.auth.id".to_string()),
             delete_rule: Some("id = @request.auth.id".to_string()),
+            resource_fields: None,
+            resource_relations: None,
+            resource_relation_fields: None,
+            list_fields: None,
+            all_fields: None,
+            view_fields: None,
+            list_relations: None,
+            all_relations: None,
+            view_relations: None,
             created: chrono::Utc::now().to_rfc3339(),
             updated: chrono::Utc::now().to_rfc3339(),
         };
@@ -1330,10 +1357,22 @@ pub async fn save_collection_metadata(pool: &DbPool, col: &Collection) -> Result
     let auto_load_int = if col.auto_load_relations { 1i64 } else { 0i64 };
     let blameable_int = if col.blameable { 1i64 } else { 0i64 };
 
+    let options_json = serde_json::json!({
+        "resourceFields": col.resource_fields,
+        "resourceRelations": col.resource_relations,
+        "resourceRelationFields": col.resource_relation_fields,
+        "listFields": col.list_fields,
+        "allFields": col.all_fields,
+        "viewFields": col.view_fields,
+        "listRelations": col.list_relations,
+        "allRelations": col.all_relations,
+        "viewRelations": col.view_relations,
+    }).to_string();
+
     let sql = if pool.is_mysql() {
         r#"
-        INSERT INTO `_collections` (`id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO `_collections` (`id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `allRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `options`, `created`, `updated`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON DUPLICATE KEY UPDATE
             `name` = VALUES(`name`),
             `type` = VALUES(`type`),
@@ -1342,16 +1381,18 @@ pub async fn save_collection_metadata(pool: &DbPool, col: &Collection) -> Result
             `autoLoadRelations` = VALUES(`autoLoadRelations`),
             `blameable` = VALUES(`blameable`),
             `listRule` = VALUES(`listRule`),
+            `allRule` = VALUES(`allRule`),
             `viewRule` = VALUES(`viewRule`),
             `createRule` = VALUES(`createRule`),
             `updateRule` = VALUES(`updateRule`),
             `deleteRule` = VALUES(`deleteRule`),
+            `options` = VALUES(`options`),
             `updated` = VALUES(`updated`)
         "#
     } else {
         r#"
-        INSERT INTO `_collections` (`id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO `_collections` (`id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `allRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `options`, `created`, `updated`)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(`id`) DO UPDATE SET
             `name` = excluded.`name`,
             `type` = excluded.`type`,
@@ -1360,10 +1401,12 @@ pub async fn save_collection_metadata(pool: &DbPool, col: &Collection) -> Result
             `autoLoadRelations` = excluded.`autoLoadRelations`,
             `blameable` = excluded.`blameable`,
             `listRule` = excluded.`listRule`,
+            `allRule` = excluded.`allRule`,
             `viewRule` = excluded.`viewRule`,
             `createRule` = excluded.`createRule`,
             `updateRule` = excluded.`updateRule`,
             `deleteRule` = excluded.`deleteRule`,
+            `options` = excluded.`options`,
             `updated` = excluded.`updated`
         "#
     };
@@ -1379,10 +1422,12 @@ pub async fn save_collection_metadata(pool: &DbPool, col: &Collection) -> Result
             Val::Int(auto_load_int),
             Val::Int(blameable_int),
             Val::from(col.list_rule.clone()),
+            Val::from(col.all_rule.clone()),
             Val::from(col.view_rule.clone()),
             Val::from(col.create_rule.clone()),
             Val::from(col.update_rule.clone()),
             Val::from(col.delete_rule.clone()),
+            Val::from(options_json),
             Val::from(&col.created),
             Val::from(&col.updated),
         ],
@@ -1433,6 +1478,71 @@ fn value_to_collection(r: &Value) -> Collection {
         _ => false,
     };
 
+    let (resource_fields, resource_relations, resource_relation_fields, list_fields, all_fields, view_fields, list_relations, all_relations, view_relations) = {
+        let opts_val = json_get(r, "options").and_then(|v| {
+            if let Value::String(s) = v {
+                serde_json::from_str::<Value>(s).ok()
+            } else if v.is_object() {
+                Some(v.clone())
+            } else {
+                None
+            }
+        });
+
+        let extract_vec = |key: &str| -> Option<Vec<String>> {
+            if let Some(ref opts) = opts_val {
+                if let Some(arr) = opts.get(key).and_then(|v| v.as_array()) {
+                    return Some(arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect());
+                }
+            }
+            if let Some(arr) = json_get(r, key).and_then(|v| v.as_array()) {
+                return Some(arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect());
+            }
+            None
+        };
+
+        let extract_map = |key: &str| -> Option<std::collections::HashMap<String, Vec<String>>> {
+            let parse_obj = |obj: &serde_json::Map<String, serde_json::Value>| -> Option<std::collections::HashMap<String, Vec<String>>> {
+                let mut map = std::collections::HashMap::new();
+                for (k, v) in obj {
+                    if let Some(arr) = v.as_array() {
+                        let fields: Vec<String> = arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect();
+                        if !fields.is_empty() {
+                            map.insert(k.clone(), fields);
+                        }
+                    }
+                }
+                if !map.is_empty() { Some(map) } else { None }
+            };
+
+            if let Some(ref opts) = opts_val {
+                if let Some(obj) = opts.get(key).and_then(|v| v.as_object()) {
+                    if let Some(m) = parse_obj(obj) {
+                        return Some(m);
+                    }
+                }
+            }
+            if let Some(obj) = json_get(r, key).and_then(|v| v.as_object()) {
+                if let Some(m) = parse_obj(obj) {
+                    return Some(m);
+                }
+            }
+            None
+        };
+
+        (
+            extract_vec("resourceFields").or_else(|| extract_vec("resource_fields")),
+            extract_vec("resourceRelations").or_else(|| extract_vec("resource_relations")),
+            extract_map("resourceRelationFields").or_else(|| extract_map("resource_relation_fields")),
+            extract_vec("listFields"),
+            extract_vec("allFields"),
+            extract_vec("viewFields"),
+            extract_vec("listRelations"),
+            extract_vec("allRelations"),
+            extract_vec("viewRelations"),
+        )
+    };
+
     Collection {
         id: json_get_str(r, "id"),
         name: json_get_str(r, "name"),
@@ -1447,6 +1557,15 @@ fn value_to_collection(r: &Value) -> Collection {
         create_rule: json_get_opt_str(r, "createRule"),
         update_rule: json_get_opt_str(r, "updateRule"),
         delete_rule: json_get_opt_str(r, "deleteRule"),
+        resource_fields,
+        resource_relations,
+        resource_relation_fields,
+        list_fields,
+        all_fields,
+        view_fields,
+        list_relations,
+        all_relations,
+        view_relations,
         created: json_get_str(r, "created"),
         updated: json_get_str(r, "updated"),
     }
@@ -1464,7 +1583,7 @@ pub async fn get_collection_by_name_or_id(
     let row = pool
         .fetch_optional(
             r#"
-            SELECT `id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`
+            SELECT `id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `allRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `options`, `created`, `updated`
             FROM `_collections`
             WHERE `id` = ? OR `name` = ?
             "#,
@@ -1490,7 +1609,7 @@ pub async fn list_collections(pool: &DbPool) -> Result<Vec<Collection>> {
     let rows = pool
         .fetch_all(
             r#"
-            SELECT `id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `created`, `updated`
+            SELECT `id`, `name`, `type`, `schema`, `realtime`, `autoLoadRelations`, `blameable`, `listRule`, `allRule`, `viewRule`, `createRule`, `updateRule`, `deleteRule`, `options`, `created`, `updated`
             FROM `_collections`
             ORDER BY `name` ASC
             "#,
@@ -2226,6 +2345,15 @@ pub async fn sync_existing_tables(pool: &DbPool) -> Result<Vec<String>> {
             create_rule: Some("@request.auth.id != \"\"".to_string()),
             update_rule: Some("@request.auth.id != \"\"".to_string()),
             delete_rule: Some("@request.auth.id != \"\"".to_string()),
+            resource_fields: None,
+            resource_relations: None,
+            resource_relation_fields: None,
+            list_fields: None,
+            all_fields: None,
+            view_fields: None,
+            list_relations: None,
+            all_relations: None,
+            view_relations: None,
             created: now.clone(),
             updated: now.clone(),
         };

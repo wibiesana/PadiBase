@@ -92,6 +92,28 @@ pub struct Collection {
     #[serde(rename = "deleteRule", default)]
     pub delete_rule: Option<String>,
 
+    // API Resource & Projection Configuration (Unified Resource and per-endpoint overrides)
+    #[serde(rename = "resourceFields", alias = "resource_fields", default)]
+    pub resource_fields: Option<Vec<String>>,
+    #[serde(rename = "resourceRelations", alias = "resource_relations", default)]
+    pub resource_relations: Option<Vec<String>>,
+    #[serde(rename = "resourceRelationFields", alias = "resource_relation_fields", default)]
+    pub resource_relation_fields: Option<std::collections::HashMap<String, Vec<String>>>,
+
+    #[serde(rename = "listFields", alias = "list_fields", default)]
+    pub list_fields: Option<Vec<String>>,
+    #[serde(rename = "allFields", alias = "all_fields", default)]
+    pub all_fields: Option<Vec<String>>,
+    #[serde(rename = "viewFields", alias = "view_fields", default)]
+    pub view_fields: Option<Vec<String>>,
+
+    #[serde(rename = "listRelations", alias = "list_relations", default)]
+    pub list_relations: Option<Vec<String>>,
+    #[serde(rename = "allRelations", alias = "all_relations", default)]
+    pub all_relations: Option<Vec<String>>,
+    #[serde(rename = "viewRelations", alias = "view_relations", default)]
+    pub view_relations: Option<Vec<String>>,
+
     #[serde(default)]
     pub created: String,
     #[serde(default)]
@@ -116,8 +138,52 @@ impl Collection {
             create_rule: Some("@request.auth.id != \"\"".to_string()),
             update_rule: Some("@request.auth.id != \"\"".to_string()),
             delete_rule: Some("@request.auth.id != \"\"".to_string()),
+            resource_fields: None,
+            resource_relations: None,
+            resource_relation_fields: None,
+            list_fields: None,
+            all_fields: None,
+            view_fields: None,
+            list_relations: None,
+            all_relations: None,
+            view_relations: None,
             created: now.clone(),
             updated: now,
+        }
+    }
+
+    pub fn effective_relation_fields(&self, relation_name: &str) -> Option<&[String]> {
+        self.resource_relation_fields.as_ref().and_then(|m| {
+            m.get(relation_name)
+                .or_else(|| {
+                    let stripped = relation_name.strip_suffix("_id").unwrap_or(relation_name);
+                    m.get(stripped)
+                })
+                .map(|v| v.as_slice())
+        })
+    }
+
+    pub fn effective_resource_fields(&self, action: Option<&str>) -> Option<&[String]> {
+        if let Some(ref rf) = self.resource_fields {
+            return Some(rf.as_slice());
+        }
+        match action {
+            Some("list") => self.list_fields.as_deref(),
+            Some("all") => self.all_fields.as_deref().or(self.list_fields.as_deref()),
+            Some("view") => self.view_fields.as_deref().or(self.list_fields.as_deref()),
+            _ => self.list_fields.as_deref(),
+        }
+    }
+
+    pub fn effective_resource_relations(&self, action: Option<&str>) -> Option<&[String]> {
+        if let Some(ref rr) = self.resource_relations {
+            return Some(rr.as_slice());
+        }
+        match action {
+            Some("list") => self.list_relations.as_deref(),
+            Some("all") => self.all_relations.as_deref().or(self.list_relations.as_deref()),
+            Some("view") => self.view_relations.as_deref().or(self.list_relations.as_deref()),
+            _ => self.list_relations.as_deref(),
         }
     }
 }

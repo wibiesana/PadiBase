@@ -378,6 +378,199 @@ let currentCollection = "users";
     }
     window.padiConfirm = showConfirm;
 
+    function ensurePromptModalElement() {
+      let modal = document.getElementById('padiPromptModal');
+      if (modal) return modal;
+      const tpl = document.createElement('div');
+      tpl.id = 'padiPromptModal';
+      tpl.className = 'hidden fixed inset-0 z-[9999] overflow-y-auto';
+      tpl.setAttribute('aria-labelledby', 'padiPromptTitle');
+      tpl.setAttribute('role', 'dialog');
+      tpl.setAttribute('aria-modal', 'true');
+      tpl.innerHTML = `
+        <div id="padiPromptBackdrop" class="fixed inset-0 bg-slate-950/60 backdrop-blur-xs transition-opacity duration-150"></div>
+        <div class="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
+          <div id="padiPromptCard" class="relative transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 sm:w-full sm:max-w-md border border-slate-200">
+            <div class="p-5 sm:p-6 space-y-4">
+              <div class="flex items-start space-x-3.5">
+                <div id="padiPromptIconBg" class="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center text-lg shrink-0 shadow-2xs">
+                  <i id="padiPromptIcon" class="fa-solid fa-pen-to-square"></i>
+                </div>
+                <div class="min-w-0 flex-1 pt-0.5">
+                  <h3 class="text-sm font-extrabold text-slate-900" id="padiPromptTitle">Rename Table</h3>
+                  <div class="mt-1 text-xs text-slate-500 leading-relaxed break-words" id="padiPromptMessage">
+                    Enter a new name for this table:
+                  </div>
+                </div>
+                <button type="button" id="padiPromptCloseBtn" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer shrink-0 -mr-1 -mt-1" title="Close (Esc)">
+                  <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+              </div>
+
+              <div class="space-y-1.5 pt-0.5">
+                <label id="padiPromptLabel" for="padiPromptInput" class="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">New Table Name</label>
+                <div class="relative">
+                  <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                    <i id="padiPromptInputIcon" class="fa-solid fa-table-columns text-xs"></i>
+                  </div>
+                  <input type="text" id="padiPromptInput" class="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-300 font-mono text-xs text-slate-800 bg-slate-50/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-600 transition placeholder:text-slate-400" autocomplete="off" spellcheck="false" placeholder="Enter name...">
+                </div>
+                <p id="padiPromptHint" class="text-[11px] text-slate-400">Use lowercase letters, numbers, and underscores.</p>
+                <p id="padiPromptError" class="text-[11px] text-rose-600 font-semibold hidden"></p>
+              </div>
+            </div>
+
+            <div class="bg-slate-50 px-5 py-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+              <button type="button" id="padiPromptCancelBtn" class="px-3.5 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-200/60 rounded-xl transition cursor-pointer">
+                <span id="padiPromptCancelText">Cancel</span>
+              </button>
+              <button type="button" id="padiPromptOkBtn" class="px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer bg-emerald-600 hover:bg-emerald-700">
+                <i class="fa-solid fa-check text-[11px]"></i>
+                <span id="padiPromptOkText">Save Changes</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(tpl);
+      return tpl;
+    }
+
+    function showPrompt(options) {
+      return new Promise((resolve) => {
+        let opts = typeof options === 'string' ? { message: options } : (options || {});
+        const title = opts.title || 'Input';
+        const rawMsg = opts.message || 'Please enter a value:';
+        const defaultValue = opts.defaultValue != null ? String(opts.defaultValue) : '';
+        const placeholder = opts.placeholder || '';
+        const label = opts.label || 'New Name';
+        const hint = opts.hint || '';
+        const confirmText = opts.confirmText || 'Save Changes';
+        const cancelText = opts.cancelText || 'Cancel';
+        const icon = opts.icon || 'fa-solid fa-pen-to-square';
+        const inputIcon = opts.inputIcon || 'fa-solid fa-table-columns';
+        const validate = typeof opts.validate === 'function' ? opts.validate : null;
+
+        const modal = ensurePromptModalElement();
+        const backdrop = modal.querySelector('#padiPromptBackdrop') || document.getElementById('padiPromptBackdrop');
+        const titleEl = modal.querySelector('#padiPromptTitle') || document.getElementById('padiPromptTitle');
+        const msgEl = modal.querySelector('#padiPromptMessage') || document.getElementById('padiPromptMessage');
+        const iconEl = modal.querySelector('#padiPromptIcon') || document.getElementById('padiPromptIcon');
+        const labelEl = modal.querySelector('#padiPromptLabel') || document.getElementById('padiPromptLabel');
+        const inputIconEl = modal.querySelector('#padiPromptInputIcon') || document.getElementById('padiPromptInputIcon');
+        const inputEl = modal.querySelector('#padiPromptInput') || document.getElementById('padiPromptInput');
+        const hintEl = modal.querySelector('#padiPromptHint') || document.getElementById('padiPromptHint');
+        const errorEl = modal.querySelector('#padiPromptError') || document.getElementById('padiPromptError');
+        const okBtn = modal.querySelector('#padiPromptOkBtn') || document.getElementById('padiPromptOkBtn');
+        const okTextEl = modal.querySelector('#padiPromptOkText') || document.getElementById('padiPromptOkText');
+        const cancelBtn = modal.querySelector('#padiPromptCancelBtn') || document.getElementById('padiPromptCancelBtn');
+        const cancelTextEl = modal.querySelector('#padiPromptCancelText') || document.getElementById('padiPromptCancelText');
+        const closeBtn = modal.querySelector('#padiPromptCloseBtn') || document.getElementById('padiPromptCloseBtn');
+
+        if (!modal || !inputEl) {
+          return resolve(null);
+        }
+
+        titleEl.textContent = title;
+        if (rawMsg.includes('<') && rawMsg.includes('>')) {
+          msgEl.innerHTML = rawMsg;
+        } else {
+          msgEl.textContent = rawMsg;
+        }
+        if (labelEl) labelEl.textContent = label;
+        if (iconEl) iconEl.className = icon;
+        if (inputIconEl) inputIconEl.className = `${inputIcon} text-xs`;
+        if (okTextEl) okTextEl.textContent = confirmText;
+        if (cancelTextEl) cancelTextEl.textContent = cancelText;
+
+        if (hintEl) {
+          if (hint) {
+            hintEl.textContent = hint;
+            hintEl.classList.remove('hidden');
+          } else {
+            hintEl.classList.add('hidden');
+          }
+        }
+        if (errorEl) {
+          errorEl.textContent = '';
+          errorEl.classList.add('hidden');
+        }
+
+        inputEl.value = defaultValue;
+        inputEl.placeholder = placeholder;
+        inputEl.classList.remove('border-rose-400', 'ring-2', 'ring-rose-200');
+
+        modal.classList.remove('hidden');
+
+        setTimeout(() => {
+          inputEl.focus();
+          inputEl.select();
+        }, 50);
+
+        let settled = false;
+        function finish(result) {
+          if (settled) return;
+          settled = true;
+          document.removeEventListener('keydown', handleKey);
+          backdrop.removeEventListener('click', onCancel);
+          cancelBtn.removeEventListener('click', onCancel);
+          if (closeBtn) closeBtn.removeEventListener('click', onCancel);
+          okBtn.removeEventListener('click', onOk);
+          inputEl.removeEventListener('input', onInput);
+          modal.classList.add('hidden');
+          resolve(result);
+        }
+
+        function onInput() {
+          if (errorEl && !errorEl.classList.contains('hidden')) {
+            errorEl.classList.add('hidden');
+            inputEl.classList.remove('border-rose-400', 'ring-2', 'ring-rose-200');
+          }
+        }
+
+        function onOk(e) {
+          if (e) e.preventDefault();
+          const val = inputEl.value;
+          if (validate) {
+            const err = validate(val);
+            if (err) {
+              if (errorEl) {
+                errorEl.textContent = err;
+                errorEl.classList.remove('hidden');
+              }
+              inputEl.classList.add('border-rose-400', 'ring-2', 'ring-rose-200');
+              inputEl.focus();
+              return;
+            }
+          }
+          finish(val);
+        }
+
+        function onCancel(e) {
+          if (e) e.preventDefault();
+          finish(null);
+        }
+
+        function handleKey(e) {
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            onCancel(e);
+          } else if (e.key === 'Enter') {
+            e.preventDefault();
+            onOk(e);
+          }
+        }
+
+        inputEl.addEventListener('input', onInput);
+        document.addEventListener('keydown', handleKey);
+        backdrop.addEventListener('click', onCancel);
+        cancelBtn.addEventListener('click', onCancel);
+        if (closeBtn) closeBtn.addEventListener('click', onCancel);
+        okBtn.addEventListener('click', onOk);
+      });
+    }
+    window.padiPrompt = showPrompt;
+
     function openQuickGuideModal() {
       document.getElementById('quickGuideModal').classList.remove('hidden');
     }
@@ -387,6 +580,8 @@ let currentCollection = "users";
     const _originalFetch = window.fetch;
     window.fetch = async function (url, options = {}) {
       const opts = Object.assign({}, options);
+      const noAutoLogout = !!opts.noAutoLogout;
+      delete opts.noAutoLogout;
       const token = sessionStorage.getItem('padi_admin_token');
       if (token && typeof url === 'string' && url.startsWith('/api/')) {
         const headers = new Headers(opts.headers || {});
@@ -396,8 +591,21 @@ let currentCollection = "users";
         opts.headers = headers;
       }
       const res = await _originalFetch(url, opts);
-      // A 401 on an authenticated dashboard call means the admin session was revoked or expired.
-      if (res.status === 401 && token && typeof url === 'string' && url.startsWith('/api/') && !url.includes('auth-with-password')) {
+      // A 401 on an authenticated admin management call means the admin session was revoked or expired.
+      // Exclude live test endpoints (/api/custom/, /api/e/) and user-auth endpoints so testing 401 responses never kicks the admin out.
+      if (
+        res.status === 401 &&
+        token &&
+        !noAutoLogout &&
+        typeof url === 'string' &&
+        url.startsWith('/api/') &&
+        !url.includes('auth-with-password') &&
+        !url.startsWith('/api/custom/') &&
+        !url.startsWith('/api/e/') &&
+        !url.startsWith('/api/auth/') &&
+        !url.includes('/login') &&
+        !url.includes('/register')
+      ) {
         sessionStorage.removeItem('padi_admin_token');
         sessionStorage.removeItem('padi_admin_email');
         try { localStorage.clear(); } catch (_) {}
@@ -3619,7 +3827,8 @@ let currentCollection = "users";
       });
       const fetchOpts = {
         method: execMethod,
-        headers: {}
+        headers: {},
+        noAutoLogout: true
       };
 
       if (execMethod === 'GET' || execMethod === 'DELETE') {
@@ -3761,6 +3970,7 @@ let currentCollection = "users";
           if (hb) hb.textContent = String(activeDbDriver).toUpperCase();
         }
         collections = data.item || data.items || [];
+        window._resourceState = null;
         const countBadge = document.getElementById('sidebarColCountBadge');
         if (countBadge) countBadge.textContent = collections.length;
 
@@ -3895,6 +4105,12 @@ let currentCollection = "users";
           blameBadge.className = 'text-[11px] px-2.5 py-0.5 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 border border-slate-300 font-bold inline-flex items-center space-x-1.5 transition cursor-pointer shadow-2xs';
           blameBadge.innerHTML = '<i class="fa-solid fa-user-slash text-[10px]"></i><span>Blameable: <strong>OFF</strong></span>';
         }
+      }
+
+      const renameBtn = document.getElementById('renameColHeaderBtn');
+      if (renameBtn) {
+        const canRename = col && col.name !== 'users' && !col.name.startsWith('_');
+        renameBtn.style.display = canRename ? 'inline-flex' : 'none';
       }
     }
 
@@ -4351,7 +4567,14 @@ let currentCollection = "users";
         openApiPreviewModal('rules');
         return;
       }
-      ['fields', 'options'].forEach(t => {
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      if (tab === 'resources') {
+        const container = document.getElementById('inlineStructureResourceContainer');
+        if (container) {
+          container.innerHTML = renderResourceProjectionsHtml(col);
+        }
+      }
+      ['fields', 'options', 'resources'].forEach(t => {
         const pane = document.getElementById(`colSettingsPane_${t}`);
         const btn = document.getElementById(`colTab_${t}`);
         if (pane) pane.classList.toggle('hidden', t !== tab);
@@ -4557,14 +4780,25 @@ let currentCollection = "users";
         type: col.type,
         schema: cleanSchema,
         realtime: document.getElementById('inlineRealtimeToggle')?.checked !== false,
-        autoLoadRelations: document.getElementById('inlineAutoRelationsToggle')?.checked === true,
+        autoLoadRelations: (col.autoLoadRelations === true || col.auto_load_relations === true),
         blameable: isBlameable,
         listRule: listRuleInp ? listRuleInp.value.trim() : (col.listRule || 'public'),
         allRule: allRuleInp ? allRuleInp.value.trim() : (col.allRule || col.listRule || 'public'),
         viewRule: viewRuleInp ? viewRuleInp.value.trim() : (col.viewRule || 'public'),
         createRule: createRuleInp ? createRuleInp.value.trim() : (col.createRule || '@request.auth.id != ""'),
         updateRule: updateRuleInp ? updateRuleInp.value.trim() : (col.updateRule || '@request.auth.id != ""'),
-        deleteRule: deleteRuleInp ? deleteRuleInp.value.trim() : (col.deleteRule || '@request.auth.id != ""')
+        deleteRule: deleteRuleInp ? deleteRuleInp.value.trim() : (col.deleteRule || '@request.auth.id != ""'),
+        resourceFields: (window._resourceState && window._resourceState.collection === currentCollection) ? window._resourceState.fields : (col.resourceFields || col.resource_fields || null),
+        resourceRelations: (window._resourceState && window._resourceState.collection === currentCollection) ? window._resourceState.relations : (col.resourceRelations || col.resource_relations || null),
+        resourceRelationFields: (window._resourceState && window._resourceState.collection === currentCollection)
+          ? ((window._resourceState.relations && window._resourceState.relations.includes('*')) ? {} : (window._resourceState.relationFields || {}))
+          : (col.resourceRelationFields || col.resource_relation_fields || null),
+        listFields: (window._resourceState && window._resourceState.collection === currentCollection) ? window._resourceState.fields : (col.listFields || col.list_fields || null),
+        allFields: (window._resourceState && window._resourceState.collection === currentCollection) ? window._resourceState.fields : (col.allFields || col.all_fields || null),
+        viewFields: (window._resourceState && window._resourceState.collection === currentCollection) ? window._resourceState.fields : (col.viewFields || col.view_fields || null),
+        listRelations: (window._resourceState && window._resourceState.collection === currentCollection) ? window._resourceState.relations : (col.listRelations || col.list_relations || null),
+        allRelations: (window._resourceState && window._resourceState.collection === currentCollection) ? window._resourceState.relations : (col.allRelations || col.all_relations || null),
+        viewRelations: (window._resourceState && window._resourceState.collection === currentCollection) ? window._resourceState.relations : (col.viewRelations || col.view_relations || null)
       };
 
       try {
@@ -4612,6 +4846,19 @@ let currentCollection = "users";
       if (updateRuleInp) updated.updateRule = updateRuleInp.value.trim() || '@request.auth.id != ""';
       if (deleteRuleInp) updated.deleteRule = deleteRuleInp.value.trim() || '@request.auth.id != ""';
 
+      if (window._resourceState && window._resourceState.collection === currentCollection) {
+        const isAllRel = Array.isArray(window._resourceState.relations) && window._resourceState.relations.includes('*');
+        updated.resourceFields = window._resourceState.fields;
+        updated.resourceRelations = window._resourceState.relations;
+        updated.resourceRelationFields = isAllRel ? {} : (window._resourceState.relationFields || {});
+        updated.listFields = window._resourceState.fields;
+        updated.allFields = window._resourceState.fields;
+        updated.viewFields = window._resourceState.fields;
+        updated.listRelations = window._resourceState.relations;
+        updated.allRelations = window._resourceState.relations;
+        updated.viewRelations = window._resourceState.relations;
+      }
+
       try {
         const res = await fetch(`/api/collections/${currentCollection}`, {
           method: 'PATCH',
@@ -4619,12 +4866,16 @@ let currentCollection = "users";
           body: JSON.stringify(updated)
         });
         if (res.ok) {
-          showToast(`Access rules for table "${currentCollection}" saved successfully!`);
+          if (listRuleInp) {
+            showToast(`Access rules for table "${currentCollection}" saved successfully!`);
+          } else {
+            showToast(`API Resource projections for table "${currentCollection}" saved successfully!`);
+          }
           await loadCollections(currentCollection);
           renderApiPane();
         } else {
           const d = await res.json();
-          showToast(d.message || 'Failed to save access rules', 'error');
+          showToast(d.message || (listRuleInp ? 'Failed to save access rules' : 'Failed to save resource projections'), 'error');
         }
       } catch (e) {
         showToast(e.message, 'error');
@@ -6211,9 +6462,29 @@ let currentCollection = "users";
       if (!oldName || oldName === 'users' || oldName.startsWith('_')) {
         return showToast('System tables cannot be renamed', 'error');
       }
-      const input = prompt(`Rename table "${oldName}" to:`, oldName);
-      if (input === null) return;
-      const newName = input.trim().toLowerCase();
+
+      const newNameRaw = await showPrompt({
+        title: 'Rename Table',
+        message: `Enter a new name for table <strong class="font-mono text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">"${escapeHtml(oldName)}"</strong>:`,
+        defaultValue: oldName,
+        label: 'New Table Name',
+        placeholder: 'e.g. bank_accounts',
+        hint: 'Use lowercase letters, numbers, and underscores (e.g., bank_accounts).',
+        confirmText: 'Rename Table',
+        icon: 'fa-solid fa-pen-to-square',
+        inputIcon: 'fa-solid fa-table-columns',
+        validate: (val) => {
+          const trimmed = val.trim().toLowerCase();
+          if (!trimmed) return 'Table name cannot be empty';
+          if (!/^[a-zA-Z0-9_]+$/.test(trimmed)) return 'Only lowercase letters, numbers, and underscores are allowed';
+          if (trimmed === 'users' || trimmed.startsWith('_')) return 'System table names starting with "_" or "users" are reserved';
+          if (collections.some(c => c.name === trimmed && c.name !== oldName)) return `A table named "${trimmed}" already exists`;
+          return null;
+        }
+      });
+
+      if (newNameRaw === null) return;
+      const newName = newNameRaw.trim().toLowerCase();
       if (!newName || newName === oldName) return;
 
       try {
@@ -6331,6 +6602,735 @@ let currentCollection = "users";
       }
     }
 
+    // ================= UNIFIED RESOURCE & FIELD PROJECTIONS (LEVEL 2) =================
+    function getCollectionAllColumnNames(col) {
+      if (!col) return ['id'];
+      const cols = [];
+      if (col.type === 'auth') {
+        cols.push('id', 'username', 'email', 'name', 'avatar', 'role', 'status', 'verified');
+      } else {
+        cols.push('id');
+      }
+      (col.schema || []).forEach(f => {
+        if (f && f.name && !cols.includes(f.name)) cols.push(f.name);
+      });
+      ['created_at', 'updated_at', 'created_by', 'updated_by'].forEach(c => {
+        if (!cols.includes(c)) cols.push(c);
+      });
+      return cols;
+    }
+
+    function getCollectionDetectedRelationNames(col) {
+      if (!col) return [];
+      const rels = [];
+      (col.schema || []).forEach(f => {
+        if (!f || !f.name) return;
+        if (f.type === 'relation') {
+          rels.push(f.name);
+        } else if (f.name.endsWith('_id') && f.name.length > 3) {
+          rels.push(f.name.slice(0, -3));
+        }
+      });
+      if (col.name !== 'users' && !rels.includes('user')) {
+        rels.push('user');
+      }
+      return [...new Set(rels)];
+    }
+
+    function findTargetCollectionForRelation(relName) {
+      if (!relName) return null;
+      const name = relName.toLowerCase();
+      // 1. Direct match
+      let target = (collections || []).find(c => c && c.name && c.name.toLowerCase() === name);
+      if (target) return target;
+      // 2. Pluralized match (e.g. user -> users, chapter -> chapters)
+      target = (collections || []).find(c => c && c.name && c.name.toLowerCase() === name + 's');
+      if (target) return target;
+      if (name.endsWith('y')) {
+        target = (collections || []).find(c => c && c.name && c.name.toLowerCase() === name.slice(0, -1) + 'ies');
+        if (target) return target;
+      }
+      // 3. Singular match (e.g. users -> user)
+      if (name.endsWith('s')) {
+        target = (collections || []).find(c => c && c.name && c.name.toLowerCase() === name.slice(0, -1));
+        if (target) return target;
+      }
+      return null;
+    }
+
+    function pickDefaultDisplayCol(targetCol) {
+      if (!targetCol) return 'name';
+      const cols = getCollectionAllColumnNames(targetCol);
+      const candidates = ['username', 'title', 'name', 'nama', 'slug', 'email', 'label'];
+      for (const cand of candidates) {
+        if (cols.includes(cand)) return cand;
+      }
+      return cols.find(c => c !== 'id') || 'id';
+    }
+
+    function getRelationAvailableColumns(relName) {
+      const targetCol = findTargetCollectionForRelation(relName);
+      if (targetCol) {
+        return getCollectionAllColumnNames(targetCol);
+      }
+      if (relName === 'user' || relName === 'users') {
+        return ['id', 'username', 'email', 'name', 'avatar', 'role', 'status', 'created_at'];
+      }
+      if (relName === 'chapter' || relName === 'chapters') {
+        return ['id', 'title', 'slug', 'chapter_number', 'content', 'created_at'];
+      }
+      return ['id', 'name', 'title', 'description', 'status', 'created_at', 'updated_at'];
+    }
+
+    function ensureResourceState(col) {
+      if (!col) return { fields: null, relations: [], relationFields: {}, previewMode: 'single' };
+      if (!window._resourceState || window._resourceState.collection !== col.name) {
+        const colOpts = (col && col.options) || {};
+        const initialFields = Array.isArray(col.resourceFields) 
+          ? [...col.resourceFields] 
+          : (Array.isArray(col.resource_fields) 
+              ? [...col.resource_fields] 
+              : (Array.isArray(colOpts.resourceFields) 
+                  ? [...colOpts.resourceFields] 
+                  : (Array.isArray(col.listFields) ? [...col.listFields] : null)));
+        
+        let initialRelations = null;
+        if (Array.isArray(col.resourceRelations)) {
+          initialRelations = [...col.resourceRelations];
+        } else if (Array.isArray(col.resource_relations)) {
+          initialRelations = [...col.resource_relations];
+        } else if (Array.isArray(colOpts.resourceRelations)) {
+          initialRelations = [...colOpts.resourceRelations];
+        } else if (Array.isArray(col.listRelations)) {
+          initialRelations = [...col.listRelations];
+        } else if (col.autoLoadRelations === true || col.auto_load_relations === true || colOpts.autoLoadRelations === true) {
+          initialRelations = ['*'];
+        } else {
+          initialRelations = [];
+        }
+
+        const rawRelFields = col.resourceRelationFields || col.resource_relation_fields || colOpts.resourceRelationFields;
+        const initialRelFields = (rawRelFields && typeof rawRelFields === 'object')
+          ? JSON.parse(JSON.stringify(rawRelFields))
+          : {};
+
+        window._resourceState = {
+          collection: col.name,
+          previewMode: 'single', // 'single' | 'list'
+          fields: initialFields,
+          relations: initialRelations,
+          relationFields: initialRelFields,
+        };
+      }
+      return window._resourceState;
+    }
+
+    function toggleResourceField(colName) {
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const allCols = getCollectionAllColumnNames(col);
+      const st = ensureResourceState(col);
+      let curr = st.fields;
+      if (curr === null) {
+        curr = allCols.filter(c => c !== colName);
+      } else if (curr.includes(colName)) {
+        curr = curr.filter(c => c !== colName);
+        if (curr.length === 0) curr = ['id'];
+      } else {
+        curr = [...curr, colName];
+        if (curr.length >= allCols.length) curr = null;
+      }
+      st.fields = curr;
+      updateResourceUI(col);
+    }
+
+    function selectAllResourceFields() {
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const st = ensureResourceState(col);
+      st.fields = null;
+      updateResourceUI(col);
+    }
+
+    function selectSafeResourceFields() {
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const allCols = getCollectionAllColumnNames(col);
+      const sensitive = ['passwordHash', 'tokenKey', 'remember_token', 'deleted_at'];
+      const safe = allCols.filter(c => !sensitive.includes(c));
+      const st = ensureResourceState(col);
+      st.fields = safe;
+      updateResourceUI(col);
+    }
+
+    function setResourceRelationMode(mode) {
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const st = ensureResourceState(col);
+      if (mode === 'disabled') {
+        st.relations = [];
+        st.relationFields = {};
+      } else if (mode === 'all') {
+        st.relations = ['*'];
+        st.relationFields = {};
+      } else if (mode === 'custom') {
+        const detected = getCollectionDetectedRelationNames(col);
+        st.relations = detected.length > 0 ? detected.filter(r => r !== '*') : ['user'];
+      }
+      updateResourceUI(col);
+    }
+
+    function toggleResourceRelation(relName) {
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const st = ensureResourceState(col);
+      let curr = Array.isArray(st.relations) ? [...st.relations] : [];
+      if (curr.includes(relName)) {
+        curr = curr.filter(r => r !== relName);
+      } else {
+        curr.push(relName);
+      }
+      st.relations = curr;
+      updateResourceUI(col);
+    }
+
+    function toggleRelationField(relName, fieldName) {
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const st = ensureResourceState(col);
+      if (!st.relationFields) st.relationFields = {};
+
+      const avail = getRelationAvailableColumns(relName);
+      let curr = st.relationFields[relName];
+      if (!curr) {
+        const targetCol = findTargetCollectionForRelation(relName);
+        const defCol = pickDefaultDisplayCol(targetCol);
+        curr = ['id', defCol];
+      } else {
+        curr = [...curr];
+      }
+
+      if (curr.includes(fieldName)) {
+        curr = curr.filter(f => f !== fieldName);
+        if (curr.length === 0) curr = ['id'];
+      } else {
+        curr.push(fieldName);
+      }
+
+      st.relationFields[relName] = curr;
+      updateResourceUI(col);
+    }
+
+    function selectAllRelationFields(relName) {
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const st = ensureResourceState(col);
+      if (!st.relationFields) st.relationFields = {};
+      const avail = getRelationAvailableColumns(relName);
+      st.relationFields[relName] = [...avail];
+      updateResourceUI(col);
+    }
+
+    function resetRelationFieldsToDefault(relName) {
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const st = ensureResourceState(col);
+      if (st.relationFields && st.relationFields[relName]) {
+        delete st.relationFields[relName];
+      }
+      updateResourceUI(col);
+    }
+
+    function addCustomFieldToRelation(relName) {
+      const input = document.getElementById(`customRelFieldInput_${relName}`);
+      if (!input) return;
+      const val = input.value.trim().toLowerCase();
+      if (!val) return;
+      toggleRelationField(relName, val);
+      input.value = '';
+    }
+
+    function addCustomResourceRelation() {
+      const input = document.getElementById('customRelInput');
+      if (!input) return;
+      const val = input.value.trim().toLowerCase();
+      if (!val) return;
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const st = ensureResourceState(col);
+      let curr = Array.isArray(st.relations) ? [...st.relations] : [];
+      if (!curr.includes(val)) {
+        curr.push(val);
+        st.relations = curr;
+      }
+      input.value = '';
+      updateResourceUI(col);
+    }
+
+    function switchResourcePreviewMode(mode) {
+      const col = collections.find(c => c.name === currentCollection) || { name: currentCollection, schema: [] };
+      const st = ensureResourceState(col);
+      st.previewMode = mode;
+      updateResourceUI(col);
+    }
+
+    function updateResourceUI(col) {
+      const el = document.getElementById('resourceProjectionsSectionWrapper');
+      if (el) el.innerHTML = renderResourceProjectionsHtml(col);
+      const container = document.getElementById('inlineStructureResourceContainer');
+      if (container) container.innerHTML = renderResourceProjectionsHtml(col);
+    }
+
+    function generateResourceSampleRecord(col, customSt) {
+      if (!col) return { id: 43 };
+      const st = customSt || ensureResourceState(col);
+      const allCols = getCollectionAllColumnNames(col);
+      const selectedCols = (st && Array.isArray(st.fields)) ? st.fields : allCols;
+
+      const record = {};
+      selectedCols.forEach(colName => {
+        if (colName === 'id') {
+          record.id = 43;
+        } else if (colName === 'user_id') {
+          record.user_id = 4;
+        } else if (colName === 'chapter_id') {
+          record.chapter_id = 486;
+        } else if (colName.endsWith('_id')) {
+          record[colName] = 10;
+        } else if (colName === 'created_at' || colName === 'updated_at') {
+          record[colName] = 1791705829;
+        } else if (colName === 'created_by' || colName === 'updated_by') {
+          record[colName] = 4;
+        } else if (colName === 'username') {
+          record.username = "alina";
+        } else if (colName === 'email') {
+          record.email = "alina@example.com";
+        } else if (colName === 'name' || colName === 'nama') {
+          record[colName] = "Alina Rose";
+        } else if (colName === 'title' || colName === 'judul') {
+          record[colName] = (col.name === 'chapters' || col.name === 'chapter' ? "Bab 1: 18:47" : `Sample ${col.name} Title`);
+        } else if (colName === 'role') {
+          record.role = "user";
+        } else if (colName === 'status') {
+          record.status = "active";
+        } else if (colName === 'verified') {
+          record.verified = 1;
+        } else {
+          const schemaField = (col.schema || []).find(f => f.name === colName);
+          if (schemaField && schemaField.type === 'number') {
+            record[colName] = 100;
+          } else if (schemaField && schemaField.type === 'bool') {
+            record[colName] = true;
+          } else {
+            record[colName] = `sample_${colName}`;
+          }
+        }
+      });
+
+      // Eager loaded relations
+      const shouldLoadRelations = st && Array.isArray(st.relations) && st.relations.length > 0 && !st.relations.includes('none');
+
+      if (shouldLoadRelations) {
+        const isAllMode = st.relations.includes('*');
+        const detectedRels = getCollectionDetectedRelationNames(col);
+        const targetRels = isAllMode 
+          ? (detectedRels.length > 0 ? detectedRels : ['user']) 
+          : st.relations;
+
+        targetRels.forEach(rel => {
+          if (rel === '*' || rel === 'none') return;
+          const targetCol = findTargetCollectionForRelation(rel);
+          // In All Relations (*) mode, always use default fields (id + display column)
+          const configuredFields = (!isAllMode && st.relationFields && st.relationFields[rel] && Array.isArray(st.relationFields[rel]) && st.relationFields[rel].length > 0)
+            ? st.relationFields[rel]
+            : null;
+
+          const relObj = {};
+          if (configuredFields) {
+            configuredFields.forEach(f => {
+              if (f === 'id') {
+                relObj.id = (rel === 'user' ? 4 : (rel === 'chapter' ? 486 : 101));
+              } else if (f === 'username') {
+                relObj.username = "alina";
+              } else if (f === 'email') {
+                relObj.email = "alina@example.com";
+              } else if (f === 'name' || f === 'nama') {
+                relObj[f] = "Alina Rose";
+              } else if (f === 'title' || f === 'judul') {
+                relObj[f] = (rel === 'chapter' ? "Bab 1: 18:47" : `Sample ${rel} Title`);
+              } else if (f === 'slug') {
+                relObj.slug = "bab-1-18-47";
+              } else if (f === 'chapter_number' || f === 'order') {
+                relObj[f] = 1;
+              } else if (f === 'role') {
+                relObj.role = "editor";
+              } else if (f === 'avatar') {
+                relObj.avatar = "https://example.com/avatar.jpg";
+              } else if (f === 'status') {
+                relObj.status = "active";
+              } else if (f === 'created_at' || f === 'updated_at') {
+                relObj[f] = 1791705829;
+              } else {
+                relObj[f] = `sample_${f}`;
+              }
+            });
+          } else {
+            // Default: id + display column
+            if (rel === 'user') {
+              relObj.id = 4;
+              relObj.username = "alina";
+            } else if (rel === 'chapter') {
+              relObj.id = 486;
+              relObj.title = "Bab 1: 18:47";
+            } else {
+              const defCol = pickDefaultDisplayCol(targetCol);
+              relObj.id = 101;
+              relObj[defCol] = `sample_${rel}`;
+            }
+          }
+          record[rel] = relObj;
+        });
+      }
+
+      return record;
+    }
+
+    function generateClientJsonPreview(col, st) {
+      const record = generateResourceSampleRecord(col, st);
+      if (st.previewMode === 'list') {
+        return JSON.stringify({
+          page: 1,
+          perPage: 30,
+          totalItems: 1,
+          totalPages: 1,
+          items: [ record ]
+        }, null, 2);
+      } else {
+        return JSON.stringify(record, null, 2);
+      }
+    }
+
+    function renderResourceProjectionsHtml(col) {
+      const st = ensureResourceState(col);
+      const allCols = getCollectionAllColumnNames(col);
+      const detectedRels = getCollectionDetectedRelationNames(col);
+
+      const selectedCols = st.fields === null ? allCols : st.fields;
+      const isAllFields = st.fields === null;
+
+      const currentRelations = st.relations;
+      const isInheritRelations = currentRelations === null;
+      const customRelList = Array.isArray(currentRelations) ? currentRelations : [];
+
+      const columnsHtml = allCols.map(cName => {
+        const isSelected = isAllFields || selectedCols.includes(cName);
+        return `
+          <button type="button" onclick="toggleResourceField('${cName}')" class="px-2.5 py-1 rounded-xl text-xs font-mono font-bold transition flex items-center space-x-1.5 cursor-pointer border ${isSelected ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs' : 'bg-slate-100 text-slate-400 border-slate-200 line-through opacity-70'}">
+            <i class="fa-solid ${isSelected ? 'fa-check text-emerald-600' : 'fa-ban text-slate-400'} text-[10px]"></i>
+            <span>${cName}</span>
+          </button>
+        `;
+      }).join('');
+
+      let relMode = 'disabled';
+      if (Array.isArray(st.relations)) {
+        if (st.relations.length === 0 || st.relations.includes('none')) {
+          relMode = 'disabled';
+        } else if (st.relations.length === 1 && st.relations[0] === '*') {
+          relMode = 'all';
+        } else {
+          relMode = 'custom';
+        }
+      } else if (st.relations === null) {
+        relMode = 'disabled';
+      }
+
+      const relationChips = [...detectedRels, ...customRelList.filter(r => r !== '*' && !detectedRels.includes(r))].map(rel => {
+        const isSelected = customRelList.includes(rel);
+        return `
+          <button type="button" onclick="toggleResourceRelation('${rel}')" class="px-2.5 py-1 rounded-xl text-xs font-mono font-bold transition flex items-center space-x-1.5 cursor-pointer border ${isSelected ? 'bg-teal-50 text-teal-800 border-teal-300 shadow-2xs' : 'bg-slate-100 text-slate-400 border-slate-200 opacity-60'}">
+            <i class="fa-solid ${isSelected ? 'fa-check text-teal-600' : 'fa-plus text-slate-400'} text-[10px]"></i>
+            <span>${rel}</span>
+          </button>
+        `;
+      }).join('');
+
+      const activeRelations = customRelList.filter(r => r !== '*');
+      const relationCardsHtml = activeRelations.length === 0 ? '' : `
+        <div class="space-y-2.5 pt-3 border-t border-indigo-200/80">
+          <div class="text-[11px] font-extrabold text-slate-800 flex items-center justify-between">
+            <span class="flex items-center space-x-1.5">
+              <i class="fa-solid fa-sliders text-teal-600 text-xs"></i>
+              <span>Customize Fields per Relation:</span>
+            </span>
+            <span class="text-[10px] text-slate-400 font-normal">Choose columns included in nested JSON objects</span>
+          </div>
+          <div class="space-y-2">
+            ${activeRelations.map(rel => {
+              const targetCol = findTargetCollectionForRelation(rel);
+              const availCols = getRelationAvailableColumns(rel);
+              const customFields = st.relationFields && st.relationFields[rel];
+              const isDefault = !customFields || customFields.length === 0;
+              const defCol = pickDefaultDisplayCol(targetCol);
+              const activeFields = isDefault ? ['id', defCol] : customFields;
+
+              const chipsHtml = availCols.map(colName => {
+                const isSelected = activeFields.includes(colName);
+                return `
+                  <button type="button" onclick="toggleRelationField('${rel}', '${colName}')" class="px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold transition flex items-center space-x-1 cursor-pointer border ${isSelected ? 'bg-teal-50 text-teal-800 border-teal-300 shadow-2xs' : 'bg-slate-100 text-slate-400 border-slate-200 opacity-60'}">
+                    <i class="fa-solid ${isSelected ? 'fa-check text-teal-600' : 'fa-plus text-slate-400'} text-[8px]"></i>
+                    <span>${colName}</span>
+                  </button>
+                `;
+              }).join('');
+
+              return `
+                <div class="p-3 rounded-xl bg-white border border-teal-200/90 shadow-2xs space-y-2">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center space-x-2">
+                      <div class="w-2 h-2 rounded-full bg-teal-500"></div>
+                      <span class="text-xs font-bold font-mono text-slate-900">${rel}</span>
+                      <span class="text-[10px] text-slate-400">(${targetCol ? `target: ${targetCol.name}` : 'relation'})</span>
+                      <span class="px-1.5 py-0.5 rounded text-[9px] font-bold ${!isDefault ? 'bg-indigo-100 text-indigo-700 font-mono' : 'bg-slate-100 text-slate-500 font-mono'}">
+                        ${!isDefault ? `${activeFields.length} columns custom` : 'default (id, ' + defCol + ')'}
+                      </span>
+                    </div>
+                    <div class="flex items-center space-x-1">
+                      <button type="button" onclick="selectAllRelationFields('${rel}')" class="px-2 py-0.5 rounded bg-slate-50 hover:bg-teal-50 text-[10px] text-slate-600 hover:text-teal-700 font-semibold border border-slate-200 cursor-pointer transition">
+                        Select All
+                      </button>
+                      <button type="button" onclick="resetRelationFieldsToDefault('${rel}')" class="px-2 py-0.5 rounded bg-slate-50 hover:bg-slate-100 text-[10px] text-slate-500 font-semibold border border-slate-200 cursor-pointer transition">
+                        Reset Default
+                      </button>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap gap-1 p-2 rounded-lg bg-slate-50/70 border border-slate-200/70">
+                    ${chipsHtml}
+                  </div>
+
+                  <div class="flex items-center space-x-1.5 pt-0.5 max-w-xs">
+                    <input type="text" id="customRelFieldInput_${rel}" placeholder="Add other field (e.g. phone)..." class="flex-1 bg-white border border-slate-200 rounded-md px-2 py-0.5 text-[10px] font-mono focus:outline-none focus:border-teal-500" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomFieldToRelation('${rel}');}">
+                    <button type="button" onclick="addCustomFieldToRelation('${rel}')" class="px-2 py-0.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-[10px] rounded-md transition cursor-pointer">
+                      + Add
+                    </button>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+
+      const jsonPreviewStr = generateClientJsonPreview(col, st);
+
+      return `
+        <div class="space-y-4">
+          <!-- What Resource Does (Explanation Banner) -->
+          <div class="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50 border border-emerald-200/80 shadow-2xs space-y-3">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex items-start space-x-3">
+                <div class="w-9 h-9 rounded-xl bg-white text-emerald-600 flex items-center justify-center text-base shrink-0 shadow-2xs border border-emerald-200/60">
+                  <i class="fa-solid fa-shapes"></i>
+                </div>
+                <div>
+                  <h4 class="text-xs font-extrabold text-slate-900 flex items-center space-x-1.5">
+                    <span>API Resource &amp; Output Transformer</span>
+                    <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-600 text-white font-mono uppercase">Unified</span>
+                  </h4>
+                  <p class="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
+                    API Resource provides a single unified output transformer for table <code class="font-mono font-bold text-emerald-800">${col.name}</code>. It automatically shapes data, masks hidden columns, and expands relations across <strong>List (/api/${col.name})</strong>, <strong>All (/api/${col.name}/all)</strong>, and <strong>Single View (/api/${col.name}/:id)</strong>.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Key Capabilities Grid -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-emerald-200/60 text-[11px]">
+              <div class="flex items-start space-x-2 bg-white/70 p-2.5 rounded-xl border border-emerald-100">
+                <i class="fa-solid fa-shield-halved text-emerald-600 mt-0.5 shrink-0"></i>
+                <div>
+                  <div class="font-bold text-slate-800">1. Data Masking</div>
+                  <div class="text-[10px] text-slate-500">Unselected columns stay sealed server-side and never leak to clients.</div>
+                </div>
+              </div>
+              <div class="flex items-start space-x-2 bg-white/70 p-2.5 rounded-xl border border-teal-100">
+                <i class="fa-solid fa-network-wired text-teal-600 mt-0.5 shrink-0"></i>
+                <div>
+                  <div class="font-bold text-slate-800">2. Embedded Relations</div>
+                  <div class="text-[10px] text-slate-500">Automatically embeds related records as nested JSON objects (e.g. user, chapter).</div>
+                </div>
+              </div>
+              <div class="flex items-start space-x-2 bg-white/70 p-2.5 rounded-xl border border-indigo-100">
+                <i class="fa-solid fa-cube text-indigo-600 mt-0.5 shrink-0"></i>
+                <div>
+                  <div class="font-bold text-slate-800">3. Unified API Contract</div>
+                  <div class="text-[10px] text-slate-500">One consistent model transformation for all read endpoints.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Main Configuration & Live JSON Preview Split Grid -->
+          <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            
+            <!-- Left 7 Cols: Configuration Controls -->
+            <div class="lg:col-span-7 space-y-4">
+              
+              <!-- Section 1: Columns to Expose -->
+              <div class="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-100 pb-2.5">
+                  <div class="flex items-center space-x-2">
+                    <span class="text-xs font-bold text-slate-900 flex items-center space-x-1.5">
+                      <i class="fa-solid fa-table-columns text-slate-400 text-xs"></i>
+                      <span>1. Exposed Columns (Field Projection)</span>
+                    </span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${isAllFields ? 'bg-emerald-100 text-emerald-800' : 'bg-indigo-100 text-indigo-800'}">
+                      ${isAllFields ? 'All Columns (*)' : `${selectedCols.length} Columns Active`}
+                    </span>
+                  </div>
+                  <div class="flex items-center space-x-1">
+                    <button type="button" onclick="selectAllResourceFields()" class="px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 text-[11px] font-semibold transition cursor-pointer">
+                      Select All (*)
+                    </button>
+                    <button type="button" onclick="selectSafeResourceFields()" class="px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 text-[11px] font-semibold transition cursor-pointer">
+                      Safe Columns
+                    </button>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap gap-1.5 p-2.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                  ${columnsHtml}
+                </div>
+
+                <p class="text-[10px] text-slate-400">
+                  <i class="fa-solid fa-info-circle mr-1"></i>
+                  Clients can still request fewer columns using <code class="font-mono">?fields=</code>, but cannot expose hidden columns.
+                </p>
+              </div>
+
+              <!-- Section 2: Relations Expansion (Eager Loading) -->
+              <div class="p-4 rounded-2xl bg-white border border-slate-200 shadow-2xs space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-1.5 border-b border-slate-100 pb-2.5">
+                  <div class="flex items-center space-x-2">
+                    <span class="text-xs font-bold text-slate-900 flex items-center space-x-1.5">
+                      <i class="fa-solid fa-network-wired text-teal-600 text-xs"></i>
+                      <span>2. Embedded Relations (Eager Loading)</span>
+                    </span>
+                    <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${relMode === 'disabled' ? 'bg-slate-100 text-slate-600' : (relMode === 'all' ? 'bg-teal-100 text-teal-800' : 'bg-indigo-100 text-indigo-800')}">
+                      ${relMode === 'disabled' ? 'Disabled' : (relMode === 'all' ? 'All Relations (*)' : `${activeRelations.length} Relations Active`)}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <label class="p-3 rounded-xl border cursor-pointer transition flex items-start space-x-2.5 ${relMode === 'disabled' ? 'bg-slate-100/90 border-slate-400 ring-2 ring-slate-300 shadow-2xs' : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'}">
+                    <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 transition ${relMode === 'disabled' ? 'border-slate-700 bg-slate-700 ring-2 ring-slate-300' : 'border-slate-300 bg-white'}">
+                      ${relMode === 'disabled' ? '<div class="w-1.5 h-1.5 rounded-full bg-white"></div>' : ''}
+                    </div>
+                    <input type="radio" name="unifiedRelMode" onchange="setResourceRelationMode('disabled')" ${relMode === 'disabled' ? 'checked' : ''} class="sr-only">
+                    <div class="min-w-0 flex-1">
+                      <div class="text-xs ${relMode === 'disabled' ? 'font-extrabold text-slate-900' : 'font-bold text-slate-700'}">1. Disabled</div>
+                      <div class="text-[11px] ${relMode === 'disabled' ? 'text-slate-600' : 'text-slate-500'} mt-0.5 leading-relaxed">
+                        Raw foreign key IDs only (e.g. <code class="font-mono ${relMode === 'disabled' ? 'text-slate-800 font-bold' : 'text-slate-700'}">user_id: 1</code>). Fast throughput, 0 extra queries.
+                      </div>
+                    </div>
+                  </label>
+
+                  <label class="p-3 rounded-xl border cursor-pointer transition flex items-start space-x-2.5 ${relMode === 'all' ? 'bg-teal-50 border-teal-500 ring-2 ring-teal-400/50 shadow-2xs' : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'}">
+                    <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 transition ${relMode === 'all' ? 'border-teal-600 bg-teal-600 ring-2 ring-teal-200' : 'border-slate-300 bg-white'}">
+                      ${relMode === 'all' ? '<div class="w-1.5 h-1.5 rounded-full bg-white"></div>' : ''}
+                    </div>
+                    <input type="radio" name="unifiedRelMode" onchange="setResourceRelationMode('all')" ${relMode === 'all' ? 'checked' : ''} class="sr-only">
+                    <div class="min-w-0 flex-1">
+                      <div class="text-xs ${relMode === 'all' ? 'font-extrabold text-teal-950' : 'font-bold text-slate-700'}">2. All Relations (*)</div>
+                      <div class="text-[11px] ${relMode === 'all' ? 'text-teal-800' : 'text-slate-500'} mt-0.5 leading-relaxed">
+                        Eager-loads all foreign keys in 1 batch query with default fields.
+                      </div>
+                    </div>
+                  </label>
+
+                  <label class="p-3 rounded-xl border cursor-pointer transition flex items-start space-x-2.5 ${relMode === 'custom' ? 'bg-indigo-50 border-indigo-500 ring-2 ring-indigo-400/50 shadow-2xs' : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'}">
+                    <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 transition ${relMode === 'custom' ? 'border-indigo-600 bg-indigo-600 ring-2 ring-indigo-200' : 'border-slate-300 bg-white'}">
+                      ${relMode === 'custom' ? '<div class="w-1.5 h-1.5 rounded-full bg-white"></div>' : ''}
+                    </div>
+                    <input type="radio" name="unifiedRelMode" onchange="setResourceRelationMode('custom')" ${relMode === 'custom' ? 'checked' : ''} class="sr-only">
+                    <div class="min-w-0 flex-1">
+                      <div class="text-xs ${relMode === 'custom' ? 'font-extrabold text-indigo-950' : 'font-bold text-slate-700'}">3. Custom Relations</div>
+                      <div class="text-[11px] ${relMode === 'custom' ? 'text-indigo-800' : 'text-slate-500'} mt-0.5 leading-relaxed">
+                        Choose specific relations and customize exact columns to embed.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                ${relMode === 'disabled' ? `
+                  <div class="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500 space-y-1">
+                    <div class="font-bold flex items-center space-x-1.5 text-slate-700">
+                      <i class="fa-solid fa-ban text-slate-400"></i>
+                      <span>No Eager Relations</span>
+                    </div>
+                    <div class="text-[11px]">
+                      Foreign key references stay as numeric/string IDs (e.g. <code class="font-mono bg-slate-200/70 px-1 rounded">user_id: 1</code>). Extra relation queries are skipped.
+                    </div>
+                  </div>
+                ` : (relMode === 'all' ? `
+                  <div class="p-3.5 rounded-xl bg-teal-50/70 border border-teal-200 text-xs text-teal-900 space-y-1">
+                    <div class="font-bold flex items-center space-x-1.5">
+                      <i class="fa-solid fa-bolt text-teal-600"></i>
+                      <span>All Detected Relations Active (*)</span>
+                    </div>
+                    <div class="text-[11px] text-teal-700">
+                      Eager loading automatically detects foreign keys (<code class="font-mono bg-teal-100/80 px-1 rounded">${detectedRels.join(', ') || 'user'}</code>) and embeds each in 1 batch query using standard display fields.
+                    </div>
+                  </div>
+                ` : `
+                  <div class="p-3 rounded-xl bg-slate-50 border border-indigo-200 space-y-2 mt-1">
+                    <div class="text-[11px] font-bold text-slate-700">Select Relations to Embed:</div>
+                    <div class="flex flex-wrap gap-1.5">
+                      ${relationChips}
+                    </div>
+                    <div class="flex items-center space-x-1.5 pt-1 max-w-sm">
+                      <input type="text" id="customRelInput" placeholder="Add custom relation (e.g. user)..." class="flex-1 bg-white border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-mono focus:outline-none focus:border-indigo-500" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomResourceRelation();}">
+                      <button type="button" onclick="addCustomResourceRelation()" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg transition cursor-pointer">
+                        + Add
+                      </button>
+                    </div>
+
+                    ${relationCardsHtml}
+                  </div>
+                `)}
+              </div>
+
+            </div>
+
+            <!-- Right 5 Cols: Live Client JSON Response Preview -->
+            <div class="lg:col-span-5 flex flex-col p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl space-y-3">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                <div class="flex items-center space-x-2">
+                  <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                  <span class="text-xs font-bold text-white uppercase tracking-wider">Client JSON Preview</span>
+                </div>
+                <div class="flex items-center space-x-1 bg-slate-800 p-0.5 rounded-lg text-[10px]">
+                  <button type="button" onclick="switchResourcePreviewMode('single')" class="px-2 py-0.5 rounded-md font-semibold transition ${st.previewMode === 'single' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'}">Single</button>
+                  <button type="button" onclick="switchResourcePreviewMode('list')" class="px-2 py-0.5 rounded-md font-semibold transition ${st.previewMode === 'list' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-400 hover:text-white'}">List</button>
+                </div>
+              </div>
+
+              <div class="text-[11px] text-slate-400">
+                Live output received by client on <code class="font-mono text-emerald-400">${st.previewMode === 'single' ? `/api/${col.name}/:id` : `/api/${col.name}`}</code>:
+              </div>
+
+              <!-- Formatted JSON Code Block -->
+              <div class="flex-1 overflow-auto rounded-xl bg-slate-950 p-3.5 border border-slate-800/80 font-mono text-[11px] text-emerald-300 leading-relaxed max-h-[460px]">
+                <pre><code>${escapeHtml(jsonPreviewStr)}</code></pre>
+              </div>
+
+              <div class="flex items-center justify-between text-[10px] text-slate-500 pt-1 border-t border-slate-800">
+                <span>Reflects active columns &amp; relations</span>
+                <button type="button" onclick="copyTextToClipboard('${escapeHtml(jsonPreviewStr).replace(/'/g, "\\'")}')" class="text-slate-400 hover:text-emerald-400 font-bold transition flex items-center space-x-1 cursor-pointer">
+                  <i class="fa-regular fa-copy"></i>
+                  <span>Copy JSON</span>
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
     function renderApiPreview(action) {
       currentSelectedApiTab = action;
       const baseUrl = window.location.origin;
@@ -6344,9 +7344,13 @@ let currentCollection = "users";
         if (tabName === action) {
           if (tabName === 'rules') {
             btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-indigo-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
+          } else if (tabName === 'resources') {
+            btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
           } else {
             btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
           }
+        } else if (tabName === 'resources') {
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100 font-bold flex items-center space-x-2 text-xs transition shrink-0`;
         } else if (tabName === 'rules') {
           btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-indigo-700 bg-indigo-50/70 hover:bg-indigo-100 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         } else if (['register', 'auth', 'forgot', 'reset', 'change_pw', 'me'].includes(tabName)) {
@@ -6355,6 +7359,40 @@ let currentCollection = "users";
           btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         }
       });
+
+      // Special View: API Resource & Field Projections Management
+      if (action === 'resources') {
+        content.innerHTML = `
+          <div class="space-y-4">
+            <div class="flex flex-wrap items-center justify-between border-b border-slate-200 pb-3 gap-2">
+              <div>
+                <h4 class="text-sm font-extrabold text-slate-900 flex items-center space-x-2">
+                  <i class="fa-solid fa-shapes text-emerald-600"></i>
+                  <span>API Resources &amp; Field Projections</span>
+                </h4>
+                <p class="text-[11px] text-slate-500 mt-0.5">Configure exposed data columns and relation expansion rules for table <span class="font-mono font-bold text-emerald-700">${cName}</span>.</p>
+              </div>
+            </div>
+
+            <div id="resourceProjectionsSectionWrapper" class="pt-1">
+              ${renderResourceProjectionsHtml(col)}
+            </div>
+
+            <!-- Save Action -->
+            <div class="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-200">
+              <div class="text-[11px] text-slate-500 flex items-center space-x-1.5">
+                <i class="fa-solid fa-circle-check text-emerald-600"></i>
+                <span>Resource projections are applied immediately on live API requests without server restart.</span>
+              </div>
+              <button type="button" id="saveAccessRulesBtn" onclick="saveAccessRulesOnly()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center space-x-1.5 cursor-pointer">
+                <i class="fa-solid fa-check"></i>
+                <span>Save Resource Projections</span>
+              </button>
+            </div>
+          </div>
+        `;
+        return;
+      }
 
       // Special View: Access Rules Management within API Endpoints & Rules Modal
       if (action === 'rules') {
@@ -6494,7 +7532,7 @@ let currentCollection = "users";
             <div class="pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50/70 p-3.5 rounded-2xl border border-slate-200">
               <div class="text-[11px] text-slate-500 flex items-center space-x-1.5">
                 <i class="fa-solid fa-circle-check text-emerald-600"></i>
-                <span>Rules are enforced immediately on live API calls without server restart.</span>
+                <span>RBAC rules are enforced immediately on live API requests without server restart.</span>
               </div>
               <button type="button" id="saveAccessRulesBtn" onclick="saveAccessRulesOnly()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-sm transition flex items-center space-x-1.5 cursor-pointer">
                 <i class="fa-solid fa-check"></i>
@@ -6511,23 +7549,28 @@ let currentCollection = "users";
         return;
       }
 
+      const sampleRecordItem = generateResourceSampleRecord(col);
+
       const sampleObj = {};
       if (col.type === 'auth') {
-        sampleObj.username = "john123";
-        sampleObj.email = "john@example.com";
+        sampleObj.username = "alina";
+        sampleObj.email = "alina@example.com";
         sampleObj.password = "secret123456";
       }
       (col.schema || []).forEach(f => {
-        sampleObj[f.name] = f.type === 'number' ? 100 : (f.type === 'bool' ? true : `sample_${f.name}`);
+        if (f.name === 'user_id') sampleObj[f.name] = 4;
+        else if (f.name === 'chapter_id') sampleObj[f.name] = 486;
+        else if (f.name.endsWith('_id')) sampleObj[f.name] = 10;
+        else sampleObj[f.name] = f.type === 'number' ? 100 : (f.type === 'bool' ? true : `sample_${f.name}`);
       });
 
       const fileField = (col.schema || []).find(f => f.type === 'file')?.name || 'file';
 
       const sampleUserRecord = {
-        id: "rec_u0192a8b",
-        email: "john@example.com",
-        username: "john123",
-        name: "John Doe",
+        id: 4,
+        email: "alina@example.com",
+        username: "alina",
+        name: "Alina Rose",
         role: "user",
         avatar: "",
         created: "2026-11-03 10:00:00",
@@ -6535,8 +7578,6 @@ let currentCollection = "users";
       };
 
       const sampleJwtToken = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJyZWNfdTAxOTJhOGIiLCJlbWFpbCI6ImpvaG5AZXhhbXBsZS5jb20iLCJyb2xlIjoidXNlciIsImV4cCI6MTgwMDAwMDAwMH0.signature";
-      const sampleRecordItem = Object.assign({ id: "rec_001" }, sampleObj);
-      delete sampleRecordItem.password;
 
       const docs = {
         list: {
@@ -6906,7 +7947,7 @@ let currentCollection = "users";
             message_code: "SUCCESS",
             success: true,
             item: {
-              id: "rec_001",
+              id: sampleRecordItem.id || 43,
               deleted: true
             },
             debug: {

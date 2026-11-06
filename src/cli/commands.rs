@@ -218,8 +218,18 @@ pub async fn run_cli() -> Result<()> {
                 app.into_make_service_with_connect_info::<SocketAddr>(),
             )
             .with_graceful_shutdown(async {
-                let _ = tokio::signal::ctrl_c().await;
-                info!("🛑 Shutdown signal received, draining active requests...");
+                match tokio::signal::ctrl_c().await {
+                    Ok(()) => {
+                        info!("🛑 Shutdown signal (Ctrl+C) received, draining active requests...");
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            "Ctrl+C signal listener unavailable ({}); keeping server alive in background mode.",
+                            err
+                        );
+                        std::future::pending::<()>().await;
+                    }
+                }
             })
             .await?;
         }

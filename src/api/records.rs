@@ -169,11 +169,30 @@ pub fn parse_with_param(
     }
     if let Some(raw) = with.or(expand) {
         if !raw.trim().is_empty() {
-            let list: Vec<String> = raw
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
+            let mut list = Vec::new();
+            let mut current = String::new();
+            let mut depth = 0;
+            for ch in raw.chars() {
+                if ch == '(' || ch == '[' {
+                    depth += 1;
+                    current.push(ch);
+                } else if ch == ')' || ch == ']' {
+                    if depth > 0 { depth -= 1; }
+                    current.push(ch);
+                } else if ch == ',' && depth == 0 {
+                    let t = current.trim().to_string();
+                    if !t.is_empty() {
+                        list.push(t);
+                    }
+                    current.clear();
+                } else {
+                    current.push(ch);
+                }
+            }
+            let t = current.trim().to_string();
+            if !t.is_empty() {
+                list.push(t);
+            }
             if !list.is_empty() {
                 return Some(list);
             }
@@ -185,10 +204,82 @@ pub fn parse_with_param(
     None
 }
 
+/// Resolve active resource projection fields taking both admin Resource configuration
+/// and optional client ?fields= query params into account.
+pub fn resolve_resource_fields(
+    admin_resource_fields: Option<&[String]>,
+    client_fields: Option<&[String]>,
+) -> Option<Vec<String>> {
+    let clean_admin: Option<Vec<String>> = admin_resource_fields.and_then(|list| {
+        let filtered: Vec<String> = list
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if filtered.is_empty() || filtered.iter().any(|f| f == "*") {
+            None
+        } else {
+            Some(filtered)
+        }
+    });
+
+    match (clean_admin, client_fields) {
+        (Some(admin_f), Some(client_f)) => {
+            let intersected: Vec<String> = client_f
+                .iter()
+                .filter(|cf| {
+                    cf.eq_ignore_ascii_case("id")
+                        || admin_f.iter().any(|af| af.eq_ignore_ascii_case(cf))
+                })
+                .map(|s| s.to_string())
+                .collect();
+            if intersected.is_empty() {
+                Some(admin_f)
+            } else {
+                Some(intersected)
+            }
+        }
+        (Some(admin_f), None) => Some(admin_f),
+        (None, Some(client_f)) => Some(client_f.to_vec()),
+        (None, None) => None,
+    }
+}
+
+/// Resolve relations to load based on client ?with= query parameter (highest priority)
+/// and admin Resource configuration per-endpoint (Level 2), which falls back to
+/// table default auto_load_relations (Level 1) if None.
+pub fn resolve_resource_relations(
+    admin_resource_relations: Option<&[String]>,
+    client_with: Option<Vec<String>>,
+) -> Option<Vec<String>> {
+    if client_with.is_some() {
+        return client_with;
+    }
+
+    if let Some(rels) = admin_resource_relations {
+        let clean: Vec<String> = rels
+            .iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if !clean.is_empty() {
+            return Some(clean);
+        } else {
+            return Some(vec!["none".to_string()]);
+        }
+    }
+
+    None
+}
+
 pub async fn validate_role_if_present(
     db: &crate::core::db::DbPool,
+    auth: Option<&crate::core::auth::Claims>,
     payload: &Map<String, Value>,
 ) -> Result<(), (StatusCode, Json<Value>)> {
+    if auth.map(|c| c.is_admin()).unwrap_or(false) {
+        return Ok(());
+    }
     if let Some(role_val) = payload.get("role") {
         if let Some(role_str) = role_val.as_str() {
             let trimmed = role_str.trim();
@@ -332,9 +423,11 @@ pub async fn list(
     check_permission(RecordAction::List, &col, auth.as_ref(), None)?;
 
     let (sort_clause, filter_clause) = resolve_list_sort_and_filter(&params);
-    let with_vec = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
+    let client_with = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
+    let with_vec = resolve_resource_relations(col.effective_resource_relations(Some("list")), client_with);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
-    let fields_vec = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let client_fields = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let fields_vec = resolve_resource_fields(col.effective_resource_fields(Some("list")), client_fields.as_deref());
     let fields_refs: Option<Vec<&str>> = fields_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
 
     let effective_per_page = params
@@ -433,9 +526,11 @@ pub async fn all(
     check_permission(RecordAction::All, &col, auth.as_ref(), None)?;
 
     let (sort_clause, filter_clause) = resolve_all_sort_and_filter(&params);
-    let with_vec = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
+    let client_with = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
+    let with_vec = resolve_resource_relations(col.effective_resource_relations(Some("all")), client_with);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
-    let fields_vec = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let client_fields = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let fields_vec = resolve_resource_fields(col.effective_resource_fields(Some("all")), client_fields.as_deref());
     let fields_refs: Option<Vec<&str>> = fields_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
 
     // Capped at maximum 5000 records to prevent excessive data fetching, while allowing user to specify a custom limit <= 5000
@@ -538,9 +633,11 @@ pub async fn first(
     check_permission(RecordAction::View, &col, auth.as_ref(), None)?;
 
     let (sort_clause, filter_clause) = resolve_all_sort_and_filter(&params);
-    let with_vec = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
+    let client_with = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
+    let with_vec = resolve_resource_relations(col.effective_resource_relations(Some("all")), client_with);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
-    let fields_vec = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let client_fields = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let fields_vec = resolve_resource_fields(col.effective_resource_fields(Some("all")), client_fields.as_deref());
     let fields_refs: Option<Vec<&str>> = fields_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
 
     let mut records = get_all_records_with_limit(
@@ -655,9 +752,11 @@ pub async fn get_one(
     let auth = authenticate_headers(&headers)?;
     check_permission(RecordAction::View, &col, auth.as_ref(), None)?;
 
-    let with_vec = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
+    let client_with = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
+    let with_vec = resolve_resource_relations(col.effective_resource_relations(Some("view")), client_with);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
-    let fields_vec = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let client_fields = parse_fields_param(params.fields.as_deref(), params.select.as_deref());
+    let fields_vec = resolve_resource_fields(col.effective_resource_fields(Some("view")), client_fields.as_deref());
     let fields_refs: Option<Vec<&str>> = fields_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
 
     let mut record = get_record_with(&state.db, &col, &id, with_refs.as_deref())
@@ -794,7 +893,7 @@ pub async fn create(
     let (mut payload, mut pending_files) = parse_request_payload(req, &state).await?;
     retain_file_fields(&col, &mut payload, &mut pending_files);
     strip_privileged_fields(&col, auth.as_ref(), &mut payload);
-    validate_role_if_present(&state.db, &payload).await?;
+    validate_role_if_present(&state.db, auth.as_ref(), &payload).await?;
 
     let auth_user_id = auth.as_ref().map(|c| c.sub.clone());
     if col.blameable || col.collection_type == crate::core::schema::CollectionType::Auth {
@@ -900,7 +999,7 @@ pub async fn update(
     let (mut payload, mut pending_files) = parse_request_payload(req, &state).await?;
     retain_file_fields(&col, &mut payload, &mut pending_files);
     strip_privileged_fields(&col, auth.as_ref(), &mut payload);
-    validate_role_if_present(&state.db, &payload).await?;
+    validate_role_if_present(&state.db, auth.as_ref(), &payload).await?;
 
     // Save any uploaded files directly to storage for this record
     if !pending_files.is_empty() {
@@ -1155,7 +1254,7 @@ pub async fn import_records(
 
     for (index, mut payload) in items.into_iter().enumerate() {
         strip_privileged_fields(&col, auth.as_ref(), &mut payload);
-        validate_role_if_present(&state.db, &payload).await?;
+        validate_role_if_present(&state.db, auth.as_ref(), &payload).await?;
         match create_record(&state.db, &col, payload).await {
             Ok(rec) => {
                 imported_count += 1;
@@ -1344,7 +1443,7 @@ pub async fn create_batch(
 
     for mut item in items {
         strip_privileged_fields(&col, auth.as_ref(), &mut item);
-        validate_role_if_present(&state.db, &item).await?;
+        validate_role_if_present(&state.db, auth.as_ref(), &item).await?;
         if col.blameable || col.collection_type == crate::core::schema::CollectionType::Auth {
             if let Some(ref uid) = auth_user_id {
                 if !item.contains_key("created_by") {

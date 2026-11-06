@@ -206,6 +206,22 @@ Secara default, **PadiBase menerapkan proteksi keamanan berbasis autentikasi dan
      - `Owner`: Hanya pemilik record yang bersangkutan (`id = @request.auth.id` atau `user_id = @request.auth.id`).
      - `Admin`: Khusus administrator (`@request.auth.role = 'admin'`).
 
+5. **API Resource & Field Projections (Resource Transformer ala Padi/Laravel)**:
+   - Terintegrasi langsung di dalam modal **API Endpoints & Rules**. Developer dapat memilih kolom mana saja yang diekspos ke klien untuk tiap endpoint read:
+     - `GET /api/:collection` (Daftar terpaginasi)
+     - `GET /api/:collection/all` (Seluruh data unpaginated)
+     - `GET /api/:collection/:id` (Detail single record)
+   - **Proteksi Server-Side**: Kolom yang tidak dipilih oleh admin tidak akan pernah dikirimkan ke klien, meskipun klien mencoba memintanya via `?fields=...`. Klien hanya dapat mempersempit kolom di dalam batas proyeksi yang diizinkan admin.
+
+6. **Sistem Relasi 2 Tingkat (2-Level Relations System)**:
+   - **Tingkat 1 (Default Master Switch di Table Options)**: `auto_load_relations` (ON/OFF) menentukan perilaku default eager-loading relasi tabel.
+   - **Tingkat 2 (Resource Endpoint Level)**: Setiap endpoint dapat memilih apakah mengikuti default tabel (`Inherit Table Default`) atau menentukan relasi kustom spesifik (misalnya hanya memuat relasi `user` dan `chapter`, atau mematikan relasi sepenuhnya untuk performa maksimal pada `list`).
+   - **Client Query Precedence**: Permintaan dinamis dari klien via `?with=user,chapter` atau `?expand=...` memiliki prioritas tertinggi.
+
+7. **Modern Modal Dialogs (Tanpa Browser Native `prompt`)**:
+   - Mengganti seluruh dialog browser native bawaan (`window.prompt`) dengan modal Tailwind modern yang responsif.
+   - Dilengkapi validasi nama tabel real-time (mencegah karakter ilegal, nama kosong, atau bentrok dengan tabel sistem), auto-focus, dan dukungan keyboard (`Enter` untuk simpan, `Esc` untuk batal).
+
 ---
 
 ## 🛠️ Visual SQL Builder & Advanced Aggregate Engine
@@ -265,7 +281,12 @@ Anda dapat menambahkan multi-kalkulasi langsung ke dalam query dengan alias kust
      - **Warning (Amber)**: Restore backup database snapshot.
      - **Info (Teal)**: Kirim email link verifikasi user, toggle verifikasi akun.
    - **Keyboard Navigation**: Mendukung tombol <kbd>Esc</kbd> untuk membatalkan dialog dan tombol <kbd>Enter</kbd> untuk langsung mengonfirmasi aksi.
-2. **Interaksi Tabel Data yang Aman**:
+2. **Global Custom Prompt & Rename Modal (`#padiPromptModal`)**:
+   - Menggantikan dialog native `prompt(...)` browser (yang sebelumnya muncul saat rename nama tabel/koleksi) dengan modal dialog interaktif modern berdesain senada:
+     - Dilengkapi badge ikon, label input dengan icon prefix `<i class="fa-solid fa-table-columns"></i>`, serta teks bantuan (*hint*).
+     - **Validasi Input Real-Time**: Otomatis mengecek jika nama kosong, mengandung karakter ilegal (spasi/simbol selain underscore), atau nama tabel yang bentrok/sudah ada sebelum request dikirim ke backend.
+     - **Keyboard Shortcuts**: Input langsung terfokus dan terseleksi otomatis saat modal terbuka; tekan <kbd>Enter</kbd> untuk menyimpan perubahan nama dan <kbd>Esc</kbd> untuk membatalkan.
+3. **Interaksi Tabel Data yang Aman**:
    - Baris data tabel (`<tr>`) tidak lagi memicu drawer edit record saat diklik secara tidak sengaja.
    - Form editor record kini hanya muncul jika pengguna menekan tombol **Edit** kuning di kolom aksi secara eksplisit.
 3. **Ergonomi Navigasi**:
@@ -351,29 +372,74 @@ Tabel referensi target (`target_table`) dan target primary key (`target_pk`) lan
 
 ---
 
+### 4. Perilaku Otomatisasi Relasi: Index, `ON DELETE`, dan `ON UPDATE`
+
+Saat membuat kolom bertipe **`Relation (FK)`** di PadiBase, sistem menerapkan aturan integritas referensial dan optimasi performa berikut:
+
+#### A. Apakah Otomatis Dibuatkan Index?
+Tergantung pada database engine yang aktif:
+* **MySQL / MariaDB**: **Ya, otomatis.** MySQL mewajibkan kolom foreign key memiliki index, sehingga saat constraint `FOREIGN KEY` dibuat, B-Tree index pada kolom tersebut langsung digenerate secara otomatis oleh database engine.
+* **SQLite (Default) & PostgreSQL**: **Tidak otomatis.** Engine database SQLite dan PostgreSQL tidak membuat index otomatis pada kolom foreign key anak (kecuali kolom diberi centang **`Uniq`**). Untuk tabel berukuran besar yang sering di-filter atau di-JOIN berdasarkan foreign key, pembuatan index manual disarankan untuk kecepatan query maksimal.
+
+#### B. Cara Kerja & Pemilihan Aturan `ON DELETE`
+PadiBase menentukan perilaku `ON DELETE` secara cerdas dan otomatis melalui checkbox **`Req` (Required)** di editor skema:
+* **Jika dicentang `Req` (Required / NOT NULL)**:
+  * Database Constraint: **`ON DELETE CASCADE`**
+  * *Perilaku:* Ketika baris pada tabel induk dihapus, seluruh baris data di tabel anak yang merujuknya akan **otomatis ikut terhapus**.
+  * *Contoh:* Relasi `orders` $\rightarrow$ `order_items` atau `posts` $\rightarrow$ `comments`.
+* **Jika TIDAK dicentang `Req` (Opsional / Nullable)**:
+  * Database Constraint: **`ON DELETE SET NULL`**
+  * *Perilaku:* Ketika baris pada tabel induk dihapus, nilai foreign key di tabel anak akan **otomatis dikosongkan (`NULL`)**, sehingga data anak tetap tersimpan dengan aman tanpa terhapus.
+  * *Contoh:* Relasi `tasks` $\rightarrow$ `assigned_to_user_id` atau `documents` $\rightarrow$ `reviewer_id`.
+
+#### C. Aturan `ON UPDATE`
+* Diterapkan dengan aturan default database: **`RESTRICT` / `NO ACTION`**.
+* Seluruh primary key (`id`) di PadiBase bersifat unik dan permanen (*immutable*) sehingga nilainya tidak pernah diubah setelah record dibuat. Aturan `RESTRICT` adalah standar industri paling aman untuk menjaga integritas relasi antar-tabel.
+
+---
+
 ### Realtime SSE Stream
 - `GET /api/realtime` : Koneksi Server-Sent Events untuk live updates
 
 ### 📁 File Storage & Image Management (PocketBase / Supabase Style)
 
-- **Struktur Storage Folder & File Unik**:
-  Setiap file disimpan di direktori storage terisolasi dengan struktur rapi per-koleksi dan per-record unik, dilengkapi prefix hash acak untuk mencegah penimpaan nama file:
+PadiBase menyediakan penanganan file dan lampiran media (*file storage system*) berperforma tinggi dengan proteksi ketat dan pembersihan otomatis tanpa meninggalkan file sampah (*zero orphaned files*):
+
+#### 1. Struktur Storage & Database
+* **Struktur Direktori Fisik**:
+  Setiap file disimpan di direktori storage terisolasi dengan struktur rapi per-koleksi dan per-record unik, dilengkapi prefix hash acak 8-karakter untuk mencegah penimpaan nama file:
   ```text
   padi_data/storage/{collection_name}/{record_id}/{unique_prefix}_{original_filename}
   ```
-- **Pembersihan Otomatis & File Override**:
-  - Saat memperbarui record dengan file gambar baru (baik lewat `PATCH /records/:id` maupun `POST /files/...`), file lama yang tersimpan sebelumnya **otomatis dihapus (*override*) dari storage fisik**, sehingga ruang disk server tidak akan pernah dipenuhi oleh file yatim (*orphaned files*).
-  - Jika sebuah record dihapus (`DELETE /records/:id`), seluruh folder storage dan file-file di dalamnya otomatis dibersihkan secara total.
-- **Tampilan Thumbnail & Image Lightbox Modal**:
-  - Pada **Tabel Data Dashboard**: Kolom bertipe file gambar menampilkan thumbnail visual interaktif.
-  - **Full-Screen Lightbox**: Mengklik thumbnail gambar akan membuka modal viewer resolusi tinggi dengan informasi dimensi gambar (`width × height px`), tombol unduh langsung, dan tombol salin link URL file.
-  - **Instant Live Preview Form**: Saat memilih file baru di drawer form record (`<input type="file">`), preview visual gambar langsung muncul secara instan sebelum menekan tombol simpan.
+* **Database Ramping**: Kolom tabel bertipe `file` hanya menyimpan nama filenya saja (string), bukan binary file, sehingga ukuran database tetap optimal dan pencarian data tetap cepat.
 
-#### 🚀 Panduan Cara Upload File dari Client
+#### 2. Keamanan & Proteksi Ketat
+* **Proteksi Directory Traversal**: Segmen path (koleksi, ID record, nama file) divalidasi dengan aturan karakter ketat (`is_safe_segment`) dan resolusi path kanonik (`canonicalize()`), menolak trik `..`, slash, karakter NUL, atau path absolut luar.
+* **Sanitisasi & Prefix Unik**: Nama file dibersihkan dari karakter ilegal dan diberi prefix acak UUID v4 sehingga file dengan nama sama dari user berbeda tidak akan pernah bertabrakan.
+* **Batas Ukuran Upload (`MAX_UPLOAD_MB`)**: Dibatasi maksimal **50 MB** secara default, dapat diubah sesuai kebutuhan di file `.env` (`MAX_UPLOAD_MB=100`).
+* **Proteksi Active Content / XSS**: File berbahaya yang dapat dieksekusi browser (seperti `.html`, `.svg`, `.xml`, `.js`) otomatis dipaksa download (`Content-Disposition: attachment; filename="..."`) dan dilindungi header isolasi ketat:
+  - `Content-Security-Policy: default-src 'none'; sandbox`
+  - `X-Content-Type-Options: nosniff`
+* **Whitelist Field Verifikasi**: Hanya kolom yang terdaftar bertipe `file` di skema yang dapat menerima file, mencegah serangan pengubahan kolom sensitif (`role`, `status`, dsb).
+* **Autentikasi & Otorisasi**: Akses file menghormati `view_rule` koleksi, serta mendukung pengiriman token via query parameter (`?token=...`) untuk integrasi mudah pada elemen HTML `<img>` atau link unduh langsung.
 
-Terdapat 2 cara bagi aplikasi client (Frontend Web, Mobile App, Postman) untuk mengunggah file:
+#### 3. Pembersihan Otomatis & Siklus Hidup File (No Orphan Files)
+* **Pembersihan saat File Diganti (*File Override*)**: Saat memperbarui record dengan file baru (lewat `PATCH /records/:id` maupun `POST /files/...`), file lama yang tersimpan sebelumnya **otomatis dihapus fisik dari disk**.
+* **Pembersihan Total saat Record Dihapus**: Jika record dihapus (`DELETE /records/:id`), folder storage record beserta seluruh file fisik di dalamnya **otomatis dibersihkan secara total** (`remove_dir_all`).
+* **Endpoint Hapus File Mandiri**:
+  - `DELETE /api/files/:collection/:record_id/:filename`
+  - Menghapus file fisik dari disk sekaligus mengosongkan nilai kolom terkait di record menjadi `NULL`.
 
-##### 1. Cara Sekaligus (All-in-One: Create / Update Record)
+#### 4. Tampilan Dashboard UI & Media Preview
+* **Thumbnail Interaktif**: Kolom bertipe gambar pada tabel data menampilkan preview visual.
+* **Full-Screen Lightbox**: Klik thumbnail untuk membuka modal resolusi tinggi, informasi dimensi gambar (`width × height px`), tombol unduh, dan salin URL.
+* **Instant Live Preview Form**: Memilih file baru di drawer form record (`<input type="file">`) langsung menampilkan preview gambar secara instan sebelum menekan tombol simpan.
+
+---
+
+#### 🚀 Panduan Cara Upload & Akses File dari Client
+
+##### A. Cara Sekaligus (All-in-One: Create / Update Record)
 Kirim `multipart/form-data` langsung ke endpoint record. PadiBase akan otomatis menyimpan file fisik dan mengisi kolom database terkait (misal `avatar`):
 
 * **Endpoint**:
@@ -398,7 +464,7 @@ Kirim `multipart/form-data` langsung ke endpoint record. PadiBase akan otomatis 
   console.log('Record & File tersimpan:', data);
   ```
 
-##### 2. Cara API Khusus Upload File (`/api/files/...`)
+##### B. Cara API Khusus Upload File (`/api/files/...`)
 Jika record sudah ada dan ingin mengunggah atau mengganti file secara spesifik:
 
 * **Endpoint**: `POST /api/files/:collection/:record_id`
@@ -430,15 +496,29 @@ Jika record sudah ada dan ingin mengunggah atau mengganti file secara spesifik:
   }
   ```
 
-##### 3. Cara Menampilkan Gambar / File di Frontend:
-Gunakan URL format `/api/files/{collection}/{record_id}/{filename}`:
-```html
-<!-- HTML / React / Vue -->
-<img src="http://127.0.0.1:8085/api/files/teachers/rec_001/f1a2b3c4_my_photo.png" alt="Avatar">
-
-<!-- Link Download Langsung (tambahkan ?download=1) -->
-<a href="http://127.0.0.1:8085/api/files/teachers/rec_001/f1a2b3c4_my_photo.png?download=1">Unduh File</a>
+##### C. Cara Menampilkan & Mengunduh File di Frontend:
+Gunakan format URL:
+```text
+http://127.0.0.1:8085/api/files/{collection}/{record_id}/{filename}
 ```
+
+1. **Menampilkan Gambar / Media (Inline):**
+   ```html
+   <!-- HTML / React / Vue -->
+   <img src="http://127.0.0.1:8085/api/files/teachers/rec_001/f1a2b3c4_my_photo.png" alt="Avatar">
+   ```
+2. **Memaksa Unduh Langsung (*Force Download*):**
+   Tambahkan parameter `?download=1` atau `?download=true`:
+   ```html
+   <a href="http://127.0.0.1:8085/api/files/teachers/rec_001/f1a2b3c4_my_photo.png?download=1">
+     Unduh File
+   </a>
+   ```
+3. **Autentikasi File Terproteksi via Query Token:**
+   Jika tabel diproteksi aturan `view_rule`, sertakan token JWT:
+   ```html
+   <img src="http://127.0.0.1:8085/api/files/teachers/rec_001/foto.png?token=JWT_TOKEN_ANDA">
+   ```
 
 ### System Backups
 - `GET /api/backups` : Daftar semua snapshot backup database
