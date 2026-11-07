@@ -777,10 +777,22 @@ let currentCollection = "users";
       document.getElementById('userEmail').textContent = email;
       document.getElementById('adminAvatarBtn').textContent = email.slice(0, 2).toUpperCase();
 
+      const routeInfo = parseCurrentRoute();
+      const targetCol = (routeInfo.view === 'collections' && routeInfo.param) ? decodeURIComponent(routeInfo.param) : null;
+
       loadHealthInfo();
-      loadCollections();
+      loadCollections(targetCol);
       loadAppSettings();
       initSSE();
+
+      if (routeInfo.view && routeInfo.view !== 'collections') {
+        switchMainView(routeInfo.view, {
+          skipRoutePush: true,
+          bucket: (routeInfo.view === 'storage' && routeInfo.param) ? decodeURIComponent(routeInfo.param) : undefined,
+        });
+      } else {
+        updateUrlRoute('collections', targetCol || currentCollection, true);
+      }
     }
 
     function handleLogout() {
@@ -790,8 +802,98 @@ let currentCollection = "users";
       if (sseSource) { sseSource.close(); sseSource = null; }
       if (typeof sseReconnectTimer !== 'undefined' && sseReconnectTimer) { clearTimeout(sseReconnectTimer); sseReconnectTimer = null; }
       if (typeof realtimeEvents !== 'undefined') { realtimeEvents = []; pausedRealtimeQueue = []; }
+      updateUrlRoute('collections', '', true);
       checkHasAdmins();
     }
+
+    // ================= SPA URL ROUTER & STATE SYNC =================
+    const ROUTE_BASE = '/_padibase';
+
+    function updateUrlRoute(view, subParam, replace = false) {
+      let targetPath = ROUTE_BASE;
+      if (view === 'collections') {
+        const col = subParam || currentCollection;
+        targetPath = col ? `${ROUTE_BASE}/tables/${encodeURIComponent(col)}` : `${ROUTE_BASE}/tables`;
+      } else if (view === 'logs') {
+        targetPath = `${ROUTE_BASE}/monitor`;
+      } else if (view === 'storage') {
+        targetPath = subParam ? `${ROUTE_BASE}/storage/${encodeURIComponent(subParam)}` : `${ROUTE_BASE}/storage`;
+      } else if (view === 'endpoints') {
+        targetPath = `${ROUTE_BASE}/endpoints`;
+      } else if (view === 'sqlbuilder') {
+        targetPath = `${ROUTE_BASE}/sqlbuilder`;
+      } else if (view === 'settings') {
+        targetPath = `${ROUTE_BASE}/settings`;
+      } else {
+        targetPath = `${ROUTE_BASE}/tables`;
+      }
+
+      if (window.location.pathname !== targetPath) {
+        try {
+          if (replace) {
+            window.history.replaceState({ view, subParam }, '', targetPath);
+          } else {
+            window.history.pushState({ view, subParam }, '', targetPath);
+          }
+        } catch (_) {}
+      }
+    }
+
+    function parseCurrentRoute() {
+      const rawPath = window.location.pathname.replace(/\/+$/, '') || '/';
+      let sub = rawPath;
+      if (sub.startsWith('/_padibase')) {
+        sub = sub.slice('/_padibase'.length);
+      } else if (sub.startsWith('/dashboard')) {
+        sub = sub.slice('/dashboard'.length);
+      }
+      sub = sub.replace(/^\/+/, ''); // e.g. "tables", "tables/users", "monitor", "storage", etc.
+
+      const parts = sub.split('/').filter(Boolean);
+      const section = parts[0] ? parts[0].toLowerCase() : '';
+      const param = parts.slice(1).join('/');
+
+      let view = 'collections';
+      if (section === 'monitor' || section === 'logs') {
+        view = 'logs';
+      } else if (section === 'storage') {
+        view = 'storage';
+      } else if (section === 'endpoints') {
+        view = 'endpoints';
+      } else if (section === 'sqlbuilder') {
+        view = 'sqlbuilder';
+      } else if (section === 'settings') {
+        view = 'settings';
+      } else if (section === 'tables' || section === 'collections') {
+        view = 'collections';
+      } else if (!section) {
+        view = 'collections';
+      }
+
+      return { view, param, section };
+    }
+
+    function applyCurrentRouteFromUrl(isPopState = false) {
+      const token = sessionStorage.getItem('padi_admin_token');
+      if (!token) return;
+
+      const { view, param } = parseCurrentRoute();
+      if (view === 'collections') {
+        switchMainView('collections', { skipRoutePush: true });
+        const targetCol = param ? decodeURIComponent(param) : (sessionStorage.getItem('padi_active_col') || currentCollection);
+        if (targetCol && collections && collections.some(c => c.name === targetCol)) {
+          selectCollection(targetCol, { skipRoutePush: true });
+        }
+      } else if (view === 'storage') {
+        switchMainView('storage', { skipRoutePush: true, bucket: param ? decodeURIComponent(param) : undefined });
+      } else {
+        switchMainView(view, { skipRoutePush: true });
+      }
+    }
+
+    window.addEventListener('popstate', () => {
+      applyCurrentRouteFromUrl(true);
+    });
 
     // ================= NAVIGATION & VIEWS =================
     function toggleMobileSidebar(force) {
@@ -828,6 +930,10 @@ let currentCollection = "users";
           }
         }
       });
+
+      if (!options.skipRoutePush) {
+        updateUrlRoute(view, options.bucket || (view === 'collections' ? currentCollection : null), options.replaceRoute);
+      }
 
       if (view === 'endpoints') {
         updateCustomEpUrlPreview();
@@ -1382,23 +1488,23 @@ let currentCollection = "users";
         const isOverride = isOverrideEndpointPath(ep.path);
         const method = ep.method || 'GET';
         return `
-          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold'}">
-            <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-emerald-50 text-emerald-900 border border-emerald-300 shadow-2xs font-bold' : 'bg-white hover:bg-slate-100/80 text-slate-700 border-slate-100 font-semibold'}">
+            <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0 cursor-pointer">
               <div class="flex items-center space-x-2.5 truncate">
-                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">
+                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200/60'}">
                   <i class="fa-solid fa-code text-[11px]"></i>
                 </span>
                 <div class="text-left truncate">
                   <div class="truncate font-mono">${ep.name || ep.path}</div>
-                  <div class="text-[10px] ${isActive ? 'text-emerald-100 font-medium' : 'text-slate-400'}">${fullDisplayPath}</div>
+                  <div class="text-[10px] ${isActive ? 'text-emerald-700/80 font-medium' : 'text-slate-400'}">${fullDisplayPath}</div>
                 </div>
               </div>
               <div class="flex items-center space-x-1 shrink-0 ml-1">
-                ${isOverride ? `<span class="px-1.5 py-0.5 rounded text-[8px] font-mono font-extrabold tracking-wider ${isActive ? 'bg-amber-400 text-amber-950 shadow-2xs' : 'bg-amber-100 text-amber-900 border border-amber-300'}" title="Overrides Built-in Route">OVERRIDE</span>` : ''}
-                <span class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-extrabold ${isActive ? 'bg-white/20 text-white' : (methodColors[method] || 'bg-slate-100 text-slate-700')}">${method}</span>
+                ${isOverride ? `<span class="px-1.5 py-0.5 rounded text-[8px] font-mono font-extrabold tracking-wider ${isActive ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-amber-100 text-amber-900 border border-amber-300'}" title="Overrides Built-in Route">OVERRIDE</span>` : ''}
+                <span class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-extrabold ${isActive ? 'bg-emerald-100 text-emerald-900 border border-emerald-200/60' : (methodColors[method] || 'bg-slate-100 text-slate-700')}">${method}</span>
               </div>
             </button>
-            <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="p-2 mr-1 rounded-lg ${isActive ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'} transition cursor-pointer" title="Edit Endpoint">
+            <button type="button" onclick="selectCustomEndpoint('${ep.id}')" class="p-2 mr-1 rounded-lg ${isActive ? 'text-emerald-700 hover:text-emerald-900 hover:bg-emerald-100/70' : 'text-slate-400 hover:bg-slate-200/60 hover:text-slate-700'} transition cursor-pointer" title="Edit Endpoint">
               <i class="fa-solid fa-sliders text-[11px]"></i>
             </button>
           </div>
@@ -3894,28 +4000,28 @@ let currentCollection = "users";
 
         if (card) {
           card.className = isSelected
-            ? "group relative flex items-center rounded-2xl transition border bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold"
-            : "group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold";
+            ? "group relative flex items-center rounded-2xl transition border bg-emerald-50 text-emerald-900 border-emerald-300 shadow-2xs font-bold"
+            : "group relative flex items-center rounded-2xl transition border bg-white hover:bg-slate-100/80 text-slate-700 border-slate-100 font-semibold";
         }
         if (icon) {
           icon.className = isSelected
-            ? "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-white/20 text-white"
-            : "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700";
+            ? "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-100 text-emerald-700"
+            : "w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-slate-100 text-slate-500 group-hover:bg-slate-200/60";
         }
         if (sub) {
-          sub.className = isSelected ? "text-[10px] text-emerald-100" : "text-[10px] text-slate-400";
+          sub.className = isSelected ? "text-[10px] text-emerald-700/80 font-medium" : "text-[10px] text-slate-400";
         }
         if (badge) {
           badge.className = isSelected
-            ? "px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-white/20 text-white"
-            : "px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700";
+            ? "px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-100 text-emerald-900"
+            : "px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-slate-100 text-slate-500";
         }
 
         const btn = document.getElementById(`setTab_${t}`);
         if (btn) {
           btn.className = isSelected
-            ? "w-full text-left px-3 py-2 rounded-xl text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-2.5 transition shrink-0"
-            : "w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0";
+            ? "w-full text-left px-3 py-2 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-900 border border-emerald-300 shadow-2xs flex items-center space-x-2.5 transition shrink-0"
+            : "w-full text-left px-3 py-2 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-100/80 flex items-center space-x-2.5 transition shrink-0";
         }
       });
       if (tab === 'roles') renderRolesSettings();
@@ -3926,7 +4032,7 @@ let currentCollection = "users";
 
     function filterSettingsTabs() {
       const q = (document.getElementById('settingsSearchInput')?.value || '').toLowerCase().trim();
-      const tabs = ['app', 'roles', 'admins', 'backups', 'email'];
+      const tabs = ['app', 'roles', 'admins', 'backups', 'email', 'cron'];
       tabs.forEach(t => {
         const c = document.getElementById(`setTabContainer_${t}`);
         if (!c) return;
@@ -3972,19 +4078,40 @@ let currentCollection = "users";
           if (hb) hb.textContent = String(activeDbDriver).toUpperCase();
         }
         collections = data.item || data.items || [];
+        // Ensure 'users' table is ALWAYS at the very top, followed by other auth tables, then alphabetized
+        collections.sort((a, b) => {
+          if (a.name === 'users') return -1;
+          if (b.name === 'users') return 1;
+          if (a.type === 'auth' && b.type !== 'auth') return -1;
+          if (a.type !== 'auth' && b.type === 'auth') return 1;
+          return (a.name || '').localeCompare(b.name || '');
+        });
         window._resourceState = null;
         const countBadge = document.getElementById('sidebarColCountBadge');
         if (countBadge) countBadge.textContent = collections.length;
 
         renderCollectionsList();
 
-        const preferred = targetCol || sessionStorage.getItem('padi_active_col') || currentCollection;
+        const routeInfo = parseCurrentRoute();
+        const urlCol = (routeInfo.view === 'collections' && routeInfo.param) ? decodeURIComponent(routeInfo.param) : null;
+        let preferred = targetCol || urlCol;
+        if (!preferred) {
+          if (collections.some(c => c.name === 'users')) {
+            preferred = 'users';
+          } else {
+            preferred = sessionStorage.getItem('padi_active_col') || currentCollection;
+          }
+        }
         if (collections.some(c => c.name === preferred)) {
           currentCollection = preferred;
         } else if (collections.length > 0) {
           currentCollection = collections[0].name;
         }
-        selectCollection(currentCollection);
+        const isCollectionsView = routeInfo.view === 'collections';
+        selectCollection(currentCollection, {
+          skipRoutePush: !isCollectionsView,
+          replaceRoute: true
+        });
       } catch (err) {
         console.error("Failed to load collections:", err);
       }
@@ -3994,6 +4121,13 @@ let currentCollection = "users";
       const container = document.getElementById('collectionsList');
       const kw = (document.getElementById('collectionSearchInput')?.value || '').toLowerCase();
       const filtered = collections.filter(c => c.name.toLowerCase().includes(kw));
+      filtered.sort((a, b) => {
+        if (a.name === 'users') return -1;
+        if (b.name === 'users') return 1;
+        if (a.type === 'auth' && b.type !== 'auth') return -1;
+        if (a.type !== 'auth' && b.type === 'auth') return 1;
+        return (a.name || '').localeCompare(b.name || '');
+      });
 
       container.innerHTML = filtered.map(c => {
         const isActive = c.name === currentCollection;
@@ -4002,25 +4136,25 @@ let currentCollection = "users";
         const isRel = c.autoLoadRelations === true || c.auto_load_relations === true;
         const fieldCount = (c.schema || []).length;
         return `
-          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold' : 'bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold'}">
+          <div class="group relative flex items-center rounded-2xl transition border ${isActive ? 'bg-emerald-50 text-emerald-900 border-emerald-300 shadow-2xs font-bold' : 'bg-white hover:bg-slate-100/80 text-slate-700 border-slate-100 font-semibold'}">
             <button onclick="selectCollection('${c.name}')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0 cursor-pointer">
               <div class="flex items-center space-x-2.5 truncate">
-                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}">
+                <span class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500 group-hover:bg-slate-200/60'}">
                   <i class="fa-solid ${icon} text-[11px]"></i>
                 </span>
                 <div class="text-left truncate">
                   <div class="truncate font-mono">${c.name}</div>
-                  <div class="text-[10px] ${isActive ? 'text-emerald-100 font-medium' : 'text-slate-400'}">${c.type} &bull; ${fieldCount} columns</div>
+                  <div class="text-[10px] ${isActive ? 'text-emerald-700/80 font-medium' : 'text-slate-400'}">${c.type} &bull; ${fieldCount} columns</div>
                 </div>
               </div>
               <div class="flex items-center space-x-1 shrink-0 ml-1">
-                ${isRel ? `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-700'}" title="Auto Relations Active"><i class="fa-solid fa-link"></i></span>` : ''}
+                ${isRel ? `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-teal-50 text-teal-700'}" title="Auto Relations Active"><i class="fa-solid fa-link"></i></span>` : ''}
                 ${isRealtime
-                  ? `<span class="px-2 py-1 rounded-lg text-[10px] font-mono ${isActive ? 'bg-white/20 text-white' : 'bg-emerald-50 text-emerald-700'}" title="Realtime SSE Active"><i class="fa-solid fa-bolt"></i></span>`
-                  : `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-white/10 text-emerald-200' : 'bg-slate-100 text-slate-400'}" title="Realtime Inactive">off</span>`}
+                  ? `<span class="px-2 py-1 rounded-lg text-[10px] font-mono ${isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-50 text-emerald-700'}" title="Realtime SSE Active"><i class="fa-solid fa-bolt"></i></span>`
+                  : `<span class="px-1.5 py-0.5 rounded-md text-[9px] font-mono ${isActive ? 'bg-emerald-100/60 text-emerald-700' : 'bg-slate-100 text-slate-400'}" title="Realtime Inactive">off</span>`}
               </div>
             </button>
-            <button onclick="selectCollection('${c.name}'); switchWorkspaceSubView('settings');" class="p-2 mr-1 rounded-lg ${isActive ? 'text-white/80 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700'} transition cursor-pointer" title="Settings for table ${c.name}">
+            <button onclick="selectCollection('${c.name}'); switchWorkspaceSubView('settings');" class="p-2 mr-1 rounded-lg ${isActive ? 'text-emerald-700 hover:text-emerald-900 hover:bg-emerald-100/70' : 'text-slate-400 hover:bg-slate-200/60 hover:text-slate-700'} transition cursor-pointer" title="Settings for table ${c.name}">
               <i class="fa-solid fa-gear text-[11px]"></i>
             </button>
           </div>
@@ -4028,7 +4162,7 @@ let currentCollection = "users";
       }).join('');
     }
 
-    function selectCollection(name) {
+    function selectCollection(name, options = {}) {
       if (window.innerWidth < 1024) {
         toggleMobileSidebar(false);
       }
@@ -4039,6 +4173,10 @@ let currentCollection = "users";
       updateSelectAllCheckboxState();
       updateBulkDeleteBar();
       renderCollectionsList();
+
+      if (!options?.skipRoutePush) {
+        updateUrlRoute('collections', name, options?.replaceRoute);
+      }
 
       const col = collections.find(c => c.name === name);
       document.getElementById('currentCollectionTitle').textContent = name;
@@ -10121,6 +10259,7 @@ let currentCollection = "users";
 
     function selectStorageBucket(name) {
       storageCurrentPage = 1;
+      updateUrlRoute('storage', name);
       loadStorageData(name);
     }
 

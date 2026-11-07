@@ -19,7 +19,7 @@ pub async fn api_root(State(state): State<AppState>) -> impl IntoResponse {
             "tables": "/api/tables",
             "realtime_sse": "/api/realtime",
             "backups": "/api/backups",
-            "dashboard_ui": "/dashboard/"
+            "dashboard_ui": "/_padibase/"
         }
     }))
 }

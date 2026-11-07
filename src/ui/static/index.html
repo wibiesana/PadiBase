@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>PadiBase Studio — Minimalist Multi-DB BaaS Dashboard</title>
-  <link rel="icon" type="image/svg+xml" href="/dashboard/favicon.svg">
+  <link rel="icon" type="image/svg+xml" href="/_padibase/favicon.svg">
   <link rel="alternate icon" href="/favicon.ico">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <link rel="stylesheet" href="/dashboard/style.css?v=2">
+  <link rel="stylesheet" href="/_padibase/style.css?v=2">
 </head>
 <body class="bg-[#f8fafc] text-slate-800 h-screen overflow-hidden flex flex-col select-none">
 
@@ -23,7 +23,7 @@
       <div class="md:col-span-2 padi-gradient p-8 text-white flex flex-col justify-between relative overflow-hidden">
         <div class="relative z-10">
           <div class="inline-flex items-center space-x-2.5 bg-white/10 border border-white/15 px-3 py-1.5 rounded-full mb-6">
-            <img src="/dashboard/favicon.svg" alt="PadiBase" class="w-6 h-6 rounded-md shadow-xs">
+            <img src="/_padibase/favicon.svg" alt="PadiBase" class="w-6 h-6 rounded-md shadow-xs">
             <span class="text-xs font-extrabold tracking-wider uppercase text-amber-300">PadiBase Studio</span>
           </div>
           <h1 class="text-2xl font-extrabold tracking-tight leading-snug" id="authAppTitle">
@@ -127,8 +127,8 @@
       <div>
         <!-- Brand Header -->
         <div class="h-14 flex items-center px-3 md:px-5 border-b border-slate-800/80">
-          <a href="#/" onclick="switchMainView('collections'); return false;" class="flex items-center space-x-2.5 group">
-            <img src="/dashboard/favicon.svg" alt="PadiBase" class="w-8 h-8 rounded-lg shadow-sm group-hover:scale-105 transition shrink-0">
+          <a href="/_padibase/tables" onclick="switchMainView('collections'); return false;" class="flex items-center space-x-2.5 group">
+            <img src="/_padibase/favicon.svg" alt="PadiBase" class="w-8 h-8 rounded-lg shadow-sm group-hover:scale-105 transition shrink-0">
             <div class="hidden md:block">
               <div class="flex items-center space-x-1.5">
                 <span class="font-extrabold text-sm tracking-tight text-white" id="headerAppName">PadiBase</span>
@@ -241,15 +241,23 @@
           <!-- Sub-Sidebar Header -->
           <div class="p-3.5 border-b border-slate-200/80 bg-white">
             <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center space-x-1.5">
-                <span class="text-xs font-extrabold uppercase tracking-wider text-slate-700">Tables</span>
-                <span id="sidebarColCountBadge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full">0</span>
+              <div class="flex items-center space-x-2">
+                <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs shadow-2xs font-bold">
+                  <i class="fa-solid fa-table"></i>
+                </div>
+                <div>
+                  <div class="flex items-center space-x-1.5">
+                    <h3 class="text-xs font-extrabold uppercase tracking-wide text-slate-800">Tables</h3>
+                    <span id="sidebarColCountBadge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full">0</span>
+                  </div>
+                  <p class="text-[10px] text-slate-400">Database &amp; Collections</p>
+                </div>
               </div>
               <div class="flex items-center space-x-1">
-                <button onclick="syncDatabaseTables()" class="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 text-xs transition" title="Sync database tables">
+                <button onclick="syncDatabaseTables()" class="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 text-xs transition cursor-pointer" title="Sync database tables">
                   <i id="syncIcon" class="fa-solid fa-arrows-rotate text-[11px]"></i>
                 </button>
-                <button onclick="openCollectionDrawer(false)" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1 transition shadow-2xs" title="Create New Table">
+                <button onclick="openCollectionDrawer(false)" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1 transition shadow-2xs cursor-pointer" title="Create New Table">
                   <i class="fa-solid fa-plus text-[10px]"></i>
                   <span>New</span>
                 </button>
@@ -262,7 +270,7 @@
             <!-- Search Filter Table -->
             <div class="relative">
               <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs absolute left-2.5 top-2.5"></i>
-              <input type="text" id="collectionSearchInput" oninput="renderCollectionsList()" placeholder="Search tables..." class="w-full bg-slate-100 border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-slate-800 focus:bg-white transition">
+              <input type="text" id="collectionSearchInput" oninput="renderCollectionsList()" placeholder="Search tables..." class="w-full bg-slate-100 border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-500 focus:bg-white transition">
             </div>
           </div>
 
@@ -444,12 +452,23 @@
           <!-- Sub-Sidebar Header -->
           <div class="p-3.5 border-b border-slate-200/80 bg-white">
             <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center space-x-1.5">
-                <span class="text-xs font-extrabold uppercase tracking-wider text-slate-700">Endpoints</span>
-                <span id="customEpCountBadge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full">0</span>
+              <div class="flex items-center space-x-2">
+                <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs shadow-2xs font-bold">
+                  <i class="fa-solid fa-code"></i>
+                </div>
+                <div>
+                  <div class="flex items-center space-x-1.5">
+                    <h3 class="text-xs font-extrabold uppercase tracking-wide text-slate-800">Endpoints</h3>
+                    <span id="customEpCountBadge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full">0</span>
+                  </div>
+                  <p class="text-[10px] text-slate-400">Custom SQL &amp; API Routes</p>
+                </div>
               </div>
               <div class="flex items-center space-x-1">
-                <button type="button" onclick="startNewCustomEndpoint()" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1 transition shadow-2xs" title="Create New Custom API Endpoint">
+                <button type="button" onclick="loadCustomEndpoints()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer" title="Refresh Endpoints">
+                  <i class="fa-solid fa-rotate text-xs"></i>
+                </button>
+                <button type="button" onclick="startNewCustomEndpoint()" class="px-2.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center space-x-1 transition shadow-2xs cursor-pointer" title="Create New Custom API Endpoint">
                   <i class="fa-solid fa-plus text-[10px]"></i>
                   <span>New</span>
                 </button>
@@ -459,7 +478,7 @@
             <!-- Search Filter Endpoints -->
             <div class="relative">
               <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs absolute left-2.5 top-2.5"></i>
-              <input type="text" id="customEpSearchInput" oninput="renderCustomEndpointsList()" placeholder="Search endpoints..." class="w-full bg-slate-100 border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
+              <input type="text" id="customEpSearchInput" oninput="renderCustomEndpointsList()" placeholder="Search endpoints..." class="w-full bg-slate-100 border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-500 focus:bg-white transition">
             </div>
           </div>
 
@@ -848,13 +867,21 @@
           <!-- Sub-Sidebar Header -->
           <div class="p-3.5 border-b border-slate-200/80 bg-white">
             <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center space-x-1.5">
-                <span class="text-xs font-extrabold uppercase tracking-wider text-slate-700">Settings</span>
-                <span id="settingsCountBadge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-slate-200 text-slate-700 rounded-full">7</span>
+              <div class="flex items-center space-x-2">
+                <div class="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs shadow-2xs font-bold">
+                  <i class="fa-solid fa-sliders"></i>
+                </div>
+                <div>
+                  <div class="flex items-center space-x-1.5">
+                    <h3 class="text-xs font-extrabold uppercase tracking-wide text-slate-800">Settings</h3>
+                    <span id="settingsCountBadge" class="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-full">6</span>
+                  </div>
+                  <p class="text-[10px] text-slate-400">System &amp; Configuration</p>
+                </div>
               </div>
               <div class="flex items-center space-x-1">
-                <button onclick="syncDatabaseTables()" class="p-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 text-xs transition" title="Sync database tables">
-                  <i class="fa-solid fa-arrows-rotate text-[11px]"></i>
+                <button onclick="syncDatabaseTables()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition cursor-pointer" title="Sync database tables">
+                  <i class="fa-solid fa-arrows-rotate text-xs"></i>
                 </button>
               </div>
             </div>
@@ -862,35 +889,35 @@
             <!-- Search Filter Settings -->
             <div class="relative">
               <i class="fa-solid fa-magnifying-glass text-slate-400 text-xs absolute left-2.5 top-2.5"></i>
-              <input type="text" id="settingsSearchInput" oninput="filterSettingsTabs()" placeholder="Search settings..." class="w-full bg-slate-100 border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600 focus:bg-white transition">
+              <input type="text" id="settingsSearchInput" oninput="filterSettingsTabs()" placeholder="Search settings..." class="w-full bg-slate-100 border border-slate-200 rounded-lg pl-7 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-500 focus:bg-white transition">
             </div>
           </div>
 
           <!-- Settings Tabs List -->
           <nav id="settingsTabsNav" class="flex-1 overflow-y-auto p-2 space-y-1.5">
             <!-- 1. Application & DB -->
-            <div id="setTabContainer_app" class="group relative flex items-center rounded-2xl transition border bg-emerald-600 text-white border-emerald-600 shadow-sm font-bold">
-              <button type="button" onclick="switchSettingsTab('app')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+            <div id="setTabContainer_app" class="group relative flex items-center rounded-2xl transition border bg-emerald-50 text-emerald-900 border-emerald-300 shadow-2xs font-bold">
+              <button type="button" onclick="switchSettingsTab('app')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0 cursor-pointer">
                 <div class="flex items-center space-x-2.5 truncate">
-                  <span id="setTabIcon_app" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-white/20 text-white">
+                  <span id="setTabIcon_app" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-100 text-emerald-700">
                     <i class="fa-solid fa-server text-[11px]"></i>
                   </span>
                   <div class="text-left truncate">
                     <div id="setTabTitle_app" class="truncate font-mono">Application &amp; DB</div>
-                    <div id="setTabSub_app" class="text-[10px] text-emerald-100">engine &bull; tokens</div>
+                    <div id="setTabSub_app" class="text-[10px] text-emerald-700/80 font-medium">engine &bull; tokens</div>
                   </div>
                 </div>
                 <div class="flex items-center space-x-1 shrink-0 ml-1">
-                  <span id="setTabBadge_app" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-white/20 text-white">system</span>
+                  <span id="setTabBadge_app" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-100 text-emerald-900">system</span>
                 </div>
               </button>
             </div>
 
-            <!-- 3. Roles (RBAC) -->
-            <div id="setTabContainer_roles" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
-              <button type="button" onclick="switchSettingsTab('roles')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+            <!-- 2. Roles (RBAC) -->
+            <div id="setTabContainer_roles" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-slate-100/80 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('roles')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0 cursor-pointer">
                 <div class="flex items-center space-x-2.5 truncate">
-                  <span id="setTabIcon_roles" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                  <span id="setTabIcon_roles" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-slate-100 text-slate-500 group-hover:bg-slate-200/60">
                     <i class="fa-solid fa-shield-halved text-[11px]"></i>
                   </span>
                   <div class="text-left truncate">
@@ -899,16 +926,16 @@
                   </div>
                 </div>
                 <div class="flex items-center space-x-1 shrink-0 ml-1">
-                  <span id="setTabBadge_roles" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">security</span>
+                  <span id="setTabBadge_roles" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-slate-100 text-slate-500">security</span>
                 </div>
               </button>
             </div>
 
-            <!-- 4. Admin Accounts -->
-            <div id="setTabContainer_admins" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
-              <button type="button" onclick="switchSettingsTab('admins')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+            <!-- 3. Admin Accounts -->
+            <div id="setTabContainer_admins" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-slate-100/80 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('admins')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0 cursor-pointer">
                 <div class="flex items-center space-x-2.5 truncate">
-                  <span id="setTabIcon_admins" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                  <span id="setTabIcon_admins" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-slate-100 text-slate-500 group-hover:bg-slate-200/60">
                     <i class="fa-solid fa-user-shield text-[11px]"></i>
                   </span>
                   <div class="text-left truncate">
@@ -917,16 +944,16 @@
                   </div>
                 </div>
                 <div class="flex items-center space-x-1 shrink-0 ml-1">
-                  <span id="setTabBadge_admins" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">admins</span>
+                  <span id="setTabBadge_admins" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-slate-100 text-slate-500">admins</span>
                 </div>
               </button>
             </div>
 
-            <!-- 5. Backups & Restore -->
-            <div id="setTabContainer_backups" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
-              <button type="button" onclick="switchSettingsTab('backups')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+            <!-- 4. Backups & Restore -->
+            <div id="setTabContainer_backups" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-slate-100/80 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('backups')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0 cursor-pointer">
                 <div class="flex items-center space-x-2.5 truncate">
-                  <span id="setTabIcon_backups" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                  <span id="setTabIcon_backups" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-slate-100 text-slate-500 group-hover:bg-slate-200/60">
                     <i class="fa-solid fa-box-archive text-[11px]"></i>
                   </span>
                   <div class="text-left truncate">
@@ -935,16 +962,16 @@
                   </div>
                 </div>
                 <div class="flex items-center space-x-1 shrink-0 ml-1">
-                  <span id="setTabBadge_backups" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">unified</span>
+                  <span id="setTabBadge_backups" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-slate-100 text-slate-500">unified</span>
                 </div>
               </button>
             </div>
 
-            <!-- 6. Mail & SMTP Settings -->
-            <div id="setTabContainer_email" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
-              <button type="button" onclick="switchSettingsTab('email')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+            <!-- 5. Mail & SMTP Settings -->
+            <div id="setTabContainer_email" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-slate-100/80 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('email')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0 cursor-pointer">
                 <div class="flex items-center space-x-2.5 truncate">
-                  <span id="setTabIcon_email" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                  <span id="setTabIcon_email" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-slate-100 text-slate-500 group-hover:bg-slate-200/60">
                     <i class="fa-solid fa-envelope text-[11px]"></i>
                   </span>
                   <div class="text-left truncate">
@@ -953,16 +980,16 @@
                   </div>
                 </div>
                 <div class="flex items-center space-x-1 shrink-0 ml-1">
-                  <span id="setTabBadge_email" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">smtp</span>
+                  <span id="setTabBadge_email" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-slate-100 text-slate-500">smtp</span>
                 </div>
               </button>
             </div>
 
-            <!-- 7. Cron & Background Tasks -->
-            <div id="setTabContainer_cron" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-emerald-50/70 text-slate-700 border-slate-100 font-semibold">
-              <button type="button" onclick="switchSettingsTab('cron')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0">
+            <!-- 6. Cron & Background Tasks -->
+            <div id="setTabContainer_cron" class="group relative flex items-center rounded-2xl transition border bg-white hover:bg-slate-100/80 text-slate-700 border-slate-100 font-semibold">
+              <button type="button" onclick="switchSettingsTab('cron')" class="flex-1 flex items-center justify-between p-2.5 text-xs min-w-0 cursor-pointer">
                 <div class="flex items-center space-x-2.5 truncate">
-                  <span id="setTabIcon_cron" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50 text-emerald-700">
+                  <span id="setTabIcon_cron" class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0 bg-slate-100 text-slate-500 group-hover:bg-slate-200/60">
                     <i class="fa-solid fa-clock text-[11px]"></i>
                   </span>
                   <div class="text-left truncate">
@@ -971,7 +998,7 @@
                   </div>
                 </div>
                 <div class="flex items-center space-x-1 shrink-0 ml-1">
-                  <span id="setTabBadge_cron" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-emerald-50 text-emerald-700">cron</span>
+                  <span id="setTabBadge_cron" class="px-2 py-0.5 rounded-lg text-[9px] font-mono font-bold bg-slate-100 text-slate-500">cron</span>
                 </div>
               </button>
             </div>
@@ -3186,6 +3213,6 @@
     </div>
   </div>
 
-  <script src="/dashboard/app.js?v=48"></script>
+  <script src="/_padibase/app.js?v=48"></script>
 </body>
 </html>

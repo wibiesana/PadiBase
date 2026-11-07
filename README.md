@@ -19,7 +19,7 @@
 - **💾 Full System Backup & Restore**:
   Snapshot database SQLite atomik secara online via WAL checkpoint & `VACUUM INTO`. Mendukung unduh backup, restore, dan hapus snapshot.
 - **💻 Embedded Admin Dashboard**:
-  Dashboard web yang modern dan responsif ter-embed langsung di dalam binary via `rust-embed` dan dapat diakses di `/dashboard/`.
+  Dashboard web yang modern dan responsif ter-embed langsung di dalam binary via `rust-embed` dan dapat diakses di `/_padibase/` (mendukung SPA routes seperti `/_padibase/tables` dan `/_padibase/monitor`).
 - **📁 File Storage System & Supabase-Style Storage Explorer**:
   Manajemen penyimpanan media & attachments dengan proteksi directory traversal, pembersihan otomatis, serta menu dashboard **Storage** interaktif (Buckets, File Explorer, Upload Modal, Preview Lightbox, 1-Click Copy URL).
 - **🛠️ Visual SQL Query Builder & Advanced Aggregation**:
@@ -92,7 +92,7 @@ DB_USERNAME=root
 DB_PASSWORD=secret
 ```
 Akses di browser:
-- **Admin Dashboard**: [http://127.0.0.1:8085/dashboard/](http://127.0.0.1:8085/dashboard/)
+- **Admin Dashboard**: [http://127.0.0.1:8085/_padibase/](http://127.0.0.1:8085/_padibase/)
 - **REST API**: [http://127.0.0.1:8085/api/](http://127.0.0.1:8085/api/)
 
 ### 2. Membuat Akun Admin via CLI

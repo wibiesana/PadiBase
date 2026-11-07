@@ -3,6 +3,7 @@ use axum::{
     extract::{DefaultBodyLimit, Path},
     http::{header, HeaderMap, Response, StatusCode},
     middleware,
+    response::Redirect,
     routing::{any, delete, get, patch, post, put},
     Router,
 };
@@ -563,19 +564,34 @@ pub fn create_router(state: AppState) -> Router {
             get(backups::download_backup).delete(backups::delete_backup),
         )
         .route("/api/backups/{filename}/restore", post(backups::restore_backup))
-        // Admin UI Dashboard
+        // Admin UI Dashboard (_padibase)
+        .route(
+            "/_padibase",
+            get(|| async { Redirect::permanent("/_padibase/") }),
+        )
+        .route(
+            "/_padibase/",
+            get(|h: HeaderMap| async move { serve_admin_ui(h, Path(Some("index.html".to_string()))).await }),
+        )
+        .route(
+            "/_padibase/{*path}",
+            get(|h: HeaderMap, Path(path): Path<String>| async move {
+                serve_admin_ui(h, Path(Some(path))).await
+            }),
+        )
+        // Backwards compatibility: redirect legacy /dashboard to /_padibase/
         .route(
             "/dashboard",
-            get(|h: HeaderMap| async move { serve_admin_ui(h, Path(Some("index.html".to_string()))).await }),
+            get(|| async { Redirect::permanent("/_padibase/") }),
         )
         .route(
             "/dashboard/",
-            get(|h: HeaderMap| async move { serve_admin_ui(h, Path(Some("index.html".to_string()))).await }),
+            get(|| async { Redirect::permanent("/_padibase/") }),
         )
         .route(
             "/dashboard/{*path}",
-            get(|h: HeaderMap, Path(path): Path<String>| async move {
-                serve_admin_ui(h, Path(Some(path))).await
+            get(|Path(path): Path<String>| async move {
+                Redirect::permanent(&format!("/_padibase/{}", path))
             }),
         )
         .route(
@@ -588,7 +604,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route(
             "/",
-            get(|h: HeaderMap| async move { serve_admin_ui(h, Path(Some("index.html".to_string()))).await }),
+            get(|| async { Redirect::temporary("/_padibase/") }),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),

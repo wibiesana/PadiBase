@@ -326,6 +326,7 @@ pub async fn padi_response_middleware(
 ) -> Response {
     let path = req.uri().path();
     if path == "/"
+        || path.starts_with("/_padibase")
         || path.starts_with("/dashboard")
         || path.contains("api-collection")
         || path.ends_with(".js")

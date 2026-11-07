@@ -1617,7 +1617,24 @@ pub async fn list_collections(pool: &DbPool) -> Result<Vec<Collection>> {
         )
         .await?;
 
-    let list: Vec<Collection> = rows.iter().map(value_to_collection).collect();
+    let mut list: Vec<Collection> = rows.iter().map(value_to_collection).collect();
+    list.sort_by(|a, b| {
+        if a.name == "users" {
+            std::cmp::Ordering::Less
+        } else if b.name == "users" {
+            std::cmp::Ordering::Greater
+        } else if a.collection_type == crate::core::schema::CollectionType::Auth
+            && b.collection_type != crate::core::schema::CollectionType::Auth
+        {
+            std::cmp::Ordering::Less
+        } else if a.collection_type != crate::core::schema::CollectionType::Auth
+            && b.collection_type == crate::core::schema::CollectionType::Auth
+        {
+            std::cmp::Ordering::Greater
+        } else {
+            a.name.cmp(&b.name)
+        }
+    });
     // Cache all collections in tenant memory
     if let Ok(mut cache) = pool.cache.collections.write() {
         for col in &list {
@@ -3004,6 +3021,7 @@ pub fn match_override_endpoint(
 
     // Never override core admin/endpoint management routes so the Dashboard cannot be locked out
     if lower.is_empty()
+        || lower.starts_with("_padibase")
         || lower.starts_with("dashboard")
         || lower.starts_with("api/endpoints")
         || lower.starts_with("api/admins")
