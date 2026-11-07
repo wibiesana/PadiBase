@@ -540,7 +540,9 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/e/{*path}", any(custom::execute_dynamic_endpoint))
         // Realtime SSE
         .route("/api/realtime", get(realtime::realtime_sse))
-        // File upload, download & management
+        // File upload, download & storage explorer (Supabase style)
+        .route("/api/storage", get(files::list_storage))
+        .route("/api/storage/files", get(files::list_storage))
         .route(
             "/api/files/{collection}/{record_id}",
             post(files::upload_file),

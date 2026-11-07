@@ -815,7 +815,7 @@ let currentCollection = "users";
       if (view !== 'collections' && window.innerWidth < 1024) {
         toggleMobileSidebar(false);
       }
-      const views = ['collections', 'endpoints', 'logs', 'settings', 'sqlbuilder'];
+      const views = ['collections', 'endpoints', 'logs', 'settings', 'sqlbuilder', 'storage'];
       views.forEach(v => {
         const el = document.getElementById(`${v}View`);
         if (el) el.classList.toggle('hidden', v !== view);
@@ -842,6 +842,8 @@ let currentCollection = "users";
         loadCronJobs();
       } else if (view === 'sqlbuilder') {
         initQueryBuilder();
+      } else if (view === 'storage') {
+        loadStorageData(options.bucket);
       } else if (view === 'logs') {
         updateRealtimeTableOptions();
         if (!sseSource || sseSource.readyState === EventSource.CLOSED) {
@@ -9979,6 +9981,922 @@ let currentCollection = "users";
       updateCronSchedulePreview();
     }
 
+    // =========================================================================
+    // STORAGE & MEDIA ASSETS EXPLORER (SUPABASE STYLE)
+    // =========================================================================
+    let storageBuckets = [];
+    let storageFiles = [];
+    let currentStorageBucket = '';
+    let currentStorageViewMode = 'table';
+    let selectedStorageUploadFile = null;
+
+    function formatBytes(bytes, decimals = 1) {
+      if (!bytes || bytes === 0) return '0 B';
+      const k = 1024;
+      const dm = decimals < 0 ? 0 : decimals;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    function getStorageFileIcon(mime = '', name = '') {
+      const m = mime.toLowerCase();
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      if (m.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) {
+        return 'fa-regular fa-image text-emerald-500';
+      }
+      if (m.includes('pdf') || ext === 'pdf') {
+        return 'fa-regular fa-file-pdf text-rose-500';
+      }
+      if (m.startsWith('audio/') || ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'].includes(ext)) {
+        return 'fa-regular fa-file-audio text-amber-500';
+      }
+      if (m.startsWith('video/') || ['mp4', 'webm', 'mov', 'mkv', 'avi'].includes(ext)) {
+        return 'fa-regular fa-file-video text-purple-500';
+      }
+      if (m.includes('json') || m.includes('xml') || m.includes('javascript') || ['json', 'js', 'ts', 'html', 'css', 'rs', 'py', 'php', 'sql'].includes(ext)) {
+        return 'fa-regular fa-file-code text-cyan-500';
+      }
+      if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext) || m.includes('zip') || m.includes('compressed')) {
+        return 'fa-regular fa-file-zipper text-orange-500';
+      }
+      return 'fa-regular fa-file text-slate-400';
+    }
+
+    async function loadStorageData(targetBucket) {
+      if (targetBucket !== undefined) {
+        currentStorageBucket = targetBucket || '';
+      }
+      const titleEl = document.getElementById('storageCurrentBucketTitle');
+      if (titleEl) {
+        titleEl.textContent = currentStorageBucket || 'All Buckets';
+      }
+
+      const q = currentStorageBucket ? `?collection=${encodeURIComponent(currentStorageBucket)}` : '';
+      try {
+        console.log('[Storage] Fetching /api/storage' + q);
+        const res = await fetch(`/api/storage${q}`);
+        console.log('[Storage] Response status:', res.status);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          console.error('[Storage] Error response:', errData);
+          showToast(errData.message || 'Failed to load storage assets.', 'error');
+          return;
+        }
+        const raw = await res.json();
+        const data = (raw && typeof raw === 'object' && raw.item && typeof raw.item === 'object' && !Array.isArray(raw.item))
+          ? raw.item
+          : ((raw && typeof raw === 'object' && raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data)) ? raw.data : raw);
+        console.log('[Storage] Data received:', data);
+        storageBuckets = data.buckets || [];
+        storageFiles = data.files || [];
+
+        // Update sidebar metrics
+        const sizeBadge = document.getElementById('storageTotalBytesBadge');
+        if (sizeBadge) sizeBadge.textContent = formatBytes(data.total_bytes || 0);
+
+        const filesBadge = document.getElementById('storageTotalFilesCount');
+        if (filesBadge) filesBadge.textContent = (data.total_files || 0).toLocaleString();
+
+        const bucketsBadge = document.getElementById('storageTotalBucketsCount');
+        if (bucketsBadge) bucketsBadge.textContent = storageBuckets.length;
+
+        renderStorageBucketsList();
+        filterStorageFiles();
+      } catch (err) {
+        console.error('Failed to load storage data:', err);
+        showToast('Failed to load storage assets.', 'error');
+      }
+    }
+
+    function renderStorageBucketsList() {
+      const container = document.getElementById('storageBucketsList');
+      if (!container) return;
+
+      const searchInput = document.getElementById('storageBucketSearch');
+      const q = searchInput ? searchInput.value.trim().toLowerCase() : '';
+
+      // All Buckets item
+      let html = `
+        <button type="button" onclick="selectStorageBucket('')" class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition ${currentStorageBucket === '' ? 'bg-emerald-50 text-emerald-900 border border-emerald-300 shadow-2xs' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}">
+          <div class="flex items-center space-x-2 truncate">
+            <i class="fa-solid fa-layer-group ${currentStorageBucket === '' ? 'text-emerald-600' : 'text-slate-400'} text-xs"></i>
+            <span class="truncate">All Buckets</span>
+          </div>
+          <span class="text-[10px] font-mono px-2 py-0.5 rounded-full ${currentStorageBucket === '' ? 'bg-emerald-100 text-emerald-900 font-extrabold' : 'bg-slate-200/70 text-slate-600'}">
+            ${storageBuckets.reduce((acc, b) => acc + (b.file_count || 0), 0)}
+          </span>
+        </button>
+      `;
+
+      const filtered = storageBuckets.filter(b => !q || (b.name || '').toLowerCase().includes(q));
+
+      if (filtered.length === 0 && q) {
+        html += `<div class="py-4 text-center text-xs text-slate-400">No buckets match "${q}"</div>`;
+      } else {
+        filtered.forEach(b => {
+          const isActive = currentStorageBucket.toLowerCase() === (b.name || '').toLowerCase();
+          html += `
+            <button type="button" onclick="selectStorageBucket('${b.name}')" class="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-semibold transition ${isActive ? 'bg-emerald-50 text-emerald-900 border border-emerald-300 shadow-2xs font-bold' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'}">
+              <div class="flex items-center space-x-2 truncate">
+                <i class="fa-solid fa-box-archive ${isActive ? 'text-emerald-600' : 'text-slate-400'} text-xs"></i>
+                <span class="truncate font-mono">${b.name}</span>
+              </div>
+              <div class="flex items-center space-x-1.5 shrink-0">
+                <span class="text-[9px] text-slate-400 font-mono">${formatBytes(b.total_bytes || 0)}</span>
+                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded-md ${isActive ? 'bg-emerald-100 text-emerald-900 font-extrabold' : 'bg-slate-200/70 text-slate-600'}">
+                  ${b.file_count || 0}
+                </span>
+              </div>
+            </button>
+          `;
+        });
+      }
+
+      container.innerHTML = html;
+    }
+
+    let storageCurrentPage = 1;
+    let storagePerPage = 24;
+
+    function selectStorageBucket(name) {
+      storageCurrentPage = 1;
+      loadStorageData(name);
+    }
+
+    function changeStoragePage(delta) {
+      storageCurrentPage = Math.max(1, storageCurrentPage + delta);
+      filterStorageFiles(false);
+    }
+
+    function changeStoragePerPage(val) {
+      storagePerPage = parseInt(val, 10) || 24;
+      storageCurrentPage = 1;
+      filterStorageFiles(false);
+    }
+
+    function filterStorageFiles(resetPage = true) {
+      if (resetPage) storageCurrentPage = 1;
+      const searchInput = document.getElementById('storageFileSearch');
+      const q = searchInput ? searchInput.value.trim().toLowerCase() : '';
+
+      const typeFilter = document.getElementById('storageTypeFilter');
+      const typeVal = typeFilter ? typeFilter.value : 'all';
+
+      const filtered = storageFiles.filter(f => {
+        if (q) {
+          const matchName = (f.name || '').toLowerCase().includes(q);
+          const matchCol = (f.collection || '').toLowerCase().includes(q);
+          const matchRec = (f.record_id || '').toLowerCase().includes(q);
+          if (!matchName && !matchCol && !matchRec) return false;
+        }
+
+        if (typeVal !== 'all') {
+          const m = (f.mime || '').toLowerCase();
+          const ext = (f.name.split('.').pop() || '').toLowerCase();
+          if (typeVal === 'image' && !m.startsWith('image/') && !['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) {
+            return false;
+          }
+          if (typeVal === 'pdf' && !m.includes('pdf') && ext !== 'pdf') {
+            return false;
+          }
+          if (typeVal === 'media' && !m.startsWith('audio/') && !m.startsWith('video/')) {
+            return false;
+          }
+          if (typeVal === 'other') {
+            if (m.startsWith('image/') || m.includes('pdf') || m.startsWith('audio/') || m.startsWith('video/')) {
+              return false;
+            }
+          }
+        }
+
+        return true;
+      });
+
+      const badge = document.getElementById('storageBucketBadge');
+      if (badge) badge.textContent = `${filtered.length.toLocaleString()} file(s)`;
+
+      const emptyEl = document.getElementById('storageEmptyState');
+      const tableWrapper = document.getElementById('storageTableView');
+      const gridWrapper = document.getElementById('storageGridView');
+      const pagBar = document.getElementById('storagePaginationBar');
+
+      if (filtered.length === 0) {
+        if (emptyEl) emptyEl.classList.remove('hidden');
+        if (tableWrapper) tableWrapper.classList.add('hidden');
+        if (gridWrapper) gridWrapper.classList.add('hidden');
+        if (pagBar) pagBar.classList.add('hidden');
+        return;
+      }
+
+      if (emptyEl) emptyEl.classList.add('hidden');
+
+      const totalItems = filtered.length;
+      const totalPages = Math.max(1, Math.ceil(totalItems / storagePerPage));
+      if (storageCurrentPage > totalPages) storageCurrentPage = totalPages;
+
+      const startIdx = (storageCurrentPage - 1) * storagePerPage;
+      const endIdx = Math.min(startIdx + storagePerPage, totalItems);
+      const pageItems = filtered.slice(startIdx, endIdx);
+
+      if (pagBar) {
+        pagBar.classList.remove('hidden');
+        const summaryEl = document.getElementById('storagePaginationSummary');
+        if (summaryEl) {
+          summaryEl.textContent = `Showing ${(startIdx + 1).toLocaleString()}–${endIdx.toLocaleString()} of ${totalItems.toLocaleString()} file(s)`;
+        }
+        const pageInd = document.getElementById('storagePageIndicator');
+        if (pageInd) {
+          pageInd.textContent = `Page ${storageCurrentPage.toLocaleString()} / ${totalPages.toLocaleString()}`;
+        }
+        const prevBtn = document.getElementById('storagePrevPageBtn');
+        if (prevBtn) prevBtn.disabled = storageCurrentPage <= 1;
+        const nextBtn = document.getElementById('storageNextPageBtn');
+        if (nextBtn) nextBtn.disabled = storageCurrentPage >= totalPages;
+      }
+
+      if (currentStorageViewMode === 'table') {
+        if (tableWrapper) tableWrapper.classList.remove('hidden');
+        if (gridWrapper) gridWrapper.classList.add('hidden');
+        renderStorageTable(pageItems);
+      } else {
+        if (tableWrapper) tableWrapper.classList.add('hidden');
+        if (gridWrapper) gridWrapper.classList.remove('hidden');
+        renderStorageGrid(pageItems);
+      }
+    }
+
+    function setStorageViewMode(mode) {
+      currentStorageViewMode = mode;
+      const tableBtn = document.getElementById('storageViewModeTable');
+      const gridBtn = document.getElementById('storageViewModeGrid');
+
+      if (mode === 'table') {
+        if (tableBtn) tableBtn.className = "px-2.5 py-1 rounded-lg text-xs font-bold transition bg-white text-slate-800 shadow-2xs";
+        if (gridBtn) gridBtn.className = "px-2.5 py-1 rounded-lg text-xs font-bold transition text-slate-500 hover:text-slate-800";
+      } else {
+        if (gridBtn) gridBtn.className = "px-2.5 py-1 rounded-lg text-xs font-bold transition bg-white text-slate-800 shadow-2xs";
+        if (tableBtn) tableBtn.className = "px-2.5 py-1 rounded-lg text-xs font-bold transition text-slate-500 hover:text-slate-800";
+      }
+
+      filterStorageFiles();
+    }
+
+    function renderStorageTable(files) {
+      const tbody = document.getElementById('storageTableBody');
+      if (!tbody) return;
+
+      const tokenQs = fileTokenQuery();
+      tbody.innerHTML = files.map(f => {
+        const isImg = (f.mime || '').startsWith('image/');
+        const iconClass = getStorageFileIcon(f.mime, f.name);
+        const modDate = f.modified_at ? new Date(f.modified_at).toLocaleString() : '-';
+        const authUrl = f.url + tokenQs;
+        const downloadUrl = f.url + (tokenQs ? tokenQs + '&download=1' : '?download=1');
+
+        return `
+          <tr class="hover:bg-slate-50/80 transition">
+            <td class="py-2 px-3 text-center">
+              ${isImg ? `
+                <div onclick="openImageLightbox('${authUrl}', '${f.name}')" class="w-8 h-8 rounded-lg overflow-hidden border border-slate-200 bg-slate-100 flex items-center justify-center cursor-pointer shadow-2xs mx-auto hover:opacity-80 transition" title="Click to view full lightbox">
+                  <img src="${authUrl}" alt="${f.name}" class="w-full h-full object-cover">
+                </div>
+              ` : `
+                <div class="w-8 h-8 rounded-lg border border-slate-200 bg-slate-50 flex items-center justify-center mx-auto text-sm">
+                  <i class="${iconClass}"></i>
+                </div>
+              `}
+            </td>
+            <td class="py-2.5 px-3 min-w-[160px]">
+              <div class="font-mono font-bold text-slate-800 truncate max-w-xs" title="${f.name}">${f.name}</div>
+            </td>
+            <td class="py-2.5 px-3 font-mono text-[11px]">
+              <span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
+                ${f.collection}
+              </span>
+            </td>
+            <td class="py-2.5 px-3 font-mono text-slate-600 text-[11px]">
+              <span class="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200">${f.record_id}</span>
+            </td>
+            <td class="py-2.5 px-3 font-mono text-slate-700 text-[11px] whitespace-nowrap">
+              ${formatBytes(f.size || 0)}
+            </td>
+            <td class="py-2.5 px-3 font-mono text-slate-500 text-[10px] whitespace-nowrap">
+              <span class="px-1.5 py-0.5 rounded bg-slate-50 border border-slate-200">${f.mime || 'application/octet-stream'}</span>
+            </td>
+            <td class="py-2.5 px-3 text-slate-400 text-[11px] whitespace-nowrap">
+              ${modDate}
+            </td>
+            <td class="py-2 px-3 text-right whitespace-nowrap">
+              <div class="inline-flex items-center space-x-1">
+                <button type="button" onclick="previewStorageFile('${authUrl}', '${f.name}', '${f.mime}')" class="p-1.5 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition" title="Preview Asset">
+                  <i class="fa-regular fa-eye"></i>
+                </button>
+                <button type="button" onclick="copyStorageFileUrl('${f.url}')" class="p-1.5 rounded-lg text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 transition" title="Copy Public File URL">
+                  <i class="fa-regular fa-copy"></i>
+                </button>
+                <a href="${downloadUrl}" download="${f.name}" class="p-1.5 rounded-lg text-slate-400 hover:text-indigo-700 hover:bg-indigo-50 transition inline-block" title="Download File">
+                  <i class="fa-solid fa-download"></i>
+                </a>
+                <button type="button" onclick="deleteStorageFile('${f.collection}', '${f.record_id}', '${f.name}')" class="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition" title="Delete File">
+                  <i class="fa-solid fa-trash-can text-rose-500"></i>
+                </button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function renderStorageGrid(files) {
+      const container = document.getElementById('storageGridView');
+      if (!container) return;
+
+      const tokenQs = fileTokenQuery();
+      container.innerHTML = files.map(f => {
+        const isImg = (f.mime || '').startsWith('image/');
+        const iconClass = getStorageFileIcon(f.mime, f.name);
+        const authUrl = f.url + tokenQs;
+        const downloadUrl = f.url + (tokenQs ? tokenQs + '&download=1' : '?download=1');
+
+        return `
+          <div class="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs hover:shadow-md transition flex flex-col group">
+            <div class="h-28 bg-slate-100 flex items-center justify-center relative overflow-hidden">
+              ${isImg ? `
+                <img src="${authUrl}" alt="${f.name}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300 cursor-pointer" onclick="openImageLightbox('${authUrl}', '${f.name}')">
+              ` : `
+                <i class="${iconClass} text-3xl"></i>
+              `}
+              <span class="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded bg-slate-900/70 text-white font-mono text-[9px] backdrop-blur-xs">
+                ${formatBytes(f.size || 0)}
+              </span>
+            </div>
+            <div class="p-2.5 flex-1 flex flex-col justify-between space-y-1.5">
+              <div>
+                <div class="font-mono text-xs font-bold text-slate-800 truncate" title="${f.name}">${f.name}</div>
+                <div class="flex items-center space-x-1 text-[10px] text-slate-400 font-mono mt-0.5">
+                  <span class="truncate">${f.collection}</span>
+                  <span>&bull;</span>
+                  <span class="truncate">${f.record_id}</span>
+                </div>
+              </div>
+              <div class="pt-1.5 border-t border-slate-100 flex items-center justify-between">
+                <button type="button" onclick="previewStorageFile('${authUrl}', '${f.name}', '${f.mime}')" class="text-xs text-slate-400 hover:text-emerald-700" title="Preview">
+                  <i class="fa-regular fa-eye"></i>
+                </button>
+                <button type="button" onclick="copyStorageFileUrl('${f.url}')" class="text-xs text-slate-400 hover:text-emerald-700" title="Copy URL">
+                  <i class="fa-regular fa-copy"></i>
+                </button>
+                <a href="${downloadUrl}" download="${f.name}" class="text-xs text-slate-400 hover:text-indigo-700" title="Download">
+                  <i class="fa-solid fa-download"></i>
+                </a>
+                <button type="button" onclick="deleteStorageFile('${f.collection}', '${f.record_id}', '${f.name}')" class="text-xs text-slate-400 hover:text-rose-600" title="Delete">
+                  <i class="fa-solid fa-trash-can"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function previewStorageFile(url, filename, mime) {
+      if ((mime || '').startsWith('image/')) {
+        openImageLightbox(url, filename);
+      } else {
+        window.open(url, '_blank');
+      }
+    }
+
+    function copyStorageFileUrl(url) {
+      const fullUrl = window.location.origin + url;
+      navigator.clipboard.writeText(fullUrl).then(() => {
+        showToast('Direct file URL copied to clipboard!', 'success');
+      }).catch(() => {
+        showToast(fullUrl, 'info');
+      });
+    }
+
+    async function deleteStorageFile(colName, recId, fileName) {
+      const confirmed = await showConfirm({
+        title: 'Delete Storage File',
+        message: `Are you sure you want to permanently delete <strong>"${escapeHtml(fileName)}"</strong> from bucket <strong>"${escapeHtml(colName)}"</strong>? This action cannot be undone.`,
+        confirmText: 'Delete File',
+        type: 'danger'
+      });
+      if (!confirmed) return;
+
+      try {
+        const res = await fetch(`/api/files/${encodeURIComponent(colName)}/${encodeURIComponent(recId)}/${encodeURIComponent(fileName)}`, {
+          method: 'DELETE'
+        });
+        if (res.ok) {
+          showToast(`File '${fileName}' deleted successfully.`, 'success');
+          loadStorageData(currentStorageBucket);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showToast(err.message || 'Failed to delete file.', 'error');
+        }
+      } catch (e) {
+        showToast('Network error while deleting file.', 'error');
+      }
+    }
+
+    // Modal Upload handlers & Record Picker / New Record Schema Builder
+    let storageCandidateRecords = [];
+    let storageRecPickerPage = 1;
+    let storageRecPickerTotalPages = 1;
+    let storageRecPickerTotalItems = 0;
+    const STORAGE_REC_PICKER_PER_PAGE = 20;
+    let storageShowOptionalNewFields = false;
+    let storageSearchDebounceTimer = null;
+
+    function openStorageUploadModal() {
+      const modal = document.getElementById('storageUploadModal');
+      if (!modal) return;
+
+      const bucketSelect = document.getElementById('storageUploadBucketSelect');
+      if (bucketSelect) {
+        // Prefer collections that have at least one file column, but list all collections
+        const sortedCols = [...collections].sort((a, b) => {
+          const aHasFile = Array.isArray(a.schema) && a.schema.some(f => f.type === 'file');
+          const bHasFile = Array.isArray(b.schema) && b.schema.some(f => f.type === 'file');
+          if (aHasFile && !bHasFile) return -1;
+          if (!aHasFile && bHasFile) return 1;
+          return a.name.localeCompare(b.name);
+        });
+        bucketSelect.innerHTML = sortedCols.map(c => {
+          const hasFile = Array.isArray(c.schema) && c.schema.some(f => f.type === 'file');
+          return `<option value="${c.name}" ${currentStorageBucket === c.name ? 'selected' : ''}>${c.name}${hasFile ? '' : ' (no file col)'}</option>`;
+        }).join('');
+      }
+
+      const searchInput = document.getElementById('storageRecordSearchInput');
+      if (searchInput) searchInput.value = '';
+      const recIdInput = document.getElementById('storageUploadRecordIdInput');
+      if (recIdInput) recIdInput.value = '';
+
+      storageRecPickerPage = 1;
+      storageShowOptionalNewFields = false;
+      onStorageUploadBucketChanged();
+      clearStorageSelectedFile();
+      modal.classList.remove('hidden');
+    }
+
+    function closeStorageUploadModal() {
+      const modal = document.getElementById('storageUploadModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function onStorageUploadBucketChanged() {
+      const bucketSelect = document.getElementById('storageUploadBucketSelect');
+      const fieldSelect = document.getElementById('storageUploadFieldSelect');
+      if (!bucketSelect || !fieldSelect) return;
+
+      const colName = bucketSelect.value;
+      const col = collections.find(c => c.name === colName);
+      const fileFields = (col && Array.isArray(col.schema))
+        ? col.schema.filter(f => f.type === 'file')
+        : [];
+
+      if (fileFields.length > 0) {
+        fieldSelect.innerHTML = fileFields.map(f => `<option value="${f.name}">${f.name}${f.required ? ' *' : ''}</option>`).join('');
+      } else {
+        fieldSelect.innerHTML = `<option value="file">file (auto)</option>`;
+      }
+
+      const recIdInput = document.getElementById('storageUploadRecordIdInput');
+      if (recIdInput) recIdInput.value = '';
+      const searchInput = document.getElementById('storageRecordSearchInput');
+      if (searchInput) searchInput.value = '';
+
+      storageRecPickerPage = 1;
+      loadStorageCandidateRecords(colName, 1, '');
+      renderStorageNewRecordFields(col);
+    }
+
+    function changeStorageRecordPickerPage(delta) {
+      const bucketSelect = document.getElementById('storageUploadBucketSelect');
+      const colName = bucketSelect ? bucketSelect.value : '';
+      if (!colName) return;
+      const nextPage = Math.max(1, Math.min(storageRecPickerTotalPages, storageRecPickerPage + delta));
+      if (nextPage === storageRecPickerPage) return;
+      storageRecPickerPage = nextPage;
+      const searchInput = document.getElementById('storageRecordSearchInput');
+      const q = searchInput ? searchInput.value.trim() : '';
+      loadStorageCandidateRecords(colName, storageRecPickerPage, q);
+    }
+
+    async function loadStorageCandidateRecords(colName, page = 1, searchQuery = '') {
+      const listEl = document.getElementById('storageRecordPickerList');
+      const countEl = document.getElementById('storageRecordPickerCount');
+      const pageLabelEl = document.getElementById('storageRecPickerPageLabel');
+      const prevBtn = document.getElementById('storageRecPickerPrevBtn');
+      const nextBtn = document.getElementById('storageRecPickerNextBtn');
+      if (!colName) return;
+
+      if (listEl) {
+        listEl.innerHTML = `<div class="p-3 text-center text-slate-400 text-[11px]"><i class="fa-solid fa-circle-notch fa-spin mr-1.5 text-emerald-600"></i>Loading page ${page} from <b>${escapeHtml(colName)}</b>...</div>`;
+      }
+
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          perPage: String(STORAGE_REC_PICKER_PER_PAGE),
+        });
+        if (searchQuery) {
+          params.set('search', searchQuery);
+        }
+
+        const res = await fetch(`/api/${encodeURIComponent(colName)}?${params.toString()}`);
+        if (!res.ok) {
+          storageCandidateRecords = [];
+          storageRecPickerTotalItems = 0;
+          storageRecPickerTotalPages = 1;
+          renderStorageCandidateRecords();
+          return;
+        }
+        const raw = await res.json();
+        const items = Array.isArray(raw.item)
+          ? raw.item
+          : (Array.isArray(raw.items) ? raw.items : (raw.item && Array.isArray(raw.item.items) ? raw.item.items : []));
+        storageCandidateRecords = items;
+
+        const total = raw.meta?.total ?? raw.totalItems ?? raw.item?.totalItems ?? items.length;
+        const lastPage = raw.meta?.last_page ?? raw.totalPages ?? raw.item?.totalPages ?? Math.max(1, Math.ceil(total / STORAGE_REC_PICKER_PER_PAGE));
+
+        storageRecPickerTotalItems = Number(total) || items.length;
+        storageRecPickerTotalPages = Math.max(1, Number(lastPage) || 1);
+        storageRecPickerPage = Math.min(page, storageRecPickerTotalPages);
+
+        if (countEl) {
+          countEl.textContent = `${storageRecPickerTotalItems.toLocaleString()} total record(s)`;
+        }
+        if (pageLabelEl) {
+          pageLabelEl.textContent = `${storageRecPickerPage.toLocaleString()} / ${storageRecPickerTotalPages.toLocaleString()}`;
+        }
+        if (prevBtn) prevBtn.disabled = storageRecPickerPage <= 1;
+        if (nextBtn) nextBtn.disabled = storageRecPickerPage >= storageRecPickerTotalPages;
+
+        renderStorageCandidateRecords();
+      } catch (e) {
+        storageCandidateRecords = [];
+        storageRecPickerTotalItems = 0;
+        storageRecPickerTotalPages = 1;
+        renderStorageCandidateRecords();
+      }
+    }
+
+    function onStorageRecordSearchInput() {
+      if (storageSearchDebounceTimer) clearTimeout(storageSearchDebounceTimer);
+      storageSearchDebounceTimer = setTimeout(() => {
+        const bucketSelect = document.getElementById('storageUploadBucketSelect');
+        const colName = bucketSelect ? bucketSelect.value : '';
+        const searchInput = document.getElementById('storageRecordSearchInput');
+        const q = searchInput ? searchInput.value.trim() : '';
+        storageRecPickerPage = 1;
+        loadStorageCandidateRecords(colName, 1, q);
+      }, 250);
+    }
+
+    function getRecordReadableSummary(rec, fileFieldName) {
+      if (!rec || typeof rec !== 'object') return '';
+      const priorityKeys = ['name', 'title', 'bank_name', 'account_name', 'full_name', 'username', 'email', 'code', 'slug', 'label', 'subject', 'phone', 'description'];
+      const parts = [];
+      const usedKeys = new Set(['id', 'created', 'updated', 'created_at', 'updated_at', 'password', 'tokenKey', 'collectionId', 'collectionName', fileFieldName]);
+
+      for (const k of priorityKeys) {
+        if (usedKeys.has(k)) continue;
+        const v = rec[k];
+        if (v !== undefined && v !== null && String(v).trim() !== '' && typeof v !== 'object') {
+          parts.push(`${k}: ${String(v).trim()}`);
+          usedKeys.add(k);
+          if (parts.length >= 2) break;
+        }
+      }
+
+      if (parts.length < 2) {
+        for (const [k, v] of Object.entries(rec)) {
+          if (usedKeys.has(k) || k.startsWith('@')) continue;
+          if (v !== undefined && v !== null && String(v).trim() !== '' && typeof v !== 'object') {
+            parts.push(`${k}: ${String(v).trim()}`);
+            usedKeys.add(k);
+            if (parts.length >= 2) break;
+          }
+        }
+      }
+
+      return parts.join(' • ');
+    }
+
+    function renderStorageCandidateRecords() {
+      const listEl = document.getElementById('storageRecordPickerList');
+      if (!listEl) return;
+
+      const recIdInput = document.getElementById('storageUploadRecordIdInput');
+      const selectedId = recIdInput ? recIdInput.value.trim() : '';
+      const fieldSelect = document.getElementById('storageUploadFieldSelect');
+      const fileFieldName = fieldSelect ? fieldSelect.value : 'file';
+      const searchInput = document.getElementById('storageRecordSearchInput');
+      const q = searchInput ? searchInput.value.trim() : '';
+
+      if (storageCandidateRecords.length === 0) {
+        listEl.innerHTML = `
+          <div class="p-3 text-center text-slate-400 text-[11px]">
+            ${!q
+              ? 'No existing records found in this table. Switch to <b>Create New Record</b> above.'
+              : 'No records match your search query. You can also type a Record ID manually.'}
+          </div>
+        `;
+        return;
+      }
+
+      listEl.innerHTML = storageCandidateRecords.map(rec => {
+        const idVal = String(rec.id ?? '');
+        const isSelected = selectedId !== '' && selectedId === idVal;
+        const summary = getRecordReadableSummary(rec, fileFieldName);
+        const existingFile = rec[fileFieldName];
+        const hasFile = existingFile !== undefined && existingFile !== null && String(existingFile).trim() !== '';
+
+        return `
+          <button type="button" onclick="selectStorageCandidateRecord('${escapeHtml(idVal)}')" class="w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition cursor-pointer ${isSelected ? 'bg-emerald-50 text-emerald-950 font-semibold' : 'hover:bg-slate-50 text-slate-700'}">
+            <div class="flex items-center space-x-2 min-w-0 truncate">
+              <span class="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold shrink-0 ${isSelected ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700 border border-slate-200'}">#${escapeHtml(idVal)}</span>
+              <span class="truncate text-[11px] ${summary ? 'text-slate-700 font-medium' : 'text-slate-400 italic'}">${summary ? escapeHtml(summary) : 'Record #' + escapeHtml(idVal)}</span>
+            </div>
+            <div class="flex items-center space-x-1.5 shrink-0">
+              ${hasFile ? `<span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-mono" title="Current file: ${escapeHtml(String(existingFile))}"><i class="fa-solid fa-paperclip mr-0.5"></i>replace</span>` : ''}
+              ${isSelected ? `<i class="fa-solid fa-circle-check text-emerald-600 text-xs"></i>` : ''}
+            </div>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function selectStorageCandidateRecord(idVal) {
+      const recIdInput = document.getElementById('storageUploadRecordIdInput');
+      if (recIdInput) {
+        recIdInput.value = idVal;
+      }
+      renderStorageCandidateRecords();
+    }
+
+    function highlightSelectedStorageRecord() {
+      renderStorageCandidateRecords();
+    }
+
+    function getStorageNewRecordSchemaFields(col) {
+      if (!col) return { requiredFields: [], optionalFields: [] };
+      const allFields = [];
+
+      if (col.type === 'auth') {
+        allFields.push({ name: 'email', type: 'email', required: true });
+        allFields.push({ name: 'password', type: 'password', required: true });
+        allFields.push({ name: 'name', type: 'text', required: false });
+        allFields.push({ name: 'username', type: 'text', required: false });
+        allFields.push({ name: 'role', type: 'text', required: false, defaultValue: 'user' });
+      }
+
+      if (Array.isArray(col.schema)) {
+        for (const f of col.schema) {
+          if (f.type === 'file') continue;
+          if (allFields.some(existing => existing.name === f.name)) continue;
+          allFields.push(f);
+        }
+      }
+
+      const requiredFields = allFields.filter(f => !!f.required);
+      const optionalFields = allFields.filter(f => !f.required);
+      return { requiredFields, optionalFields };
+    }
+
+    function renderStorageNewRecordFieldInput(f) {
+      const reqBadge = f.required
+        ? `<span class="text-rose-500 font-bold ml-0.5" title="Required field">*</span>`
+        : `<span class="text-slate-400 font-normal ml-1 text-[10px]">(optional)</span>`;
+      const inputId = `storageNewRecField_${f.name}`;
+
+      if (f.type === 'bool') {
+        return `
+          <div class="flex items-center justify-between py-1">
+            <label for="${inputId}" class="text-[11px] font-bold text-slate-700">${escapeHtml(f.name)}${reqBadge}</label>
+            <label class="inline-flex items-center space-x-1.5 cursor-pointer">
+              <input type="checkbox" id="${inputId}" data-field-name="${escapeHtml(f.name)}" data-field-type="bool" class="rounded border-slate-300 text-emerald-600">
+              <span class="text-[11px] text-slate-600">True</span>
+            </label>
+          </div>
+        `;
+      }
+
+      const inputType = f.type === 'number'
+        ? 'number'
+        : (f.type === 'date' ? 'datetime-local' : (f.type === 'email' ? 'email' : (f.type === 'password' ? 'password' : 'text')));
+
+      return `
+        <div>
+          <label for="${inputId}" class="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+            <span>${escapeHtml(f.name)}${reqBadge}</span>
+            <span class="text-[9px] font-mono uppercase text-slate-400">${escapeHtml(f.type || 'text')}</span>
+          </label>
+          <input
+            type="${inputType}"
+            ${f.type === 'number' ? 'step="any"' : ''}
+            id="${inputId}"
+            data-field-name="${escapeHtml(f.name)}"
+            data-field-type="${escapeHtml(f.type || 'text')}"
+            data-field-required="${f.required ? '1' : '0'}"
+            value="${f.defaultValue || ''}"
+            placeholder="Enter ${escapeHtml(f.name)}${f.required ? ' (required)' : ''}..."
+            class="w-full bg-white border ${f.required ? 'border-emerald-300' : 'border-slate-300'} rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600"
+          >
+        </div>
+      `;
+    }
+
+    function toggleStorageOptionalNewFields() {
+      storageShowOptionalNewFields = !storageShowOptionalNewFields;
+      const bucketSelect = document.getElementById('storageUploadBucketSelect');
+      const col = collections.find(c => c.name === (bucketSelect ? bucketSelect.value : ''));
+      renderStorageNewRecordFields(col);
+    }
+
+    function renderStorageNewRecordFields(col) {
+      const box = document.getElementById('storageNewRecordFieldsBox');
+      if (!box) return;
+
+      const { requiredFields, optionalFields } = getStorageNewRecordSchemaFields(col);
+      let html = '';
+
+      if (requiredFields.length > 0) {
+        html += `
+          <div class="flex items-center justify-between text-[11px] font-bold text-emerald-900 bg-emerald-50/90 border border-emerald-200 px-2.5 py-1.5 rounded-lg">
+            <span><i class="fa-solid fa-asterisk text-rose-500 mr-1 text-[9px]"></i>Required fields for new <b>${escapeHtml(col.name)}</b> record:</span>
+            <span class="font-mono text-[10px] text-emerald-700">${requiredFields.length} required</span>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-0.5">
+            ${requiredFields.map(f => renderStorageNewRecordFieldInput(f)).join('')}
+          </div>
+        `;
+      } else {
+        html += `
+          <div class="text-[11px] text-emerald-800 bg-emerald-50/70 border border-emerald-200/80 px-3 py-2 rounded-lg flex items-center space-x-2">
+            <i class="fa-solid fa-circle-check text-emerald-600"></i>
+            <span>No other required columns in <b>${escapeHtml(col ? col.name : '')}</b>. A new record will be created automatically with this file.</span>
+          </div>
+        `;
+      }
+
+      if (optionalFields.length > 0) {
+        html += `
+          <div class="pt-1">
+            <button type="button" onclick="toggleStorageOptionalNewFields()" class="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 flex items-center space-x-1 cursor-pointer">
+              <i class="fa-solid ${storageShowOptionalNewFields ? 'fa-chevron-up' : 'fa-plus'} text-[10px]"></i>
+              <span>${storageShowOptionalNewFields ? 'Hide' : 'Fill'} optional fields (${optionalFields.length})</span>
+            </button>
+            ${storageShowOptionalNewFields ? `
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-2 pt-2 border-t border-slate-200/80">
+                ${optionalFields.map(f => renderStorageNewRecordFieldInput(f)).join('')}
+              </div>
+            ` : ''}
+          </div>
+        `;
+      }
+
+      box.innerHTML = html;
+    }
+
+    function toggleStorageRecordMode() {
+      const radios = document.getElementsByName('storageRecordOption');
+      let val = 'existing';
+      for (const r of radios) {
+        if (r.checked) val = r.value;
+      }
+      const existingContainer = document.getElementById('storageExistingRecordContainer');
+      const newContainer = document.getElementById('storageNewRecordContainer');
+      if (existingContainer) {
+        existingContainer.classList.toggle('hidden', val === 'new');
+      }
+      if (newContainer) {
+        newContainer.classList.toggle('hidden', val !== 'new');
+      }
+    }
+
+    function handleStorageFileSelect(event) {
+      const file = event.target.files && event.target.files[0];
+      if (!file) return;
+
+      selectedStorageUploadFile = file;
+      const infoBox = document.getElementById('storageSelectedFileInfo');
+      const nameEl = document.getElementById('storageSelectedFileName');
+      const sizeEl = document.getElementById('storageSelectedFileSize');
+
+      if (nameEl) nameEl.textContent = file.name;
+      if (sizeEl) sizeEl.textContent = `(${formatBytes(file.size)})`;
+      if (infoBox) infoBox.classList.remove('hidden');
+    }
+
+    function clearStorageSelectedFile() {
+      selectedStorageUploadFile = null;
+      const input = document.getElementById('storageUploadFileInput');
+      if (input) input.value = '';
+      const infoBox = document.getElementById('storageSelectedFileInfo');
+      if (infoBox) infoBox.classList.add('hidden');
+    }
+
+    async function submitStorageUpload() {
+      if (!selectedStorageUploadFile) {
+        showToast('Please select a file to upload.', 'error');
+        return;
+      }
+
+      const bucketSelect = document.getElementById('storageUploadBucketSelect');
+      const fieldSelect = document.getElementById('storageUploadFieldSelect');
+      const bucket = bucketSelect ? bucketSelect.value : '';
+      const fieldName = fieldSelect ? fieldSelect.value : 'file';
+
+      if (!bucket) {
+        showToast('Please choose a target bucket.', 'error');
+        return;
+      }
+
+      const radios = document.getElementsByName('storageRecordOption');
+      let mode = 'existing';
+      for (const r of radios) {
+        if (r.checked) mode = r.value;
+      }
+
+      const recIdInput = document.getElementById('storageUploadRecordIdInput');
+      const recId = recIdInput ? recIdInput.value.trim() : '';
+
+      if (mode === 'existing' && !recId) {
+        showToast('Please select a record from the list or enter a Record ID.', 'error');
+        if (recIdInput) recIdInput.focus();
+        return;
+      }
+
+      const formData = new FormData();
+
+      if (mode === 'new') {
+        const fieldInputs = document.querySelectorAll('#storageNewRecordFieldsBox [data-field-name]');
+        for (const el of fieldInputs) {
+          const fname = el.getAttribute('data-field-name');
+          const ftype = el.getAttribute('data-field-type');
+          const isReq = el.getAttribute('data-field-required') === '1';
+
+          if (ftype === 'bool') {
+            formData.append(fname, el.checked ? 'true' : 'false');
+          } else {
+            const val = el.value.trim();
+            if (isReq && val === '') {
+              showToast(`Field '${fname}' is required to create a new record in '${bucket}'.`, 'error');
+              el.focus();
+              return;
+            }
+            if (val !== '') {
+              formData.append(fname, val);
+            }
+          }
+        }
+      }
+
+      formData.append(fieldName, selectedStorageUploadFile);
+
+      const btn = document.getElementById('storageSubmitUploadBtn');
+      const oldHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin mr-1"></i> Uploading...`;
+      }
+
+      try {
+        const url = mode === 'existing'
+          ? `/api/files/${encodeURIComponent(bucket)}/${encodeURIComponent(recId)}`
+          : `/api/${encodeURIComponent(bucket)}`;
+
+        const res = await fetch(url, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (res.ok) {
+          showToast(`File '${selectedStorageUploadFile.name}' uploaded successfully!`, 'success');
+          closeStorageUploadModal();
+          loadStorageData(bucket);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showToast(err.message || 'Failed to upload file.', 'error');
+        }
+      } catch (e) {
+        console.error('Upload error:', e);
+        showToast('Network error during file upload.', 'error');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = oldHtml;
+        }
+      }
+    }
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         closeRecordEditorPage();
@@ -9990,6 +10908,7 @@ let currentCollection = "users";
         closeDrawer('imageLightboxModal');
         closeCronJobModal();
         closeCronResultModal();
+        closeStorageUploadModal();
       }
     });
 

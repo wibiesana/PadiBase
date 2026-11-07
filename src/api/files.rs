@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::core::app::AppState;
 use crate::core::auth::{authenticate_with_query_token, check_permission, RecordAction};
-use crate::core::db::get_collection_by_name_or_id;
+use crate::core::db::{get_collection_by_name_or_id, list_collections};
 use crate::core::env::Env;
 use crate::core::realtime::RealtimeMessage;
 use crate::core::record::{get_record, update_record};
@@ -122,19 +122,41 @@ pub async fn get_file(
         return Err(invalid_path());
     }
 
-    let col = get_collection_by_name_or_id(&state.db, &collection)
-        .await
-        .map_err(|e| internal("Failed to load collection", e))?
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "File not found."))?;
+    let col = match get_collection_by_name_or_id(&state.db, &collection).await {
+        Ok(Some(c)) => c,
+        _ => {
+            // Try plural or singular fallback
+            let alt = if collection.ends_with('s') {
+                collection[..collection.len() - 1].to_string()
+            } else {
+                format!("{}s", collection)
+            };
+            get_collection_by_name_or_id(&state.db, &alt)
+                .await
+                .map_err(|e| internal("Failed to load collection", e))?
+                .ok_or_else(|| err(StatusCode::NOT_FOUND, "File not found."))?
+        }
+    };
 
     let auth = authenticate_with_query_token(&state, &headers, query.get("token").map(String::as_str)).await?;
     check_permission(RecordAction::View, &col, auth.as_ref(), None)?;
 
-    let file_path = state
+    let mut file_path = state
         .storage_dir
         .join(&col.name)
         .join(&record_id)
         .join(&filename);
+
+    if !file_path.exists() {
+        let alt_path = state
+            .storage_dir
+            .join(&collection)
+            .join(&record_id)
+            .join(&filename);
+        if alt_path.exists() {
+            file_path = alt_path;
+        }
+    }
 
     // Resolve symlinks and make sure we never leave the storage directory.
     let canonical = tokio::fs::canonicalize(&file_path)
@@ -426,5 +448,184 @@ pub async fn delete_file(
     Ok(Json(json!({
         "success": true,
         "message": format!("File '{}' deleted successfully.", filename)
+    })))
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct StorageListQuery {
+    pub collection: Option<String>,
+    pub search: Option<String>,
+}
+
+/// List all storage buckets and files across collections with aggregates
+pub async fn list_storage(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Query(query): axum::extract::Query<StorageListQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let auth = authenticate_with_query_token(&state, &headers, None).await?;
+    if auth.is_none() {
+        return Err(err(StatusCode::UNAUTHORIZED, "Authentication required."));
+    }
+
+    let storage_dir = state.storage_dir.clone();
+
+    let (mut buckets_map, all_files, total_files, total_bytes) = tokio::task::spawn_blocking(move || {
+        let mut buckets: std::collections::HashMap<String, (usize, u64)> = std::collections::HashMap::new();
+        let mut files = Vec::new();
+        let mut tot_files: usize = 0;
+        let mut tot_bytes: u64 = 0;
+
+        let search_dirs = vec![
+            storage_dir.clone(),
+            std::path::PathBuf::from("./padi_data/storage"),
+            std::path::PathBuf::from("padi_data/storage"),
+        ];
+
+        let actual_dir = search_dirs.into_iter().find(|d| d.exists()).unwrap_or(storage_dir);
+
+        if let Ok(col_entries) = std::fs::read_dir(&actual_dir) {
+            for col_entry in col_entries.flatten() {
+                let col_name = col_entry.file_name().to_string_lossy().to_string();
+                if !is_safe_segment(&col_name) {
+                    continue;
+                }
+                let col_path = col_entry.path();
+                if !col_path.is_dir() {
+                    continue;
+                }
+
+                buckets.entry(col_name.clone()).or_insert((0, 0));
+
+                if let Ok(rec_entries) = std::fs::read_dir(&col_path) {
+                    for rec_entry in rec_entries.flatten() {
+                        let rec_id = rec_entry.file_name().to_string_lossy().to_string();
+                        if !is_safe_segment(&rec_id) {
+                            continue;
+                        }
+                        let rec_path = rec_entry.path();
+                        if !rec_path.is_dir() {
+                            continue;
+                        }
+
+                        if let Ok(file_entries) = std::fs::read_dir(&rec_path) {
+                            for file_entry in file_entries.flatten() {
+                                let file_name = file_entry.file_name().to_string_lossy().to_string();
+                                if !is_safe_segment(&file_name) {
+                                    continue;
+                                }
+                                if let Ok(metadata) = file_entry.metadata() {
+                                    if !metadata.is_file() {
+                                        continue;
+                                    }
+                                    let size = metadata.len();
+                                    let modified = metadata
+                                        .modified()
+                                        .ok()
+                                        .and_then(|t| {
+                                            let duration = t.duration_since(std::time::UNIX_EPOCH).ok()?;
+                                            Some(duration.as_millis() as i64)
+                                        })
+                                        .unwrap_or(0);
+
+                                    let stat = buckets.entry(col_name.clone()).or_insert((0, 0));
+                                    stat.0 += 1;
+                                    stat.1 += size;
+
+                                    tot_files += 1;
+                                    tot_bytes += size;
+
+                                    let mime = from_path(&file_name).first_or_octet_stream().to_string();
+                                    let url = format!("/api/files/{}/{}/{}", col_name, rec_id, file_name);
+
+                                    files.push(json!({
+                                        "name": file_name,
+                                        "collection": col_name,
+                                        "record_id": rec_id,
+                                        "size": size,
+                                        "mime": mime,
+                                        "modified_at": modified,
+                                        "url": url,
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        (buckets, files, tot_files, tot_bytes)
+    })
+    .await
+    .map_err(|e| internal("Failed to inspect storage directory", e))?;
+
+    // Also register any collections that declare a File field but have no files yet
+    if let Ok(collections) = list_collections(&state.db).await {
+        for col in collections {
+            if col.schema.iter().any(|f| f.field_type == FieldType::File) {
+                buckets_map.entry(col.name.clone()).or_insert((0, 0));
+            }
+        }
+    }
+
+    let target_col = query.collection.as_deref().unwrap_or("").trim().to_lowercase();
+    let search_q = query.search.as_deref().unwrap_or("").trim().to_lowercase();
+
+    let mut filtered_files: Vec<serde_json::Value> = all_files
+        .into_iter()
+        .filter(|f| {
+            if !target_col.is_empty() {
+                let col = f.get("collection").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                let match_exact = col == target_col;
+                let match_p1 = col == format!("{}s", target_col);
+                let match_p2 = target_col == format!("{}s", col);
+                let match_p3 = col == format!("{}es", target_col);
+                let match_p4 = target_col == format!("{}es", col);
+                if !match_exact && !match_p1 && !match_p2 && !match_p3 && !match_p4 {
+                    return false;
+                }
+            }
+
+            if !search_q.is_empty() {
+                let name = f.get("name").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                let col = f.get("collection").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                let rec = f.get("record_id").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+                if !name.contains(&search_q) && !col.contains(&search_q) && !rec.contains(&search_q) {
+                    return false;
+                }
+            }
+
+            true
+        })
+        .collect();
+
+    // Sort files by modified_at desc
+    filtered_files.sort_by(|a, b| {
+        let ma = a.get("modified_at").and_then(|v| v.as_i64()).unwrap_or(0);
+        let mb = b.get("modified_at").and_then(|v| v.as_i64()).unwrap_or(0);
+        mb.cmp(&ma)
+    });
+
+    let mut buckets: Vec<serde_json::Value> = buckets_map
+        .into_iter()
+        .map(|(name, (count, size))| {
+            json!({
+                "name": name,
+                "file_count": count,
+                "total_bytes": size,
+            })
+        })
+        .collect();
+    buckets.sort_by(|a, b| {
+        let na = a.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let nb = b.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        na.cmp(nb)
+    });
+
+    Ok(Json(json!({
+        "total_files": total_files,
+        "total_bytes": total_bytes,
+        "buckets": buckets,
+        "files": filtered_files,
     })))
 }

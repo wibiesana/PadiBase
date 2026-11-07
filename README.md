@@ -20,8 +20,8 @@
   Snapshot database SQLite atomik secara online via WAL checkpoint & `VACUUM INTO`. Mendukung unduh backup, restore, dan hapus snapshot.
 - **💻 Embedded Admin Dashboard**:
   Dashboard web yang modern dan responsif ter-embed langsung di dalam binary via `rust-embed` dan dapat diakses di `/dashboard/`.
-- **📁 File Storage System**:
-  Manajemen penyimpanan media & attachments dengan proteksi directory traversal.
+- **📁 File Storage System & Supabase-Style Storage Explorer**:
+  Manajemen penyimpanan media & attachments dengan proteksi directory traversal, pembersihan otomatis, serta menu dashboard **Storage** interaktif (Buckets, File Explorer, Upload Modal, Preview Lightbox, 1-Click Copy URL).
 - **🛠️ Visual SQL Query Builder & Advanced Aggregation**:
   Perancang query SQL interaktif visual dengan live preview, live parameter binding, JOINs, atomic multi-table transactions, serta dukungan fungsi kalkulasi & agregasi lengkap (`COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `COALESCE`, `ROUND`, `GROUP_CONCAT`, `GROUP BY`, `HAVING`, `DISTINCT`).
 - **🛡️ Granular API Access Rules & RBAC (Pemisahan 'list' vs 'all')**:
@@ -430,10 +430,17 @@ PadiBase menyediakan penanganan file dan lampiran media (*file storage system*) 
   - `DELETE /api/files/:collection/:record_id/:filename`
   - Menghapus file fisik dari disk sekaligus mengosongkan nilai kolom terkait di record menjadi `NULL`.
 
-#### 4. Tampilan Dashboard UI & Media Preview
-* **Thumbnail Interaktif**: Kolom bertipe gambar pada tabel data menampilkan preview visual.
-* **Full-Screen Lightbox**: Klik thumbnail untuk membuka modal resolusi tinggi, informasi dimensi gambar (`width × height px`), tombol unduh, dan salin URL.
-* **Instant Live Preview Form**: Memilih file baru di drawer form record (`<input type="file">`) langsung menampilkan preview gambar secara instan sebelum menekan tombol simpan.
+#### 4. Menu Dashboard "Storage" (Supabase-Style Storage Explorer)
+Di Admin Dashboard (`/dashboard/`), kini tersedia menu utama **Storage** (`railStorageBtn`) yang terinspirasi langsung dari antarmuka **Supabase Storage**:
+* **Buckets / Collections Explorer**: Sub-sidebar navigasi yang menampilkan daftar semua bucket/koleksi beserta counter jumlah file dan total ukuran penggunaan ruang disk (`KB / MB / GB`).
+* **Dual View Modes (Table vs Grid Cards)**: Menampilkan aset file dalam format tabel detail atau kartu visual grid dengan live thumbnail gambar.
+* **Filter & Pencarian Cepat**: Cari file berdasarkan nama file, nama koleksi, atau ID record, serta filter instan berdasarkan tipe file (*All, Images, Documents/PDF, Video/Audio, Other*).
+* **Aksi 1-Klik Tanpa Ribet**:
+  - 👁️ **Preview**: Buka file gambar di Lightbox resolusi tinggi atau tab baru.
+  - 🔗 **Copy URL**: Salin link URL lengkap file ke clipboard secara instan.
+  - ⬇️ **Download**: Mengunduh file asli langsung ke perangkat.
+  - 🗑️ **Delete**: Hapus file dengan dialog konfirmasi aman.
+* **Upload Modal Interaktif**: Dialog upload lengkap dengan drag-and-drop zone, pemilihan bucket target, opsi lampirkan ke record yang ada atau buat record baru, serta seleksi kolom file.
 
 ---
 
