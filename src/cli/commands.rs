@@ -212,7 +212,12 @@ pub async fn run_cli() -> Result<()> {
             info!("👉 Admin Dashboard available at http://{}/_padibase/", addr);
             info!("👉 REST API endpoints available at http://{}/api/", addr);
 
-            let listener = tokio::net::TcpListener::bind(addr).await?;
+            use axum::serve::ListenerExt;
+            let listener = tokio::net::TcpListener::bind(addr)
+                .await?
+                .tap_io(|tcp_stream| {
+                    let _ = tcp_stream.set_nodelay(true);
+                });
             axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<SocketAddr>(),

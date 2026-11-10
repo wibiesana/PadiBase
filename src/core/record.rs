@@ -1199,9 +1199,9 @@ pub async fn get_all_records_with_limit(
     let sql = format!("SELECT * FROM `{}` {} {} {};", col.name, filter_sql, sort_sql, limit_clause);
     let rows = pool.fetch_all(&sql, &[]).await?;
 
-    let mut items = Vec::new();
+    let mut items = Vec::with_capacity(rows.len());
     for row in rows {
-        items.push(json_row_to_record(&row, col, &meta)?);
+        items.push(json_row_into_record(row, col, &meta)?);
     }
 
     let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations, col.resource_relation_fields.as_ref()).await;
@@ -1269,9 +1269,9 @@ pub async fn list_records_with(
         .fetch_all(&sql, &[Val::Int(per_page), Val::Int(offset)])
         .await?;
 
-    let mut items = Vec::new();
+    let mut items = Vec::with_capacity(rows.len());
     for row in rows {
-        items.push(json_row_to_record(&row, col, &meta)?);
+        items.push(json_row_into_record(row, col, &meta)?);
     }
 
     let _ = eager_load_relations(pool, &col.name, col.auto_load_relations, &mut items, with_relations, col.resource_relation_fields.as_ref()).await;
@@ -1306,62 +1306,71 @@ fn canonical_field_name<'a>(raw_name: &'a str, col: &'a Collection) -> &'a str {
     raw_name
 }
 
-fn json_row_to_record(row: &Value, col: &Collection, meta: &TableMetadata) -> Result<Record> {
-    let mut data = Map::new();
-    let id_str = json_get_str(row, &meta.pk_column);
+fn json_row_into_record(row: Value, col: &Collection, meta: &TableMetadata) -> Result<Record> {
+    let id_str = json_get_str(&row, &meta.pk_column);
     let id_str = if id_str.is_empty() {
-        json_get_str(row, "id")
+        json_get_str(&row, "id")
     } else {
         id_str
     };
 
-    if let Some(obj) = row.as_object() {
-        for (raw_name, raw_val) in obj {
-            // Do not expose sensitive credentials in record output (matching padi_rust / padi_go / padi_php hidden fields)
-            if raw_name.eq_ignore_ascii_case("passwordHash")
-                || raw_name.eq_ignore_ascii_case("password")
-                || raw_name.eq_ignore_ascii_case("tokenKey")
-                || raw_name.eq_ignore_ascii_case("remember_token")
-            {
-                continue;
-            }
+    let mut data = match row {
+        Value::Object(obj) => {
+            let mut out = Map::with_capacity(obj.len() + 1);
+            for (raw_name, raw_val) in obj {
+                // Do not expose sensitive credentials in record output (matching padi_rust / padi_go / padi_php hidden fields)
+                if raw_name.eq_ignore_ascii_case("passwordHash")
+                    || raw_name.eq_ignore_ascii_case("password")
+                    || raw_name.eq_ignore_ascii_case("tokenKey")
+                    || raw_name.eq_ignore_ascii_case("remember_token")
+                {
+                    continue;
+                }
 
-            let name = canonical_field_name(raw_name, col);
+                let name = canonical_field_name(&raw_name, col);
 
-            let is_bool_field = name == "verified"
-                || name == "emailVisibility"
-                || col
+                let is_bool_field = name == "verified"
+                    || name == "emailVisibility"
+                    || col
+                        .schema
+                        .iter()
+                        .any(|f| f.name == name && f.field_type == FieldType::Bool);
+
+                let is_json_field = col
                     .schema
                     .iter()
-                    .any(|f| f.name == name && f.field_type == FieldType::Bool);
+                    .any(|f| f.name == name && f.field_type == FieldType::Json);
 
-            let is_json_field = col
-                .schema
-                .iter()
-                .any(|f| f.name == name && f.field_type == FieldType::Json);
-
-            let val: Value = if is_bool_field {
-                match raw_val {
-                    Value::Bool(b) => Value::Bool(*b),
-                    Value::Number(n) => Value::Bool(n.as_i64().unwrap_or(0) != 0),
-                    Value::String(s) => {
-                        Value::Bool(s == "1" || s.eq_ignore_ascii_case("true"))
+                let val: Value = if is_bool_field {
+                    match raw_val {
+                        Value::Bool(b) => Value::Bool(b),
+                        Value::Number(n) => Value::Bool(n.as_i64().unwrap_or(0) != 0),
+                        Value::String(s) => {
+                            Value::Bool(s == "1" || s.eq_ignore_ascii_case("true"))
+                        }
+                        _ => Value::Bool(false),
                     }
-                    _ => Value::Bool(false),
-                }
-            } else if is_json_field {
-                if let Value::String(s) = raw_val {
-                    serde_json::from_str::<Value>(s).unwrap_or_else(|_| Value::String(s.clone()))
+                } else if is_json_field {
+                    if let Value::String(s) = raw_val {
+                        serde_json::from_str::<Value>(&s).unwrap_or(Value::String(s))
+                    } else {
+                        raw_val
+                    }
                 } else {
-                    raw_val.clone()
-                }
-            } else {
-                raw_val.clone()
-            };
+                    raw_val
+                };
 
-            data.insert(name.to_string(), val);
+                let key = if name == raw_name {
+                    raw_name
+                } else {
+                    name.to_string()
+                };
+                out.insert(key, val);
+            }
+            out
         }
-    }
+        _ => Map::new(),
+    };
 
     if !data.contains_key("id") && !id_str.is_empty() {
         data.insert("id".to_string(), Value::String(id_str.clone()));
@@ -1371,6 +1380,10 @@ fn json_row_to_record(row: &Value, col: &Collection, meta: &TableMetadata) -> Re
         id: id_str,
         data,
     })
+}
+
+fn json_row_to_record(row: &Value, col: &Collection, meta: &TableMetadata) -> Result<Record> {
+    json_row_into_record(row.clone(), col, meta)
 }
 
 /// Count records matching an optional filter (compatible with Padi Framework `count` query).

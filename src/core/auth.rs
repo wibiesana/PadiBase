@@ -525,6 +525,338 @@ pub fn has_role_constraint(rule: &str) -> bool {
         || lower.contains("user")
 }
 
+/// Helper to split an expression by an operator (e.g. `||` or `&&`) only at depth 0 (outside parentheses).
+fn split_top_level_logical(s: &str, op: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut depth = 0;
+    let mut current = String::new();
+    let chars: Vec<char> = s.chars().collect();
+    let mut i = 0;
+    let op_chars: Vec<char> = op.chars().collect();
+    let op_len = op_chars.len();
+
+    while i < chars.len() {
+        if chars[i] == '(' {
+            depth += 1;
+            current.push('(');
+            i += 1;
+        } else if chars[i] == ')' {
+            if depth > 0 {
+                depth -= 1;
+            }
+            current.push(')');
+            i += 1;
+        } else if depth == 0 && i + op_len <= chars.len() && chars[i..i + op_len] == op_chars[..] {
+            let trimmed = current.trim();
+            if !trimmed.is_empty() {
+                parts.push(trimmed.to_string());
+            }
+            current.clear();
+            i += op_len;
+        } else {
+            current.push(chars[i]);
+            i += 1;
+        }
+    }
+    let trimmed = current.trim();
+    if !trimmed.is_empty() {
+        parts.push(trimmed.to_string());
+    }
+    parts
+}
+
+/// Evaluates a single atomic condition (no unbracketed `&&` or `||`).
+fn evaluate_atomic_condition(
+    cond: &str,
+    auth: Option<&Claims>,
+    existing_record: Option<&Map<String, Value>>,
+) -> bool {
+    let clean = cond.trim().trim_matches(|c| c == '(' || c == ')').trim();
+    if clean.is_empty() {
+        return true;
+    }
+    let lower = clean.to_lowercase();
+
+    // 1. Universal Allow / Deny keywords
+    if lower == "public" || lower == "*" || lower == "anyone" || lower == "allow_all" || lower == "1=1" || lower == "1 = 1" {
+        return true;
+    }
+    if lower == "admin" || lower == "locked" || lower == "1=0" || lower == "1 = 0" {
+        return auth.map(|c| c.is_admin()).unwrap_or(false);
+    }
+
+    // 2. Authentication check: @request.auth.id != "" or @request.auth.id != ''
+    if lower == "@request.auth.id != \"\""
+        || lower == "@request.auth.id != ''"
+        || lower == "@request.auth.id!=''"
+        || lower == "@request.auth.id!=\"\""
+    {
+        return auth.is_some();
+    }
+    if lower == "@request.auth.id == \"\""
+        || lower == "@request.auth.id == ''"
+        || lower == "@request.auth.id=''"
+        || lower == "@request.auth.id=\"\""
+    {
+        return auth.is_none();
+    }
+
+    // 3. User role check: @request.auth.role = '...' or @request.auth.role != '...'
+    if lower.contains("@request.auth.role")
+        || lower.contains("users.role")
+        || lower.contains("role=")
+        || lower.contains("role =")
+    {
+        let Some(claims) = auth else {
+            return false;
+        };
+        if claims.is_admin() {
+            return true;
+        }
+        let user_role = claims.role.trim().to_lowercase();
+
+        // Check inequality: !=
+        if lower.contains("!=") {
+            let target = clean
+                .split("!=")
+                .nth(1)
+                .unwrap_or("")
+                .trim()
+                .trim_matches(|c| c == '\'' || c == '"')
+                .to_lowercase();
+            return user_role != target;
+        }
+
+        // Check equality: = or ==
+        if lower.contains("==") || lower.contains('=') {
+            let sep = if lower.contains("==") { "==" } else { "=" };
+            let target = clean
+                .split(sep)
+                .nth(1)
+                .unwrap_or("")
+                .trim()
+                .trim_matches(|c| c == '\'' || c == '"')
+                .to_lowercase();
+            return user_role == target;
+        }
+
+        return check_role_rule(clean, &claims.role);
+    }
+
+    // 4. Ownership condition: e.g. created_by = @request.auth.id, user_id = @request.auth.id, id = @request.auth.id
+    if lower.contains("@request.auth.id") {
+        let Some(claims) = auth else {
+            return false;
+        };
+        if claims.is_admin() {
+            return true;
+        }
+
+        // If inequality !=
+        if lower.contains("!=") {
+            let col_name = clean
+                .split("!=")
+                .next()
+                .unwrap_or("")
+                .trim()
+                .trim_matches(|c| c == '`' || c == '\'' || c == '"');
+            if let Some(rec) = existing_record {
+                return !matches_record_user(rec, &claims.sub, &[col_name]);
+            }
+            return true;
+        }
+
+        // Equality: col = @request.auth.id
+        if lower.contains('=') {
+            let col_name = clean
+                .split('=')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .trim_matches(|c| c == '`' || c == '\'' || c == '"');
+            if let Some(rec) = existing_record {
+                return matches_record_user(rec, &claims.sub, &[col_name]);
+            }
+            // For Create action where existing_record is None, the user will be the creator.
+            return true;
+        }
+    }
+
+    // 5. Generic record field check: e.g. status = "active", is_published = 1
+    if lower.contains('=') && !lower.contains("@request.auth") {
+        if let Some(rec) = existing_record {
+            let parts: Vec<&str> = if lower.contains("!=") {
+                clean.split("!=").collect()
+            } else if lower.contains("==") {
+                clean.split("==").collect()
+            } else {
+                clean.split('=').collect()
+            };
+            if parts.len() == 2 {
+                let col = parts[0]
+                    .trim()
+                    .trim_matches(|c| c == '`' || c == '\'' || c == '"');
+                let target = parts[1].trim().trim_matches(|c| c == '\'' || c == '"');
+                if let Some(v) = rec.get(col) {
+                    let actual_str = match v {
+                        Value::String(s) => s.clone(),
+                        Value::Number(n) => n.to_string(),
+                        Value::Bool(b) => b.to_string(),
+                        _ => String::new(),
+                    };
+                    if lower.contains("!=") {
+                        return !actual_str.eq_ignore_ascii_case(target);
+                    } else {
+                        return actual_str.eq_ignore_ascii_case(target);
+                    }
+                }
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // 6. Fallback role check (e.g. bare "admin, editor")
+    if let Some(claims) = auth {
+        return check_role_rule(clean, &claims.role);
+    }
+
+    false
+}
+
+/// Evaluates a full boolean rule expression supporting parentheses `(...)`, `||`, and `&&`.
+pub fn evaluate_rule_expression(
+    expr: &str,
+    auth: Option<&Claims>,
+    existing_record: Option<&Map<String, Value>>,
+) -> bool {
+    let clean = expr.trim();
+    if clean.is_empty() {
+        return auth.is_some();
+    }
+
+    // Admin / superadmin always bypasses all access rules
+    if let Some(claims) = auth {
+        if claims.is_admin() {
+            return true;
+        }
+    }
+
+    // 1. Split by top-level OR (`||`)
+    let or_parts = split_top_level_logical(clean, "||");
+    if or_parts.len() > 1 {
+        for part in or_parts {
+            if evaluate_rule_expression(&part, auth, existing_record) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 2. Split by top-level AND (`&&`)
+    let and_parts = split_top_level_logical(clean, "&&");
+    if and_parts.len() > 1 {
+        for part in and_parts {
+            if !evaluate_rule_expression(&part, auth, existing_record) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // 3. Remove enclosing outer parentheses if wrapped
+    if clean.starts_with('(') && clean.ends_with(')') {
+        let mut depth = 0;
+        let mut fully_enclosed = true;
+        for (idx, c) in clean.chars().enumerate() {
+            if c == '(' {
+                depth += 1;
+            } else if c == ')' {
+                depth -= 1;
+                if depth == 0 && idx < clean.len() - 1 {
+                    fully_enclosed = false;
+                    break;
+                }
+            }
+        }
+        if fully_enclosed && depth == 0 {
+            let inner = &clean[1..clean.len() - 1];
+            return evaluate_rule_expression(inner, auth, existing_record);
+        }
+    }
+
+    // 4. Single atomic condition
+    evaluate_atomic_condition(clean, auth, existing_record)
+}
+
+/// Builds a SQL filter string for List / All queries based on the collection's access rule and authenticated user.
+/// If user is admin or rule is public, returns client_filter (no extra restriction).
+pub fn build_row_level_security_filter(
+    rule: Option<&str>,
+    auth: Option<&Claims>,
+    client_filter: Option<&str>,
+) -> Option<String> {
+    // 1. Superuser / Admin always bypasses RLS filter
+    if let Some(claims) = auth {
+        if claims.is_admin() {
+            return client_filter.map(|s| s.to_string());
+        }
+    }
+
+    let Some(raw_rule) = rule else {
+        return client_filter.map(|s| s.to_string());
+    };
+    let clean_rule = raw_rule.trim();
+    if clean_rule.is_empty()
+        || clean_rule.eq_ignore_ascii_case("public")
+        || clean_rule == "*"
+        || clean_rule == "@request.auth.id != \"\""
+        || clean_rule == "@request.auth.id != ''"
+    {
+        return client_filter.map(|s| s.to_string());
+    }
+
+    // If rule requires auth or ownership:
+    let Some(claims) = auth else {
+        // Not authenticated on a non-public rule: return a filter that matches nothing
+        return Some("1 = 0".to_string());
+    };
+
+    // Replace @request.auth tokens with actual values for SQL
+    let mut sql_filter = clean_rule.to_string();
+    sql_filter = sql_filter.replace("@request.auth.id", &format!("'{}'", claims.sub));
+
+    let user_role = claims.role.trim().to_lowercase();
+    let words: Vec<String> = sql_filter.split_whitespace().map(|s| s.to_string()).collect();
+    for window in words.windows(3) {
+        if window[0].eq_ignore_ascii_case("@request.auth.role") {
+            let op = &window[1];
+            let val = window[2]
+                .trim_matches(|c| c == '\'' || c == '"' || c == '(' || c == ')')
+                .to_lowercase();
+            let matches = user_role == val;
+            let target_phrase = format!("{} {} {}", window[0], op, window[2]);
+            let replacement = if (op == "=" || op == "==") && matches {
+                "1 = 1"
+            } else if (op == "!=" || op == "<>") && !matches {
+                "1 = 1"
+            } else {
+                "1 = 0"
+            };
+            sql_filter = sql_filter.replace(&target_phrase, replacement);
+        }
+    }
+
+    if let Some(cf) = client_filter {
+        let trimmed_cf = cf.trim();
+        if !trimmed_cf.is_empty() {
+            return Some(format!("({}) && ({})", sql_filter, trimmed_cf));
+        }
+    }
+
+    Some(sql_filter)
+}
+
 pub fn check_permission(
     action: RecordAction,
     col: &Collection,
@@ -560,181 +892,27 @@ pub fn check_permission(
 
     // 3. For List, All, and View: default is public unless rule explicitly specifies otherwise
     if matches!(action, RecordAction::List | RecordAction::All | RecordAction::View) {
-        match rule_trimmed {
-            None | Some("public") | Some("*") | Some("anyone") => return Ok(()),
-            Some("admin") | Some("locked") => {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(json!({
-                        "code": 403,
-                        "message": "Only administrators can view this collection."
-                    })),
-                ));
-            }
-            Some(r) => {
-                // Check role constraint if present
-                if has_role_constraint(r) {
-                    let claims = match auth {
-                        Some(c) => c,
-                        None => {
-                            return Err((
-                                StatusCode::UNAUTHORIZED,
-                                Json(json!({
-                                    "code": 401,
-                                    "message": "Authentication required. You must be logged in to view records in this collection."
-                                })),
-                            ));
-                        }
-                    };
-                    if !check_role_rule(r, &claims.role) {
-                        return Err((
-                            StatusCode::FORBIDDEN,
-                            Json(json!({
-                                "code": 403,
-                                "message": format!("Permission denied. Your role '{}' is not authorized to view records in this collection.", claims.role)
-                            })),
-                        ));
-                    }
-                    return Ok(());
-                }
-
-                // Unrecognised rule: fail closed to "must be logged in" instead of public.
-                if auth.is_none() {
-                    return Err((
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({
-                            "code": 401,
-                            "message": "Authentication required. You must be logged in to view records in this collection."
-                        })),
-                    ));
-                }
-                return Ok(());
-            }
+        if rule_trimmed.is_none() {
+            return Ok(());
         }
     }
 
-    // 4. For Create, Update, Delete:
-    // Default: Must be logged-in user, UNTIL user configures otherwise (e.g. "public" or custom role rule)
-    if let Some(rule) = rule_trimmed {
-        // Did the user explicitly configure it otherwise (e.g. Public / Anyone)?
-        if rule.eq_ignore_ascii_case("public")
-            || rule == "*"
-            || rule.eq_ignore_ascii_case("anyone")
-            || rule.eq_ignore_ascii_case("allow_all")
-        {
-            return Ok(());
-        }
+    let action_name = match action {
+        RecordAction::List => "list",
+        RecordAction::All => "fetch all",
+        RecordAction::View => "view",
+        RecordAction::Create => "create",
+        RecordAction::Update => "update",
+        RecordAction::Delete => "delete",
+    };
 
-        // Locked / Admin only
-        if rule.eq_ignore_ascii_case("admin") || rule.eq_ignore_ascii_case("locked") {
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({
-                    "code": 403,
-                    "message": "Only administrators are allowed to perform this operation."
-                })),
-            ));
-        }
+    let rule = rule_trimmed.unwrap_or("@request.auth.id != \"\"");
 
-        let action_name = match action {
-            RecordAction::List => "list",
-            RecordAction::All => "fetch all",
-            RecordAction::View => "view",
-            RecordAction::Create => "create",
-            RecordAction::Update => "update",
-            RecordAction::Delete => "delete",
-        };
-
-        // User must be logged in for non-public actions
-        let claims = match auth {
-            Some(c) => c,
-            None => {
-                return Err((
-                    StatusCode::UNAUTHORIZED,
-                    Json(json!({
-                        "code": 401,
-                        "message": format!("Authentication required. You must be logged in to {} records.", action_name)
-                    })),
-                ));
-            }
-        };
-
-        let ownership_eval = check_record_ownership(rule, &claims.sub, existing_record);
-        let has_role = has_role_constraint(rule);
-
-        // Case 1: Rule has both ownership AND role constraint
-        // (e.g. `user_id = @request.auth.id || @request.auth.role = 'admin'`, or `owner, admin`)
-        if ownership_eval.is_some() && has_role {
-            let is_owner = ownership_eval.unwrap_or(false);
-            let has_role_match = check_role_rule(rule, &claims.role);
-
-            // Allowed if user is the record owner OR user holds an authorized role
-            if is_owner || has_role_match {
-                return Ok(());
-            }
-
-            return Err((
-                StatusCode::FORBIDDEN,
-                Json(json!({
-                    "code": 403,
-                    "message": format!(
-                        "Permission denied. You must be the owner of this record or have an authorized role to {} this record.",
-                        action_name
-                    )
-                })),
-            ));
-        }
-
-        // Case 2: Rule has ownership constraint only
-        // (e.g. `user_id = @request.auth.id`, `created_by = @request.auth.id`, `id = @request.auth.id`)
-        if let Some(is_owner) = ownership_eval {
-            if matches!(action, RecordAction::Update | RecordAction::Delete) {
-                if !is_owner {
-                    return Err((
-                        StatusCode::FORBIDDEN,
-                        Json(json!({
-                            "code": 403,
-                            "message": format!("Permission denied. You are not authorized to {} this record because you are not its owner.", action_name)
-                        })),
-                    ));
-                }
-            }
-            return Ok(());
-        }
-
-        // Case 3: Rule has role constraint only
-        // (e.g. `@request.auth.role = 'creator'`, `creator, admin`)
-        if has_role {
-            if !check_role_rule(rule, &claims.role) {
-                return Err((
-                    StatusCode::FORBIDDEN,
-                    Json(json!({
-                        "code": 403,
-                        "message": format!(
-                            "Permission denied. Your role '{}' is not authorized to {} records in this collection.",
-                            claims.role, action_name
-                        )
-                    })),
-                ));
-            }
-            return Ok(());
-        }
-
-        // Case 4: Default auth requirement or custom auth expression (e.g. `@request.auth.id != ""`)
+    if evaluate_rule_expression(rule, auth, existing_record) {
         return Ok(());
     }
 
-    // Default: no rule, empty rule, or default "@request.auth.id != \"\"":
-    // Requires authenticated logged-in user!
     if auth.is_none() {
-        let action_name = match action {
-            RecordAction::List => "list",
-            RecordAction::All => "fetch all",
-            RecordAction::View => "view",
-            RecordAction::Create => "create",
-            RecordAction::Update => "update",
-            RecordAction::Delete => "delete",
-        };
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(json!({
@@ -744,5 +922,74 @@ pub fn check_permission(
         ));
     }
 
-    Ok(())
+    Err((
+        StatusCode::FORBIDDEN,
+        Json(json!({
+            "code": 403,
+            "message": format!(
+                "Permission denied. You do not satisfy the access rule to {} this record.",
+                action_name
+            )
+        })),
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_claims(sub: &str, role: &str) -> Claims {
+        Claims {
+            sub: sub.to_string(),
+            email: format!("{}@example.com", sub),
+            role: role.to_string(),
+            collection_id: None,
+            exp: 9999999999,
+            iat: 0,
+            tk: None,
+        }
+    }
+
+    #[test]
+    fn test_complex_rule_expressions() {
+        let admin_claims = mock_claims("admin_1", "admin");
+        let user_claims = mock_claims("user_4", "user");
+        let other_claims = mock_claims("user_5", "user");
+
+        let mut rec_map = Map::new();
+        rec_map.insert("created_by".to_string(), Value::String("user_4".to_string()));
+        rec_map.insert("status".to_string(), Value::String("published".to_string()));
+
+        let rule = r#"(@request.auth.role = "user" && created_by = @request.auth.id) || @request.auth.role = "admin""#;
+
+        // 1. Admin should pass
+        assert!(evaluate_rule_expression(rule, Some(&admin_claims), Some(&rec_map)));
+
+        // 2. Owner user should pass
+        assert!(evaluate_rule_expression(rule, Some(&user_claims), Some(&rec_map)));
+
+        // 3. Non-owner user should fail
+        assert!(!evaluate_rule_expression(rule, Some(&other_claims), Some(&rec_map)));
+
+        // 4. Guest / Unauthenticated should fail
+        assert!(!evaluate_rule_expression(rule, None, Some(&rec_map)));
+    }
+
+    #[test]
+    fn test_row_level_security_filter_building() {
+        let user_claims = mock_claims("user_4", "user");
+        let admin_claims = mock_claims("admin_1", "admin");
+
+        let rule = r#"(@request.auth.role = "user" && created_by = @request.auth.id) || @request.auth.role = "admin""#;
+
+        // Admin has no filter
+        let admin_filter = build_row_level_security_filter(Some(rule), Some(&admin_claims), None);
+        assert!(admin_filter.is_none());
+
+        // User gets an RLS filter with their ID
+        let user_filter = build_row_level_security_filter(Some(rule), Some(&user_claims), None);
+        assert!(user_filter.is_some());
+        let f = user_filter.unwrap();
+        assert!(f.contains("'user_4'"));
+    }
 }

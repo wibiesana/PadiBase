@@ -613,7 +613,7 @@ pub fn create_router(state: AppState) -> Router {
         .layer(DefaultBodyLimit::max(files::max_file_bytes() + 2 * 1024 * 1024))
         .layer(
             CompressionLayer::new().compress_when(
-                SizeAbove::new(512)
+                SizeAbove::new(4096)
                     .and(NotForContentType::new("text/event-stream"))
                     .and(NotForContentType::IMAGES)
                     .and(NotForContentType::GRPC),

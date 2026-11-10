@@ -924,9 +924,11 @@ let currentCollection = "users";
         const btn = document.getElementById(`rail${v.charAt(0).toUpperCase() + v.slice(1)}Btn`);
         if (btn) {
           if (v === view) {
-            btn.className = "w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-bold transition bg-emerald-600 text-white shadow-sm relative";
+            btn.classList.add('rail-nav-active');
+            btn.classList.remove('rail-nav-inactive', 'text-slate-400', 'bg-emerald-600');
           } else {
-            btn.className = "w-full flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-slate-900 transition relative";
+            btn.classList.remove('rail-nav-active', 'bg-emerald-600', 'text-white');
+            btn.classList.add('rail-nav-inactive', 'text-slate-400');
           }
         }
       });
@@ -4295,6 +4297,648 @@ let currentCollection = "users";
     }
 
     // ================= INLINE COLLECTION SETTINGS & VISUAL ACCESS RULES =================
+    function resolveCollectionOwnerExpr(collection) {
+      if (!collection) return { col: 'user_id', expr: 'user_id = @request.auth.id', exists: false };
+      const cName = collection.name || '';
+      if (cName === 'users') {
+        return { col: 'id', expr: 'id = @request.auth.id', exists: true };
+      }
+      const fields = (collection.schema || []).map(f => (f.name || '').toLowerCase());
+      const candidates = ['created_by', 'user_id', 'author_id', 'owner_id', 'creator_id', 'user', 'account_id'];
+      for (const cand of candidates) {
+        if (fields.includes(cand)) {
+          return { col: cand, expr: `${cand} = @request.auth.id`, exists: true };
+        }
+      }
+      if (collection.blameable) {
+        return { col: 'created_by', expr: 'created_by = @request.auth.id', exists: true };
+      }
+      const userRel = (collection.schema || []).find(f => (f.relationTable && f.relationTable.toLowerCase() === 'users') || (f.relation_table && f.relation_table.toLowerCase() === 'users'));
+      if (userRel && userRel.name) {
+        return { col: userRel.name, expr: `${userRel.name} = @request.auth.id`, exists: true };
+      }
+      return { col: 'user_id', expr: 'user_id = @request.auth.id', exists: false };
+    }
+
+    // ================= VISUAL RULE BUILDER & EXPRESSION STUDIO =================
+    let currentRuleBuilderTarget = "inlineInput_updateRule";
+    let currentRuleBuilderConditions = [];
+
+    function openRuleBuilderModal(targetInputId, ruleKey, ruleLabel) {
+      const col = collections.find(c => c.name === currentCollection) || collections[0] || { name: 'table', schema: [] };
+      const cName = col.name;
+      const ownerInfo = resolveCollectionOwnerExpr(col);
+      const ownerCol = ownerInfo.col;
+
+      if (targetInputId) {
+        currentRuleBuilderTarget = targetInputId;
+      } else {
+        currentRuleBuilderTarget = "inlineInput_updateRule";
+      }
+
+      const selectEl = document.getElementById('rbTargetRuleSelect');
+      if (selectEl) {
+        let found = false;
+        for (let i = 0; i < selectEl.options.length; i++) {
+          if (selectEl.options[i].value === currentRuleBuilderTarget) {
+            selectEl.selectedIndex = i;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          selectEl.selectedIndex = 4; // updateRule
+          currentRuleBuilderTarget = selectEl.value;
+        }
+      }
+
+      const tableBadge = document.getElementById('rbCurrentTableBadge');
+      if (tableBadge) tableBadge.textContent = cName;
+
+      const isCreate = currentRuleBuilderTarget === 'inlineInput_createRule';
+      const noticeEl = document.getElementById('rbCreateContextNotice');
+      if (noticeEl) {
+        if (isCreate) noticeEl.classList.remove('hidden');
+        else noticeEl.classList.add('hidden');
+      }
+
+      renderRuleBuilderPresets(col, ownerCol);
+
+      const targetInput = document.getElementById(currentRuleBuilderTarget);
+      const currentVal = targetInput ? targetInput.value.trim() : '';
+
+      const rawInput = document.getElementById('rbRawExpressionInput');
+      if (rawInput) {
+        rawInput.value = currentVal || (isCreate ? '@request.auth.id != ""' : `(@request.auth.role = "user" && ${ownerCol} = @request.auth.id) || @request.auth.role = "admin"`);
+      }
+
+      parseExpressionIntoConditions(rawInput ? rawInput.value : '');
+      updateRuleSimulator();
+
+      const modal = document.getElementById('ruleBuilderModal');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    function closeRuleBuilderModal() {
+      const modal = document.getElementById('ruleBuilderModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function onRuleBuilderTargetChange() {
+      const selectEl = document.getElementById('rbTargetRuleSelect');
+      if (!selectEl) return;
+      currentRuleBuilderTarget = selectEl.value;
+
+      const col = collections.find(c => c.name === currentCollection) || collections[0] || { name: 'table', schema: [] };
+      const ownerInfo = resolveCollectionOwnerExpr(col);
+      const isCreate = currentRuleBuilderTarget === 'inlineInput_createRule';
+
+      const noticeEl = document.getElementById('rbCreateContextNotice');
+      if (noticeEl) {
+        if (isCreate) noticeEl.classList.remove('hidden');
+        else noticeEl.classList.add('hidden');
+      }
+
+      renderRuleBuilderPresets(col, ownerInfo.col);
+
+      if (!currentRuleBuilderTarget.startsWith('apply_')) {
+        const targetInput = document.getElementById(currentRuleBuilderTarget);
+        if (targetInput && targetInput.value.trim()) {
+          const rawInput = document.getElementById('rbRawExpressionInput');
+          if (rawInput) {
+            rawInput.value = targetInput.value.trim();
+            parseExpressionIntoConditions(rawInput.value);
+            updateRuleSimulator();
+          }
+        } else {
+          const rawInput = document.getElementById('rbRawExpressionInput');
+          if (rawInput) {
+            rawInput.value = isCreate ? '@request.auth.id != ""' : `(@request.auth.role = "user" && ${ownerInfo.col} = @request.auth.id) || @request.auth.role = "admin"`;
+            parseExpressionIntoConditions(rawInput.value);
+            updateRuleSimulator();
+          }
+        }
+      }
+    }
+
+    function renderRuleBuilderPresets(col, ownerCol) {
+      const container = document.getElementById('rbPresetCardsContainer');
+      if (!container) return;
+
+      const isCreate = currentRuleBuilderTarget === 'inlineInput_createRule';
+
+      let presets = [];
+      if (isCreate) {
+        presets = [
+          {
+            id: 'create_require_auth',
+            title: 'All Authenticated Users',
+            tag: 'Recommended for Create',
+            tagCls: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+            desc: 'Any signed-in user with a valid JWT token can create new records. Blameable stamps created_by automatically.',
+            expr: `@request.auth.id != ""`
+          },
+          {
+            id: 'create_admin_staff',
+            title: 'Authorized Roles Only',
+            tag: 'Role Clearance',
+            tagCls: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+            desc: 'Restricts record creation strictly to users with specific roles (e.g. admin or staff/editor).',
+            expr: `@request.auth.role = "admin" || @request.auth.role = "staff"`
+          },
+          {
+            id: 'create_public',
+            title: 'Public Submission (Open)',
+            tag: 'Public / Guest',
+            tagCls: 'bg-blue-100 text-blue-800 border-blue-200',
+            desc: 'Allow anyone, including anonymous visitors without authentication, to submit/create records.',
+            expr: `public`
+          },
+          {
+            id: 'create_admin_only',
+            title: 'Locked (Admin Only)',
+            tag: 'Admin Only',
+            tagCls: 'bg-rose-100 text-rose-800 border-rose-200',
+            desc: 'Restricted strictly to system administrators.',
+            expr: `admin`
+          }
+        ];
+      } else {
+        presets = [
+          {
+            id: 'user_own_admin_all',
+            title: 'User Own Data, Admin All',
+            tag: 'Recommended',
+            tagCls: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+            desc: 'Regular users can only view & edit their own records. Admins have unrestricted access.',
+            expr: `(@request.auth.role = "user" && ${ownerCol} = @request.auth.id) || @request.auth.role = "admin"`
+          },
+          {
+            id: 'owner_or_admin',
+            title: 'Record Owner OR Admin',
+            tag: 'Ownership + Role',
+            tagCls: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+            desc: 'Record creator or any user with role admin/editor.',
+            expr: `${ownerCol} = @request.auth.id || @request.auth.role = "admin"`
+          },
+          {
+            id: 'multi_role',
+            title: 'Specific Roles Only',
+            tag: 'Multi-Role RBAC',
+            tagCls: 'bg-amber-100 text-amber-800 border-amber-200',
+            desc: 'Access granted only to users with role admin or manager.',
+            expr: `@request.auth.role = "admin" || @request.auth.role = "manager"`
+          },
+          {
+            id: 'require_auth',
+            title: 'All Authenticated Users',
+            tag: 'Require Login',
+            tagCls: 'bg-teal-100 text-teal-800 border-teal-200',
+            desc: 'Any signed-in user with a valid JWT authentication token.',
+            expr: `@request.auth.id != ""`
+          },
+          {
+            id: 'public_open',
+            title: 'Public Access (Open)',
+            tag: 'Public',
+            tagCls: 'bg-blue-100 text-blue-800 border-blue-200',
+            desc: 'Anyone, including anonymous visitors without authentication.',
+            expr: `public`
+          },
+          {
+            id: 'admin_only',
+            title: 'Locked (Admin Only)',
+            tag: 'Admin Only',
+            tagCls: 'bg-rose-100 text-rose-800 border-rose-200',
+            desc: 'Restricted strictly to system administrators.',
+            expr: `admin`
+          }
+        ];
+      }
+
+      container.innerHTML = presets.map(p => `
+        <div onclick="applyRulePresetCard('${escapeHtml(p.expr).replace(/'/g, "\\'")}')" class="p-3 rounded-2xl bg-slate-50 hover:bg-indigo-50/60 border border-slate-200 hover:border-indigo-300 transition cursor-pointer flex flex-col justify-between group shadow-2xs">
+          <div class="space-y-1">
+            <div class="flex items-center justify-between gap-1">
+              <span class="font-extrabold text-slate-800 group-hover:text-indigo-900 text-xs">${p.title}</span>
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-bold border ${p.tagCls}">${p.tag}</span>
+            </div>
+            <p class="text-[11px] text-slate-500 group-hover:text-slate-600 leading-snug">${p.desc}</p>
+          </div>
+          <div class="mt-2 pt-1.5 border-t border-slate-200/70 font-mono text-[10px] text-indigo-700 truncate font-semibold">
+            ${escapeHtml(p.expr)}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function applyRulePresetCard(expr) {
+      const rawInput = document.getElementById('rbRawExpressionInput');
+      if (rawInput) {
+        rawInput.value = expr;
+      }
+      parseExpressionIntoConditions(expr);
+      updateRuleSimulator();
+      showToast('Preset loaded into rule builder!', 'info');
+    }
+
+    function parseExpressionIntoConditions(expr) {
+      const clean = (expr || '').trim();
+      currentRuleBuilderConditions = [];
+
+      if (!clean || clean === 'public' || clean === 'admin' || clean === '@request.auth.id != ""') {
+        if (clean === 'public') {
+          currentRuleBuilderConditions.push({ connector: 'AND', field: 'public', op: '=', val: 'true', inGroup: false });
+        } else if (clean === 'admin') {
+          currentRuleBuilderConditions.push({ connector: 'AND', field: '@request.auth.role', op: '=', val: '"admin"', inGroup: false });
+        } else if (clean === '@request.auth.id != ""') {
+          currentRuleBuilderConditions.push({ connector: 'AND', field: '@request.auth.id', op: '!=', val: '""', inGroup: false });
+        } else {
+          currentRuleBuilderConditions.push({ connector: 'AND', field: '@request.auth.role', op: '=', val: '"user"', inGroup: true });
+          currentRuleBuilderConditions.push({ connector: 'AND', field: 'created_by', op: '=', val: '@request.auth.id', inGroup: true });
+          currentRuleBuilderConditions.push({ connector: 'OR', field: '@request.auth.role', op: '=', val: '"admin"', inGroup: false });
+        }
+        renderRuleConditionsList();
+        return;
+      }
+
+      const orParts = clean.split('||').map(s => s.trim()).filter(Boolean);
+      orParts.forEach((orPart, orIdx) => {
+        const isGroup = orPart.startsWith('(') && orPart.endsWith(')');
+        const inner = isGroup ? orPart.slice(1, -1).trim() : orPart;
+        const andParts = inner.split('&&').map(s => s.trim()).filter(Boolean);
+
+        andParts.forEach((andPart, andIdx) => {
+          let connector = (orIdx === 0 && andIdx === 0) ? 'AND' : (andIdx > 0 ? 'AND' : 'OR');
+          let field = '@request.auth.role';
+          let op = '=';
+          let val = '"user"';
+
+          const ops = ['!=', '==', '=', '!~', '~', '>=', '<=', '>', '<'];
+          for (const o of ops) {
+            if (andPart.includes(o)) {
+              const segs = andPart.split(o);
+              field = segs[0].trim();
+              op = o === '==' ? '=' : o;
+              val = segs.slice(1).join(o).trim();
+              break;
+            }
+          }
+
+          currentRuleBuilderConditions.push({
+            connector: connector,
+            field: field,
+            op: op,
+            val: val,
+            inGroup: isGroup
+          });
+        });
+      });
+
+      if (currentRuleBuilderConditions.length === 0) {
+        currentRuleBuilderConditions.push({ connector: 'AND', field: '@request.auth.role', op: '=', val: '"user"', inGroup: false });
+      }
+
+      renderRuleConditionsList();
+    }
+
+    function renderRuleConditionsList() {
+      const container = document.getElementById('rbConditionsList');
+      if (!container) return;
+
+      const col = collections.find(c => c.name === currentCollection) || { schema: [] };
+      const tableFields = (col.schema || []).map(f => f.name).filter(Boolean);
+      const ownerInfo = resolveCollectionOwnerExpr(col);
+
+      const fieldOptions = [
+        '@request.auth.role',
+        '@request.auth.id',
+        ownerInfo.col,
+        ...tableFields.filter(f => f !== ownerInfo.col && f !== 'id')
+      ];
+      const uniqueFields = Array.from(new Set(fieldOptions));
+
+      if (currentRuleBuilderConditions.length === 0) {
+        container.innerHTML = `
+          <div class="p-4 rounded-xl bg-slate-50 border border-dashed border-slate-300 text-center text-slate-400 text-xs">
+            No conditions yet. Click <strong>+ Add Condition</strong> or select a <strong>Preset</strong> above.
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = currentRuleBuilderConditions.map((cond, idx) => {
+        const isFirst = idx === 0;
+        return `
+          <div class="flex flex-wrap items-center gap-2 p-2.5 rounded-xl border ${cond.inGroup ? 'bg-indigo-50/40 border-indigo-200' : 'bg-slate-50 border-slate-200'} transition">
+            ${isFirst ? `
+              <span class="w-14 px-2 py-1.5 rounded-lg bg-slate-200 text-slate-700 font-extrabold text-[10px] text-center shrink-0">WHERE</span>
+            ` : `
+              <select onchange="updateRuleCondition(${idx}, 'connector', this.value)" class="w-14 px-1.5 py-1.5 rounded-lg font-extrabold text-[10px] text-center shrink-0 ${cond.connector === 'OR' ? 'bg-amber-100 text-amber-900 border border-amber-300' : 'bg-indigo-100 text-indigo-900 border border-indigo-300'} cursor-pointer">
+                <option value="AND" ${cond.connector === 'AND' ? 'selected' : ''}>AND</option>
+                <option value="OR" ${cond.connector === 'OR' ? 'selected' : ''}>OR</option>
+              </select>
+            `}
+
+            <div class="flex-1 min-w-[140px]">
+              <input type="text" list="rbFieldListDatalist" value="${escapeHtml(cond.field)}" oninput="updateRuleCondition(${idx}, 'field', this.value)" placeholder="Field or @request..." class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs text-slate-800 focus:outline-none focus:border-indigo-600">
+            </div>
+
+            <select onchange="updateRuleCondition(${idx}, 'op', this.value)" class="w-20 bg-white border border-slate-300 rounded-lg px-2 py-1.5 font-mono text-xs text-slate-800 focus:outline-none focus:border-indigo-600 cursor-pointer">
+              <option value="=" ${cond.op === '=' ? 'selected' : ''}>= (equal)</option>
+              <option value="!=" ${cond.op === '!=' ? 'selected' : ''}>!= (not equal)</option>
+              <option value="~" ${cond.op === '~' ? 'selected' : ''}>~ (contains)</option>
+              <option value="!~" ${cond.op === '!~' ? 'selected' : ''}>!~ (not contains)</option>
+              <option value=">" ${cond.op === '>' ? 'selected' : ''}>&gt;</option>
+              <option value=">=" ${cond.op === '>=' ? 'selected' : ''}>&gt;=</option>
+              <option value="<" ${cond.op === '<' ? 'selected' : ''}>&lt;</option>
+              <option value="<=" ${cond.op === '<=' ? 'selected' : ''}>&lt;=</option>
+            </select>
+
+            <div class="flex-1 min-w-[140px] relative">
+              <input type="text" value="${escapeHtml(cond.val)}" oninput="updateRuleCondition(${idx}, 'val', this.value)" placeholder='@request.auth.id or "value"' class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-mono text-xs text-slate-800 focus:outline-none focus:border-indigo-600">
+            </div>
+
+            <button type="button" onclick="toggleConditionGroup(${idx})" class="px-2 py-1.5 rounded-lg border text-[10px] font-bold transition cursor-pointer ${cond.inGroup ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}" title="Group into ( ... ) parentheses">
+              ( )
+            </button>
+
+            <button type="button" onclick="removeRuleConditionRow(${idx})" class="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition cursor-pointer" title="Remove this condition">
+              <i class="fa-solid fa-trash-can text-xs"></i>
+            </button>
+          </div>
+        `;
+      }).join('');
+
+      let datalist = document.getElementById('rbFieldListDatalist');
+      if (!datalist) {
+        datalist = document.createElement('datalist');
+        datalist.id = 'rbFieldListDatalist';
+        document.body.appendChild(datalist);
+      }
+      datalist.innerHTML = uniqueFields.map(f => `<option value="${escapeHtml(f)}"></option>`).join('');
+    }
+
+    function addRuleConditionRow() {
+      const col = collections.find(c => c.name === currentCollection) || { schema: [] };
+      const ownerInfo = resolveCollectionOwnerExpr(col);
+      const isFirst = currentRuleBuilderConditions.length === 0;
+      const isCreate = currentRuleBuilderTarget === 'inlineInput_createRule';
+
+      currentRuleBuilderConditions.push({
+        connector: isFirst ? 'AND' : 'OR',
+        field: isCreate ? '@request.auth.role' : ownerInfo.col,
+        op: '=',
+        val: isCreate ? '"admin"' : '@request.auth.id',
+        inGroup: false
+      });
+
+      renderRuleConditionsList();
+      recomputeExpressionFromConditions();
+    }
+
+    function removeRuleConditionRow(idx) {
+      currentRuleBuilderConditions.splice(idx, 1);
+      renderRuleConditionsList();
+      recomputeExpressionFromConditions();
+    }
+
+    function updateRuleCondition(idx, key, val) {
+      if (currentRuleBuilderConditions[idx]) {
+        currentRuleBuilderConditions[idx][key] = val;
+        recomputeExpressionFromConditions();
+      }
+    }
+
+    function toggleConditionGroup(idx) {
+      if (currentRuleBuilderConditions[idx]) {
+        currentRuleBuilderConditions[idx].inGroup = !currentRuleBuilderConditions[idx].inGroup;
+        renderRuleConditionsList();
+        recomputeExpressionFromConditions();
+      }
+    }
+
+    function recomputeExpressionFromConditions() {
+      if (currentRuleBuilderConditions.length === 0) {
+        const rawInput = document.getElementById('rbRawExpressionInput');
+        if (rawInput) rawInput.value = '';
+        updateRuleSimulator();
+        return;
+      }
+
+      let groups = [];
+      let currentGroup = [];
+      let lastInGroup = null;
+
+      currentRuleBuilderConditions.forEach(cond => {
+        if (lastInGroup === null || cond.inGroup === lastInGroup) {
+          currentGroup.push(cond);
+        } else {
+          groups.push({ inGroup: lastInGroup, items: currentGroup });
+          currentGroup = [cond];
+        }
+        lastInGroup = cond.inGroup;
+      });
+      if (currentGroup.length > 0) {
+        groups.push({ inGroup: lastInGroup, items: currentGroup });
+      }
+
+      const formattedSegments = groups.map(grp => {
+        const segStr = grp.items.map((item, i) => {
+          const conn = i === 0 ? '' : (item.connector === 'OR' ? ' || ' : ' && ');
+          return `${conn}${item.field} ${item.op} ${item.val}`;
+        }).join('');
+        return (grp.inGroup && grp.items.length > 1) ? `(${segStr})` : segStr;
+      });
+
+      let fullExpr = formattedSegments.join(' || ');
+      const rawInput = document.getElementById('rbRawExpressionInput');
+      if (rawInput) {
+        rawInput.value = fullExpr;
+      }
+      updateRuleSimulator();
+    }
+
+    function onRawExpressionInputChange() {
+      updateRuleSimulator();
+    }
+
+    function copyRuleBuilderExpr() {
+      const rawInput = document.getElementById('rbRawExpressionInput');
+      if (rawInput && rawInput.value) {
+        copyToClipboard(rawInput.value);
+      }
+    }
+
+    function simulateRuleExpression(expr, persona) {
+      const clean = (expr || '').trim();
+      if (!clean || clean === 'public' || clean === '*' || clean === 'anyone') {
+        return { allowed: true, reason: 'Public Access' };
+      }
+      if (clean === 'admin' || clean === 'locked') {
+        if (persona.role === 'admin' || persona.role === 'superadmin') {
+          return { allowed: true, reason: 'Admin Role' };
+        }
+        return { allowed: false, reason: 'Admin Only' };
+      }
+
+      if (persona.role === 'admin' || persona.role === 'superadmin') {
+        return { allowed: true, reason: 'Admin Bypass' };
+      }
+
+      if (clean === '@request.auth.id != ""' || clean === "@request.auth.id != ''") {
+        return persona.id ? { allowed: true, reason: 'Authenticated User' } : { allowed: false, reason: 'Not Logged In' };
+      }
+
+      if (!persona.id) {
+        return { allowed: false, reason: 'Authentication Required' };
+      }
+
+      let evaluatedExpr = clean;
+      evaluatedExpr = evaluatedExpr.replace(/@request\.auth\.id/g, `"${persona.id}"`);
+      evaluatedExpr = evaluatedExpr.replace(/@request\.auth\.role/g, `"${persona.role}"`);
+
+      const col = collections.find(c => c.name === currentCollection) || {};
+      const ownerInfo = resolveCollectionOwnerExpr(col);
+      const ownerCol = ownerInfo.col;
+
+      if (persona.is_owner) {
+        evaluatedExpr = evaluatedExpr.replace(new RegExp(`\\b${ownerCol}\\s*=\\s*"${persona.id}"`, 'g'), 'true');
+        evaluatedExpr = evaluatedExpr.replace(new RegExp(`\\b${ownerCol}\\s*==\\s*"${persona.id}"`, 'g'), 'true');
+      } else {
+        evaluatedExpr = evaluatedExpr.replace(new RegExp(`\\b${ownerCol}\\s*=\\s*"${persona.id}"`, 'g'), 'false');
+        evaluatedExpr = evaluatedExpr.replace(new RegExp(`\\b${ownerCol}\\s*==\\s*"${persona.id}"`, 'g'), 'false');
+      }
+
+      try {
+        let jsExpr = evaluatedExpr
+          .replace(/([^!=<>])=([^=])/g, '$1===$2')
+          .replace(/==/g, '===')
+          .replace(/~/g, '===');
+        if (/^[a-zA-Z0-9_\s"'!=<>&|().]+$/.test(jsExpr)) {
+          const fn = new Function(`return Boolean(${jsExpr});`);
+          const res = fn();
+          return { allowed: Boolean(res), reason: res ? 'Condition Satisfied' : 'Condition Mismatched' };
+        }
+      } catch (e) {
+        // Fallback
+      }
+
+      return { allowed: persona.is_owner, reason: persona.is_owner ? 'Record Owner' : 'Not Record Owner' };
+    }
+
+    function updateRuleSimulator() {
+      const rawInput = document.getElementById('rbRawExpressionInput');
+      const expr = rawInput ? rawInput.value.trim() : '';
+      const grid = document.getElementById('rbSimulatorResultsGrid');
+      if (!grid) return;
+
+      const personas = [
+        {
+          name: 'Guest / Public',
+          desc: 'Unauthenticated (No Token)',
+          icon: 'fa-regular fa-user text-slate-400',
+          id: '',
+          role: '',
+          is_owner: false
+        },
+        {
+          name: 'User (Owner)',
+          desc: 'ID: 4, Role: "user", Owner: Yes',
+          icon: 'fa-solid fa-user-check text-indigo-400',
+          id: '4',
+          role: 'user',
+          is_owner: true
+        },
+        {
+          name: 'User (Non-Owner)',
+          desc: 'ID: 5, Role: "user", Owner: No',
+          icon: 'fa-solid fa-user-xmark text-amber-400',
+          id: '5',
+          role: 'user',
+          is_owner: false
+        },
+        {
+          name: 'Administrator',
+          desc: 'ID: 1, Role: "admin"',
+          icon: 'fa-solid fa-crown text-amber-400',
+          id: '1',
+          role: 'admin',
+          is_owner: false
+        }
+      ];
+
+      grid.innerHTML = personas.map(p => {
+        const sim = simulateRuleExpression(expr, p);
+        return `
+          <div class="p-2.5 rounded-xl border ${sim.allowed ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200' : 'bg-slate-900 border-slate-800 text-slate-400'} flex flex-col justify-between space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-1.5">
+                <i class="${p.icon} text-xs"></i>
+                <span class="font-bold text-[11px] text-white">${p.name}</span>
+              </div>
+              <span class="px-1.5 py-0.5 rounded text-[9px] font-extrabold ${sim.allowed ? 'bg-emerald-500 text-slate-950' : 'bg-slate-800 text-slate-400'}">
+                ${sim.allowed ? 'ALLOWED' : 'DENIED'}
+              </span>
+            </div>
+            <div class="text-[10px] text-slate-400 leading-tight">
+              ${p.desc}
+            </div>
+            <div class="pt-1 border-t border-slate-800/80 font-mono text-[9px] ${sim.allowed ? 'text-emerald-400 font-bold' : 'text-rose-400'}">
+              ${sim.allowed ? '✓ ' + sim.reason : '✕ ' + sim.reason}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function resetRuleBuilder() {
+      const col = collections.find(c => c.name === currentCollection) || {};
+      const ownerInfo = resolveCollectionOwnerExpr(col);
+      const isCreate = currentRuleBuilderTarget === 'inlineInput_createRule';
+      const defExpr = isCreate ? '@request.auth.id != ""' : `(@request.auth.role = "user" && ${ownerInfo.col} = @request.auth.id) || @request.auth.role = "admin"`;
+      const rawInput = document.getElementById('rbRawExpressionInput');
+      if (rawInput) rawInput.value = defExpr;
+      parseExpressionIntoConditions(defExpr);
+      updateRuleSimulator();
+    }
+
+    function applyRuleBuilderToTarget() {
+      const rawInput = document.getElementById('rbRawExpressionInput');
+      const expr = rawInput ? rawInput.value.trim() : '';
+
+      if (currentRuleBuilderTarget === 'apply_all_write') {
+        const targets = ['inlineInput_createRule', 'inlineInput_updateRule', 'inlineInput_deleteRule'];
+        targets.forEach(tId => {
+          const el = document.getElementById(tId);
+          if (el) {
+            el.value = expr;
+            updateRoleDropdownUI(tId);
+          }
+        });
+        showToast('Rule successfully applied to all write operations (Create, Update, Delete)!', 'success');
+      } else if (currentRuleBuilderTarget === 'apply_all_rules') {
+        const targets = ['inlineInput_listRule', 'inlineInput_allRule', 'inlineInput_viewRule', 'inlineInput_createRule', 'inlineInput_updateRule', 'inlineInput_deleteRule'];
+        targets.forEach(tId => {
+          const el = document.getElementById(tId);
+          if (el) {
+            el.value = expr;
+            updateRoleDropdownUI(tId);
+          }
+        });
+        showToast('Rule successfully applied to all collection rules!', 'success');
+      } else {
+        const el = document.getElementById(currentRuleBuilderTarget);
+        if (el) {
+          el.value = expr;
+          updateRoleDropdownUI(currentRuleBuilderTarget);
+        }
+        showToast('Rule successfully applied to target input!', 'success');
+      }
+
+      closeRuleBuilderModal();
+    }
+
     function renderInlineCollectionSettings() {
       const col = collections.find(c => c.name === currentCollection) || collections[0];
       if (!col) return;
@@ -4327,7 +4971,8 @@ let currentCollection = "users";
         { key: 'deleteRule', label: '5. Delete Record (DELETE)', desc: 'Who is allowed to delete records from the table?', defaultVal: '@request.auth.id != ""' }
       ];
 
-      const ownerExpr = currentCollection === 'users' ? 'id = @request.auth.id' : 'user_id = @request.auth.id';
+      const ownerInfo = resolveCollectionOwnerExpr(col);
+      const ownerExpr = ownerInfo.expr;
 
       const rulesGrid = document.getElementById('inlineRulesGrid');
       if (rulesGrid) {
@@ -4348,8 +4993,14 @@ let currentCollection = "users";
                   <button type="button" onclick="applyRulePreset('${inputId}', '@request.auth.id != \\'\\'', 'set')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 font-semibold transition" title="Require Logged In User">
                     Require Auth
                   </button>
-                  <button type="button" onclick="applyRulePreset('${inputId}', '${ownerExpr}', 'append')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 text-indigo-700 font-bold hover:border-indigo-300 transition" title="Append Creator/Owner (${ownerExpr})">
+                  ${rc.key !== 'createRule' ? `
+                  <button type="button" onclick="applyRulePreset('${inputId}', '${ownerExpr}', 'append')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 text-indigo-700 font-bold hover:border-indigo-300 transition" title="${ownerInfo.exists ? `Append Creator/Owner (${ownerExpr})` : `Notice: Table has no ownership column (${ownerExpr})`}">
                     Creator / Owner
+                  </button>
+                  ` : ''}
+                  <button type="button" onclick="openRuleBuilderModal('${inputId}', '${rc.key}', '${rc.label}')" class="px-2 py-0.5 rounded-lg border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 font-bold hover:border-indigo-300 transition flex items-center space-x-1 cursor-pointer" title="Open Visual Rule Builder (&& / ||)">
+                    <i class="fa-solid fa-wand-magic-sparkles text-[9px] text-indigo-600"></i>
+                    <span>Rule Builder</span>
                   </button>
 
                   <!-- Role Multi-Select Dropdown -->
@@ -4720,9 +5371,9 @@ let currentCollection = "users";
         if (pane) pane.classList.toggle('hidden', t !== tab);
         if (btn) {
           if (t === tab) {
-            btn.className = "w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold bg-emerald-600 text-white shadow-2xs flex items-center space-x-2.5 transition shrink-0";
+            btn.className = "w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold rail-nav-active flex items-center space-x-2.5 transition shrink-0";
           } else {
-            btn.className = "w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold text-slate-700 hover:bg-slate-200/70 flex items-center space-x-2.5 transition shrink-0";
+            btn.className = "w-full text-left px-3 py-2.5 rounded-xl text-xs font-semibold rail-nav-inactive flex items-center space-x-2.5 transition shrink-0";
           }
         }
       });
@@ -5269,18 +5920,18 @@ let currentCollection = "users";
       };
 
       thead.innerHTML = `
-        <th class="py-3 px-3 w-8 border-r border-slate-200/60 text-center">
-          <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" ${isAllSelected ? 'checked' : ''} class="rounded border-slate-300">
+        <th class="py-3 px-3 w-8 border-r border-slate-800 text-center">
+          <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this.checked)" ${isAllSelected ? 'checked' : ''} class="rounded border-slate-700">
         </th>
-        <th class="py-3 px-3 w-20 border-r border-slate-200/60 text-center whitespace-nowrap">
-          <span class="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</span>
+        <th class="py-3 px-3 w-20 border-r border-slate-800 text-center whitespace-nowrap">
+          <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Action</span>
         </th>
-        <th onclick="toggleSort('id')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
-          <i class="fa-solid fa-fingerprint text-[10px] text-emerald-600 mr-1"></i> id ${sortIcon('id')}
+        <th onclick="toggleSort('id')" class="py-3 px-4 border-r border-slate-800 cursor-pointer hover:bg-slate-800/60 transition whitespace-nowrap">
+          <span class="text-slate-300">id</span> <span class="ml-1 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 text-[9px] font-mono font-bold">PK</span> ${sortIcon('id')}
         </th>
         ${schemaCols.map(c => `
-          <th onclick="toggleSort('${c.name}')" class="py-3 px-4 border-r border-slate-200/60 cursor-pointer hover:bg-emerald-50/50 transition whitespace-nowrap">
-            <i class="${FIELD_ICONS[c.type] || 'fa-solid fa-font'} text-[10px] text-emerald-600 mr-1"></i> ${c.name} ${sortIcon(c.name)}
+          <th onclick="toggleSort('${c.name}')" class="py-3 px-4 border-r border-slate-800 cursor-pointer hover:bg-slate-800/60 transition whitespace-nowrap">
+            <i class="${FIELD_ICONS[c.type] || 'fa-solid fa-font'} text-[10px] text-slate-500 mr-1"></i> <span class="text-slate-300">${c.name}</span> ${sortIcon(c.name)}
           </th>
         `).join('')}
       `;
@@ -5295,13 +5946,13 @@ let currentCollection = "users";
         tbody.innerHTML = `
           <tr>
             <td colspan="${totalColCount}" class="py-16 text-center text-slate-400 font-sans">
-              <div class="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto mb-3 text-lg">
+              <div class="w-12 h-12 rounded-2xl bg-slate-800/80 text-emerald-400 flex items-center justify-center mx-auto mb-3 text-lg border border-slate-700">
                 <i class="fa-solid fa-seedling"></i>
               </div>
-              <div class="text-sm font-bold text-slate-700 mb-1">No records found in table "${currentCollection}"</div>
+              <div class="text-sm font-bold text-slate-200 mb-1">No records found in table "${currentCollection}"</div>
               <p class="text-xs text-slate-400 mb-4">Add your first record or configure the table columns.</p>
               <div class="flex items-center justify-center space-x-2">
-                <button onclick="openCollectionDrawer(true)" class="px-3.5 py-2 rounded-xl border border-slate-300 hover:bg-slate-100 text-slate-700 text-xs font-bold">
+                <button onclick="openCollectionDrawer(true)" class="px-3.5 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-200 text-xs font-bold">
                   <i class="fa-solid fa-sliders mr-1"></i> Configure Schema &amp; Rules
                 </button>
                 <button onclick="openRecordDrawer(null)" class="px-4 py-2 rounded-xl padi-btn-primary text-white text-xs font-bold shadow-sm">
@@ -5315,22 +5966,22 @@ let currentCollection = "users";
         tbody.innerHTML = items.map(item => {
           const checked = selectedRecordIds.has(item.id) ? 'checked' : '';
           return `
-            <tr class="hover:bg-emerald-50/30 transition group">
-              <td class="py-2.5 px-3 border-r border-slate-100 text-center">
-                <input type="checkbox" ${checked} onchange="toggleSelectRecord('${item.id}', this.checked)" class="rounded border-slate-300">
+            <tr class="hover:bg-slate-800/50 transition group">
+              <td class="py-2.5 px-3 border-r border-slate-800/80 text-center">
+                <input type="checkbox" ${checked} onchange="toggleSelectRecord('${item.id}', this.checked)" class="rounded border-slate-700">
               </td>
-              <td class="py-2.5 px-3 border-r border-slate-100 text-center whitespace-nowrap">
-                <button type="button" onclick="openRecordDrawer('${item.id}')" class="px-2.5 py-1 rounded-lg bg-amber-400 hover:bg-amber-500 active:scale-95 text-slate-900 font-bold text-[11px] shadow-xs hover:shadow transition inline-flex items-center space-x-1.5 cursor-pointer border border-amber-300" title="Edit Record">
-                  <i class="fa-solid fa-pen-to-square text-[10px] text-amber-950"></i>
+              <td class="py-2.5 px-3 border-r border-slate-800/80 text-center whitespace-nowrap">
+                <button type="button" onclick="openRecordDrawer('${item.id}')" class="safe-edit-btn px-2.5 py-1 rounded-lg font-bold text-[11px] transition inline-flex items-center space-x-1.5 cursor-pointer" title="Edit Record">
+                  <i class="fa-solid fa-pen-to-square text-[10px]"></i>
                   <span>Edit</span>
                 </button>
               </td>
-              <td onclick="copyToClipboard('${item.id}')" class="py-2.5 px-4 border-r border-slate-100 whitespace-nowrap cursor-pointer">
-                <span class="px-2.5 py-0.5 rounded-lg bg-emerald-50 group-hover:bg-emerald-100 text-emerald-800 border border-emerald-200/70 font-semibold text-[11px] inline-flex items-center" title="Click to copy ID">
-                  ${item.id} <i class="fa-regular fa-copy ml-1.5 text-[9px] opacity-50"></i>
+              <td onclick="copyToClipboard('${item.id}')" class="py-2.5 px-4 border-r border-slate-800/80 whitespace-nowrap cursor-pointer">
+                <span class="px-2 py-0.5 rounded-md bg-slate-800/80 group-hover:bg-slate-700 text-slate-300 border border-slate-700/80 font-mono font-semibold text-[11px] inline-flex items-center" title="Click to copy ID">
+                  ${item.id} <i class="fa-regular fa-copy ml-1.5 text-[9px] opacity-40"></i>
                 </span>
               </td>
-              ${schemaCols.map(c => `<td class="py-2.5 px-4 border-r border-slate-100 max-w-[240px] truncate">${formatCell(item[c.name], c.type, item, c.name)}</td>`).join('')}
+              ${schemaCols.map(c => `<td class="py-2.5 px-4 border-r border-slate-800/80 max-w-[240px] truncate">${formatCell(item[c.name], c.type, item, c.name)}</td>`).join('')}
             </tr>
           `;
         }).join('');
@@ -5396,7 +6047,7 @@ let currentCollection = "users";
           ? '<span class="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-bold">TRUE</span>'
           : '<span class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 text-[10px] font-bold">FALSE</span>';
       }
-      if (typeof val === 'object') return `<span class="text-teal-700">${JSON.stringify(val)}</span>`;
+      if (typeof val === 'object') return `<span class="json-relation-pill truncate inline-block max-w-[230px]">${JSON.stringify(val)}</span>`;
       return String(val).replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
@@ -6117,6 +6768,15 @@ let currentCollection = "users";
       if (mode === 'set' || !current || current === 'public' || current === '@request.auth.id != ""' || current === "@request.auth.id != ''") {
         el.value = snippet;
         updateRoleDropdownUI(inputId);
+        if (snippet && snippet.includes('@request.auth.id') && !snippet.includes('@request.auth.id !=')) {
+          const targetCol = collections.find(c => c.name === currentCollection);
+          if (targetCol) {
+            const ownerInfo = resolveCollectionOwnerExpr(targetCol);
+            if (!ownerInfo.exists) {
+              showToast(`Perhatian: Tabel "${currentCollection}" belum memiliki kolom "${ownerInfo.col}". Tambahkan kolom tersebut ke schema atau aktifkan opsi Blameable agar aturan kepemilikan berfungsi.`, 'warning');
+            }
+          }
+        }
         return;
       }
 
@@ -6134,6 +6794,15 @@ let currentCollection = "users";
 
       el.value = `${current} || ${snippet}`;
       updateRoleDropdownUI(inputId);
+      if (snippet && snippet.includes('@request.auth.id') && !snippet.includes('@request.auth.id !=')) {
+        const targetCol = collections.find(c => c.name === currentCollection);
+        if (targetCol) {
+          const ownerInfo = resolveCollectionOwnerExpr(targetCol);
+          if (!ownerInfo.exists) {
+            showToast(`Perhatian: Tabel "${currentCollection}" belum memiliki kolom "${ownerInfo.col}". Tambahkan kolom tersebut ke schema atau aktifkan opsi Blameable agar aturan kepemilikan berfungsi.`, 'warning');
+          }
+        }
+      }
     }
 
     function openCollectionDrawer(isEdit, tab = 'fields') {
@@ -6717,29 +7386,30 @@ let currentCollection = "users";
 
     let currentApiPreviewUrl = "";
     let currentApiPreviewPath = "";
+    let currentApiPreviewSdk = "";
     let currentApiPreviewJs = "";
     let currentApiPreviewCurl = "";
     let currentApiPreviewResponseJson = "";
-    let currentApiSnippetMode = "js"; // "js" | "curl"
+    let currentApiSnippetMode = "sdk"; // "sdk" | "js" | "curl"
 
     function toggleApiSnippetMode(mode) {
       currentApiSnippetMode = mode;
+      const sdkEl = document.getElementById('apiSnippetPre_sdk');
       const jsEl = document.getElementById('apiSnippetPre_js');
       const curlEl = document.getElementById('apiSnippetPre_curl');
+      const btnSdk = document.getElementById('apiSnippetBtn_sdk');
       const btnJs = document.getElementById('apiSnippetBtn_js');
       const btnCurl = document.getElementById('apiSnippetBtn_curl');
-      if (jsEl && curlEl) {
+      if (sdkEl && jsEl && curlEl) {
+        sdkEl.classList.toggle('hidden', mode !== 'sdk');
         jsEl.classList.toggle('hidden', mode !== 'js');
         curlEl.classList.toggle('hidden', mode !== 'curl');
       }
-      if (btnJs && btnCurl) {
-        btnJs.className = mode === 'js'
-          ? "px-2 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[10px] shadow-2xs transition"
-          : "px-2 py-0.5 rounded-md text-slate-600 hover:text-slate-900 font-semibold text-[10px] transition";
-        btnCurl.className = mode === 'curl'
-          ? "px-2 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[10px] shadow-2xs transition"
-          : "px-2 py-0.5 rounded-md text-slate-600 hover:text-slate-900 font-semibold text-[10px] transition";
-      }
+      const activeCls = "px-2.5 py-0.5 rounded-md bg-emerald-600 text-white font-bold text-[10px] shadow-2xs transition cursor-pointer";
+      const inactiveCls = "px-2.5 py-0.5 rounded-md text-slate-400 hover:text-white font-semibold text-[10px] transition cursor-pointer";
+      if (btnSdk) btnSdk.className = mode === 'sdk' ? activeCls : inactiveCls;
+      if (btnJs) btnJs.className = mode === 'js' ? activeCls : inactiveCls;
+      if (btnCurl) btnCurl.className = mode === 'curl' ? activeCls : inactiveCls;
     }
 
     // ================= UNIFIED RESOURCE & FIELD PROJECTIONS (LEVEL 2) =================
@@ -7258,45 +7928,45 @@ let currentCollection = "users";
       return `
         <div class="space-y-4">
           <!-- What Resource Does (Explanation Banner) -->
-          <div class="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50 border border-emerald-200/80 shadow-2xs space-y-3">
+          <div class="p-4 rounded-2xl bg-[#0e172a] border border-emerald-500/30 shadow-2xs space-y-3">
             <div class="flex items-start justify-between gap-3">
               <div class="flex items-start space-x-3">
-                <div class="w-9 h-9 rounded-xl bg-white text-emerald-600 flex items-center justify-center text-base shrink-0 shadow-2xs border border-emerald-200/60">
+                <div class="w-9 h-9 rounded-xl bg-emerald-950/60 text-emerald-400 flex items-center justify-center text-base shrink-0 shadow-2xs border border-emerald-500/30">
                   <i class="fa-solid fa-shapes"></i>
                 </div>
                 <div>
-                  <h4 class="text-xs font-extrabold text-slate-900 flex items-center space-x-1.5">
+                  <h4 class="text-xs font-extrabold text-white flex items-center space-x-1.5">
                     <span>API Resource &amp; Output Transformer</span>
                     <span class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-emerald-600 text-white font-mono uppercase">Unified</span>
                   </h4>
-                  <p class="text-[11px] text-slate-600 mt-0.5 leading-relaxed">
-                    API Resource provides a single unified output transformer for table <code class="font-mono font-bold text-emerald-800">${col.name}</code>. It automatically shapes data, masks hidden columns, and expands relations across <strong>List (/api/${col.name})</strong>, <strong>All (/api/${col.name}/all)</strong>, and <strong>Single View (/api/${col.name}/:id)</strong>.
+                  <p class="text-[11px] text-slate-300 mt-0.5 leading-relaxed">
+                    API Resource provides a single unified output transformer for table <code class="font-mono font-bold text-emerald-400">${col.name}</code>. It automatically shapes data, masks hidden columns, and expands relations across <strong>List (/api/${col.name})</strong>, <strong>All (/api/${col.name}/all)</strong>, and <strong>Single View (/api/${col.name}/:id)</strong>.
                   </p>
                 </div>
               </div>
             </div>
 
             <!-- Key Capabilities Grid -->
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-emerald-200/60 text-[11px]">
-              <div class="flex items-start space-x-2 bg-white/70 p-2.5 rounded-xl border border-emerald-100">
-                <i class="fa-solid fa-shield-halved text-emerald-600 mt-0.5 shrink-0"></i>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-slate-800 text-[11px]">
+              <div class="flex items-start space-x-2 bg-[#090d16] p-2.5 rounded-xl border border-slate-800">
+                <i class="fa-solid fa-shield-halved text-emerald-400 mt-0.5 shrink-0"></i>
                 <div>
-                  <div class="font-bold text-slate-800">1. Data Masking</div>
-                  <div class="text-[10px] text-slate-500">Unselected columns stay sealed server-side and never leak to clients.</div>
+                  <div class="font-bold text-slate-100">1. Data Masking</div>
+                  <div class="text-[10px] text-slate-400">Unselected columns stay sealed server-side and never leak to clients.</div>
                 </div>
               </div>
-              <div class="flex items-start space-x-2 bg-white/70 p-2.5 rounded-xl border border-teal-100">
-                <i class="fa-solid fa-network-wired text-teal-600 mt-0.5 shrink-0"></i>
+              <div class="flex items-start space-x-2 bg-[#090d16] p-2.5 rounded-xl border border-slate-800">
+                <i class="fa-solid fa-network-wired text-teal-400 mt-0.5 shrink-0"></i>
                 <div>
-                  <div class="font-bold text-slate-800">2. Embedded Relations</div>
-                  <div class="text-[10px] text-slate-500">Automatically embeds related records as nested JSON objects (e.g. user, chapter).</div>
+                  <div class="font-bold text-slate-100">2. Embedded Relations</div>
+                  <div class="text-[10px] text-slate-400">Automatically embeds related records as nested JSON objects (e.g. user, chapter).</div>
                 </div>
               </div>
-              <div class="flex items-start space-x-2 bg-white/70 p-2.5 rounded-xl border border-indigo-100">
-                <i class="fa-solid fa-cube text-indigo-600 mt-0.5 shrink-0"></i>
+              <div class="flex items-start space-x-2 bg-[#090d16] p-2.5 rounded-xl border border-slate-800">
+                <i class="fa-solid fa-cube text-indigo-400 mt-0.5 shrink-0"></i>
                 <div>
-                  <div class="font-bold text-slate-800">3. Unified API Contract</div>
-                  <div class="text-[10px] text-slate-500">One consistent model transformation for all read endpoints.</div>
+                  <div class="font-bold text-slate-100">3. Unified API Contract</div>
+                  <div class="text-[10px] text-slate-400">One consistent model transformation for all read endpoints.</div>
                 </div>
               </div>
             </div>
@@ -7482,21 +8152,15 @@ let currentCollection = "users";
         const tabName = btn.getAttribute('data-api-tab');
         const isHidden = btn.classList.contains('hidden');
         if (tabName === action) {
-          if (tabName === 'rules') {
-            btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-indigo-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
-          } else if (tabName === 'resources') {
-            btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
-          } else {
-            btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl bg-emerald-600 text-white font-bold shadow-2xs flex items-center space-x-2 text-xs transition shrink-0`;
-          }
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl rail-nav-active font-bold flex items-center space-x-2 text-xs transition shrink-0`;
         } else if (tabName === 'resources') {
-          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-emerald-800 bg-emerald-50/70 hover:bg-emerald-100 font-bold flex items-center space-x-2 text-xs transition shrink-0`;
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl rail-nav-inactive text-emerald-400 font-bold flex items-center space-x-2 text-xs transition shrink-0`;
         } else if (tabName === 'rules') {
-          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-indigo-700 bg-indigo-50/70 hover:bg-indigo-100 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl rail-nav-inactive text-indigo-400 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         } else if (['register', 'auth', 'forgot', 'reset', 'change_pw', 'me'].includes(tabName)) {
-          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-teal-800 hover:bg-teal-50 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl rail-nav-inactive text-teal-400 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         } else {
-          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl text-slate-700 hover:bg-slate-200/70 font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
+          btn.className = `${isHidden ? 'hidden ' : ''}w-full text-left px-3 py-2 rounded-xl rail-nav-inactive font-semibold flex items-center space-x-2 text-xs transition shrink-0`;
         }
       });
 
@@ -7581,7 +8245,8 @@ let currentCollection = "users";
           }
         ];
 
-        const ownerExpr = cName === 'users' ? 'id = @request.auth.id' : 'user_id = @request.auth.id';
+        const ownerInfo = resolveCollectionOwnerExpr(col);
+        const ownerExpr = ownerInfo.expr;
 
         const rulesCardsHtml = rulesConfig.map((rc, i) => {
           const rawVal = (col[rc.key] && String(col[rc.key]).trim() !== '') 
@@ -7608,8 +8273,14 @@ let currentCollection = "users";
                   <button type="button" onclick="applyRulePreset('${inputId}', '@request.auth.id != \\'\\'', 'set')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 font-semibold transition cursor-pointer" title="Require Logged In User">
                     Require Auth
                   </button>
-                  <button type="button" onclick="applyRulePreset('${inputId}', '${ownerExpr}', 'append')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 text-indigo-700 font-bold hover:border-indigo-300 transition cursor-pointer" title="Append Creator/Owner (${ownerExpr})">
+                  ${rc.key !== 'createRule' ? `
+                  <button type="button" onclick="applyRulePreset('${inputId}', '${ownerExpr}', 'append')" class="px-2 py-0.5 rounded-lg border border-slate-200 bg-white hover:bg-indigo-50 text-indigo-700 font-bold hover:border-indigo-300 transition cursor-pointer" title="${ownerInfo.exists ? `Append Creator/Owner (${ownerExpr})` : `Notice: Table has no ownership column (${ownerExpr})`}">
                     Creator / Owner
+                  </button>
+                  ` : ''}
+                  <button type="button" onclick="openRuleBuilderModal('${inputId}', '${rc.key}', '${rc.label}')" class="px-2 py-0.5 rounded-lg border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 font-bold hover:border-indigo-300 transition flex items-center space-x-1 cursor-pointer" title="Open Visual Rule Builder (&& / ||)">
+                    <i class="fa-solid fa-wand-magic-sparkles text-[9px] text-indigo-600"></i>
+                    <span>Rule Builder</span>
                   </button>
 
                   <!-- Role Multi-Select Dropdown -->
@@ -7661,6 +8332,10 @@ let currentCollection = "users";
                 <button type="button" onclick="applyInlineSecurityProfile('recommended')" class="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-[11px] font-bold transition cursor-pointer">Public Read, Auth Write</button>
                 <button type="button" onclick="applyInlineSecurityProfile('public_all')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-semibold transition cursor-pointer">Public (All Open)</button>
                 <button type="button" onclick="applyInlineSecurityProfile('private_all')" class="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-[11px] font-semibold transition cursor-pointer">Require Auth</button>
+                <button type="button" onclick="openRuleBuilderModal()" class="px-2.5 py-1 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] font-bold shadow-xs transition flex items-center space-x-1.5 cursor-pointer">
+                  <i class="fa-solid fa-wand-magic-sparkles text-[10px]"></i>
+                  <span>Visual Rule Builder (&& / ||)</span>
+                </button>
               </div>
             </div>
 
@@ -7727,6 +8402,7 @@ let currentCollection = "users";
           badge: 'bg-emerald-100 text-emerald-800',
           path: `/api/${cName}?page=1&perPage=30`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// 1. Paginated records list (Auto eager-loads relations)\nconst result = await padi.table('${cName}').getList(1, 30, {\n  sort: '-created'\n});\nconsole.log(result.items, result.totalItems);`,
           js: `const res = await fetch('${baseUrl}/api/${cName}?page=1&perPage=30');\nconst { item, meta, debug } = await res.json();\nconsole.log(item, meta);`,
           curl: `curl -X GET "${baseUrl}/api/${cName}?page=1&perPage=30"`
         },
@@ -7737,6 +8413,7 @@ let currentCollection = "users";
           badge: 'bg-emerald-100 text-emerald-800',
           path: `/api/${cName}/all?limit=5000&sort_by=id&order=desc`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// 2. Fetch all records without pagination (max 5,000)\nconst items = await padi.table('${cName}').getFullList({\n  sort: '-created'\n});\nconsole.log(items);`,
           js: `const res = await fetch('${baseUrl}/api/${cName}/all?limit=5000&sort_by=id&order=desc');\nconst { item, debug } = await res.json();\nconsole.log(item);`,
           curl: `curl -X GET "${baseUrl}/api/${cName}/all?limit=5000&sort_by=id&order=desc"`
         },
@@ -7747,6 +8424,7 @@ let currentCollection = "users";
           badge: 'bg-emerald-100 text-emerald-800',
           path: `/api/${cName}/RECORD_ID`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// 3. Fetch single record by ID\nconst record = await padi.table('${cName}').getOne('RECORD_ID');\nconsole.log(record);`,
           js: `const res = await fetch('${baseUrl}/api/${cName}/RECORD_ID');\nconst { item } = await res.json();\nconsole.log(item);`,
           curl: `curl -X GET "${baseUrl}/api/${cName}/RECORD_ID"`
         },
@@ -7757,6 +8435,7 @@ let currentCollection = "users";
           badge: 'bg-sky-100 text-sky-800',
           path: `/api/${cName}`,
           statusCode: '201 Created',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// 4. Create new record\nconst newRecord = await padi.table('${cName}').create(${JSON.stringify(sampleObj, null, 2)});\nconsole.log('Created record ID:', newRecord.id);`,
           js: `const res = await fetch('${baseUrl}/api/${cName}', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`,
           curl: `curl -X POST "${baseUrl}/api/${cName}" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(sampleObj, null, 2)}'`
         },
@@ -7767,6 +8446,7 @@ let currentCollection = "users";
           badge: 'bg-amber-100 text-amber-800',
           path: `/api/${cName}/RECORD_ID`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// 5. Update record fields\nconst updated = await padi.table('${cName}').update('RECORD_ID', ${JSON.stringify(sampleObj, null, 2)});\nconsole.log('Updated record:', updated);`,
           js: `const res = await fetch('${baseUrl}/api/${cName}/RECORD_ID', {\n  method: 'PATCH',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify(${JSON.stringify(sampleObj, null, 2)})\n});\nconst { item } = await res.json();`,
           curl: `curl -X PATCH "${baseUrl}/api/${cName}/RECORD_ID" \\\n  -H "Content-Type: application/json" \\\n  -d '${JSON.stringify(sampleObj, null, 2)}'`
         },
@@ -7777,6 +8457,7 @@ let currentCollection = "users";
           badge: 'bg-rose-100 text-rose-800',
           path: `/api/${cName}/RECORD_ID`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// 6. Delete record by ID\nawait padi.table('${cName}').delete('RECORD_ID');\nconsole.log('Deleted successfully');`,
           js: `const res = await fetch('${baseUrl}/api/${cName}/RECORD_ID', {\n  method: 'DELETE'\n});\nconst { item } = await res.json();`,
           curl: `curl -X DELETE "${baseUrl}/api/${cName}/RECORD_ID"`
         },
@@ -7787,6 +8468,7 @@ let currentCollection = "users";
           badge: 'bg-purple-100 text-purple-800',
           path: `/api/realtime`,
           statusCode: '200 OK (text/event-stream)',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// Realtime SSE stream for table '${cName}'\n// Automatically connects and listens for create, update, delete events\nconst unsubscribe = await padi.table('${cName}').subscribe((e) => {\n  console.log('Event action:', e.action); // 'create' | 'update' | 'delete'\n  console.log('Changed record:', e.record);\n});\n\n// To stop listening later:\n// unsubscribe();`,
           js: `const evtSource = new EventSource('${baseUrl}/api/realtime');\nevtSource.onmessage = (event) => {\n  const data = JSON.parse(event.data);\n  if (data.table === '${cName}') {\n    console.log('Change event:', data.action, data.record);\n  }\n};`,
           curl: `curl -N "${baseUrl}/api/realtime"`
         },
@@ -7797,6 +8479,7 @@ let currentCollection = "users";
           badge: 'bg-indigo-100 text-indigo-800',
           path: `/api/files/${cName}/RECORD_ID`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// Option A: Upload file via FormData and attach to record\nconst formData = new FormData();\nformData.append('${fileField}', fileInputElement.files[0]);\n\nconst updated = await padi.files.upload('${cName}', 'RECORD_ID', formData);\nconsole.log('Upload result:', updated);\n\n// Option B: Generate safe public media URL\nconst fileUrl = padi.files.getUrl('${cName}', 'RECORD_ID', 'filename.png');\nconsole.log('Media URL:', fileUrl);`,
           js: `const formData = new FormData();\nformData.append('${fileField}', fileInputElement.files[0]);\n\nconst res = await fetch('${baseUrl}/api/files/${cName}/RECORD_ID', {\n  method: 'POST',\n  body: formData\n});\nconst result = await res.json();`,
           curl: `curl -X POST "${baseUrl}/api/files/${cName}/RECORD_ID" \\\n  -F "${fileField}=@/path/to/my_image.png"`
         },
@@ -7807,6 +8490,7 @@ let currentCollection = "users";
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/${cName}/auth-with-password`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// User login (stores token in padi.authStore automatically)\nconst authData = await padi.table('${cName}').authWithPassword('john@example.com', 'secret123456');\n\nconsole.log('User profile:', authData.record);\nconsole.log('JWT Token:', authData.token);\nconsole.log('Is Logged In:', padi.authStore.isValid);`,
           js: `const res = await fetch('${baseUrl}/api/${cName}/auth-with-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    identity: 'john@example.com',\n    password: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`,
           curl: `curl -X POST "${baseUrl}/api/${cName}/auth-with-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "identity": "john@example.com",\n  "password": "secret123456"\n}'`
         },
@@ -7817,6 +8501,7 @@ let currentCollection = "users";
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/${cName}/register`,
           statusCode: '201 Created',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// Register new user account\nconst newUser = await padi.table('${cName}').register({\n  email: 'john@example.com',\n  username: 'john123',\n  name: 'John Doe',\n  password: 'secret123456',\n  passwordConfirm: 'secret123456'\n});\nconsole.log('Registered user:', newUser.record);`,
           js: `const res = await fetch('${baseUrl}/api/${cName}/register', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    email: 'john@example.com',\n    username: 'john123',\n    name: 'John Doe',\n    password: 'secret123456',\n    passwordConfirm: 'secret123456'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token, item.record);`,
           curl: `curl -X POST "${baseUrl}/api/${cName}/register" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "email": "john@example.com",\n  "username": "john123",\n  "name": "John Doe",\n  "password": "secret123456",\n  "passwordConfirm": "secret123456"\n}'`
         },
@@ -7827,6 +8512,7 @@ let currentCollection = "users";
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/${cName}/forgot-password`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// Request password reset token\nawait padi.table('${cName}').requestPasswordReset('john@example.com');`,
           js: `const res = await fetch('${baseUrl}/api/${cName}/forgot-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    email: 'john@example.com'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.email, item.reset_token);`,
           curl: `curl -X POST "${baseUrl}/api/${cName}/forgot-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "email": "john@example.com"\n}'`
         },
@@ -7837,6 +8523,7 @@ let currentCollection = "users";
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/${cName}/reset-password`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// Confirm password reset with token\nawait padi.table('${cName}').confirmPasswordReset(\n  'TOKEN_HERE',\n  'newSecretPassword123',\n  'newSecretPassword123'\n);`,
           js: `const res = await fetch('${baseUrl}/api/${cName}/reset-password', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({\n    token: 'd7f4a1c2e8b940bf7c53e01a8',\n    password: 'newSecretPassword123',\n    passwordConfirm: 'newSecretPassword123'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.message);`,
           curl: `curl -X POST "${baseUrl}/api/${cName}/reset-password" \\\n  -H "Content-Type: application/json" \\\n  -d '{\n  "token": "d7f4a1c2e8b940bf7c53e01a8",\n  "password": "newSecretPassword123",\n  "passwordConfirm": "newSecretPassword123"\n}'`
         },
@@ -7847,6 +8534,7 @@ let currentCollection = "users";
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/${cName}/change-password`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// Change password for logged-in user\nawait padi.table('${cName}').changePassword(\n  'oldPassword123',\n  'newSecretPassword123',\n  'newSecretPassword123'\n);`,
           js: `const res = await fetch('${baseUrl}/api/${cName}/change-password', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    oldPassword: 'secret123456',\n    newPassword: 'updatedPassword789',\n    passwordConfirm: 'updatedPassword789'\n  })\n});\nconst { item } = await res.json();\nconsole.log(item.token);`,
           curl: `curl -X POST "${baseUrl}/api/${cName}/change-password" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\\n  -d '{\n  "oldPassword": "secret123456",\n  "newPassword": "updatedPassword789",\n  "passwordConfirm": "updatedPassword789"\n}'`
         },
@@ -7857,6 +8545,7 @@ let currentCollection = "users";
           badge: 'bg-teal-100 text-teal-800',
           path: `/api/${cName}/me`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// Refresh auth token & get current profile\nconst authData = await padi.table('${cName}').authRefresh();\nconsole.log('Current user:', authData.record);`,
           js: `const res = await fetch('${baseUrl}/api/${cName}/me', {\n  headers: {\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  }\n});\nconst { item } = await res.json();\nconsole.log(item.record, item.token);`,
           curl: `curl -X GET "${baseUrl}/api/${cName}/me" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN"`
         },
@@ -7867,6 +8556,7 @@ let currentCollection = "users";
           badge: 'bg-amber-100 text-amber-800',
           path: `/api/transactions`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// Execute atomic batch operations in one transaction\nconst result = await padi.send('/api/transactions', {\n  method: 'POST',\n  body: {\n    operations: [\n      { action: 'create', table: '${cName}', data: ${JSON.stringify(sampleObj)} },\n      { action: 'update', table: '${cName}', id: 'RECORD_ID', data: ${JSON.stringify(sampleObj)} }\n    ]\n  }\n});`,
           js: `const res = await fetch('${baseUrl}/api/transactions', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer YOUR_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    operations: [\n      {\n        action: 'create',\n        table: '${cName}',\n        data: ${JSON.stringify(sampleObj)}\n      },\n      {\n        action: 'update',\n        table: '${cName}',\n        id: 'rec_001',\n        data: ${JSON.stringify(sampleObj)}\n      }\n    ]\n  })\n});\nconst { item } = await res.json();`,
           curl: `curl -X POST "${baseUrl}/api/transactions" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer YOUR_JWT_TOKEN" \\\n  -d '{\n  "operations": [\n    {\n      "action": "create",\n      "table": "${cName}",\n      "data": ${JSON.stringify(sampleObj)}\n    }\n  ]\n}'`
         },
@@ -7877,6 +8567,7 @@ let currentCollection = "users";
           badge: 'bg-amber-100 text-amber-800',
           path: `/api/sql`,
           statusCode: '200 OK',
+          sdk: `import PadiBase from 'padibase';\nconst padi = new PadiBase('${baseUrl}');\n\n// Run custom parameterized SQL (Admin only)\nconst result = await padi.send('/api/sql', {\n  method: 'POST',\n  body: {\n    sql: 'SELECT * FROM \`${cName}\` WHERE id = ?',\n    params: [1]\n  }\n});`,
           js: `const res = await fetch('${baseUrl}/api/sql', {\n  method: 'POST',\n  headers: {\n    'Content-Type': 'application/json',\n    'Authorization': 'Bearer ADMIN_JWT_TOKEN'\n  },\n  body: JSON.stringify({\n    sql: 'SELECT * FROM \`${cName}\` LIMIT ?',\n    params: [10],\n    transaction: false\n  })\n});\nconst { items } = await res.json();`,
           curl: `curl -X POST "${baseUrl}/api/sql" \\\n  -H "Content-Type: application/json" \\\n  -H "Authorization: Bearer ADMIN_JWT_TOKEN" \\\n  -d '{\n  "sql": "SELECT * FROM \\\`${cName}\\\` LIMIT ?",\n  "params": [10]\n}'`
         }
@@ -7885,6 +8576,7 @@ let currentCollection = "users";
       const d = docs[action] || docs.list;
       currentApiPreviewPath = d.path;
       currentApiPreviewUrl = `${baseUrl}${d.path}`;
+      currentApiPreviewSdk = d.sdk || d.js;
       currentApiPreviewJs = d.js;
       currentApiPreviewCurl = d.curl;
 
@@ -8243,13 +8935,13 @@ let currentCollection = "users";
           <p class="text-slate-500 mt-0.5">${d.desc}</p>
         </div>
         ${ruleBadgeHtml}
-        <div class="flex flex-wrap items-center justify-between bg-emerald-50/60 p-3 rounded-2xl font-mono gap-2 border border-emerald-200/80">
+        <div class="flex flex-wrap items-center justify-between bg-[#090d16] p-3 rounded-2xl font-mono gap-2 border border-emerald-500/30">
           <div class="flex items-center space-x-2.5 min-w-0">
             <span class="px-2.5 py-1 rounded-lg font-extrabold text-[10px] shrink-0 ${d.badge}">${d.method}</span>
-            <span class="text-slate-900 font-bold break-all text-xs">${d.path}</span>
+            <span class="text-white font-bold break-all text-xs">${d.path}</span>
           </div>
           <div class="flex items-center space-x-2 shrink-0">
-            <button type="button" onclick="copyToClipboard(currentApiPreviewPath)" class="px-2.5 py-1 rounded-lg bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-[11px] font-sans font-bold flex items-center space-x-1 transition cursor-pointer">
+            <button type="button" onclick="copyToClipboard(currentApiPreviewPath)" class="px-2.5 py-1 rounded-lg bg-[#0e172a] hover:bg-slate-800 text-slate-200 border border-slate-700 text-[11px] font-sans font-bold flex items-center space-x-1 transition cursor-pointer">
               <i class="fa-regular fa-copy text-[10px]"></i>
               <span>Copy Path</span>
             </button>
@@ -8260,22 +8952,26 @@ let currentCollection = "users";
           </div>
         </div>
         <div class="space-y-4">
-          <!-- 1. Request Code Snippet (JS Fetch / cURL) -->
+          <!-- 1. Request Code Snippet (JS SDK / JS Fetch / cURL) -->
           <div>
             <div class="flex items-center justify-between mb-1.5">
-              <div class="flex items-center space-x-1.5 bg-slate-200/60 p-0.5 rounded-lg border border-slate-200">
-                <button type="button" id="apiSnippetBtn_js" onclick="toggleApiSnippetMode('js')" class="px-2.5 py-0.5 rounded-md ${currentApiSnippetMode === 'js' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900 font-semibold'} text-[10px] transition cursor-pointer">
+              <div class="flex items-center space-x-1.5 bg-[#090d16] p-1 rounded-lg border border-slate-800">
+                <button type="button" id="apiSnippetBtn_sdk" onclick="toggleApiSnippetMode('sdk')" class="px-2.5 py-0.5 rounded-md ${currentApiSnippetMode === 'sdk' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-400 hover:text-white font-semibold'} text-[10px] transition cursor-pointer">
+                  JS SDK
+                </button>
+                <button type="button" id="apiSnippetBtn_js" onclick="toggleApiSnippetMode('js')" class="px-2.5 py-0.5 rounded-md ${currentApiSnippetMode === 'js' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-400 hover:text-white font-semibold'} text-[10px] transition cursor-pointer">
                   JS Fetch
                 </button>
-                <button type="button" id="apiSnippetBtn_curl" onclick="toggleApiSnippetMode('curl')" class="px-2.5 py-0.5 rounded-md ${currentApiSnippetMode === 'curl' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-600 hover:text-slate-900 font-semibold'} text-[10px] transition cursor-pointer">
+                <button type="button" id="apiSnippetBtn_curl" onclick="toggleApiSnippetMode('curl')" class="px-2.5 py-0.5 rounded-md ${currentApiSnippetMode === 'curl' ? 'bg-emerald-600 text-white font-bold shadow-2xs' : 'text-slate-400 hover:text-white font-semibold'} text-[10px] transition cursor-pointer">
                   cURL
                 </button>
               </div>
-              <button type="button" onclick="copyToClipboard(currentApiSnippetMode === 'js' ? currentApiPreviewJs : currentApiPreviewCurl)" class="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[10px] font-bold flex items-center space-x-1 transition cursor-pointer">
+              <button type="button" onclick="copyToClipboard(currentApiSnippetMode === 'sdk' ? currentApiPreviewSdk : (currentApiSnippetMode === 'js' ? currentApiPreviewJs : currentApiPreviewCurl))" class="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-[10px] font-bold flex items-center space-x-1 transition cursor-pointer">
                 <i class="fa-regular fa-copy text-[9px]"></i>
                 <span>Copy Snippet</span>
               </button>
             </div>
+            <pre id="apiSnippetPre_sdk" class="${currentApiSnippetMode === 'sdk' ? '' : 'hidden '}bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto max-h-[260px]">${d.sdk || d.js}</pre>
             <pre id="apiSnippetPre_js" class="${currentApiSnippetMode === 'js' ? '' : 'hidden '}bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto max-h-[260px]">${d.js}</pre>
             <pre id="apiSnippetPre_curl" class="${currentApiSnippetMode === 'curl' ? '' : 'hidden '}bg-slate-950 text-emerald-400 p-4 rounded-2xl font-mono text-[11px] overflow-x-auto max-h-[260px]">${d.curl}</pre>
           </div>

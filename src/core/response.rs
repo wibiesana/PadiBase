@@ -310,7 +310,7 @@ pub fn format_padi_json(
                 "execution_time": format!("{:.2}ms", elapsed_ms),
                 "queries_count": queries.len(),
                 "queries": queries,
-                "timestamp": chrono::Local::now().to_rfc3339(),
+                "timestamp": chrono::Utc::now().to_rfc3339(),
             }),
         );
     }
@@ -399,7 +399,11 @@ pub async fn padi_response_middleware(
     }
 
     let debug_enabled = Env::is_debug();
-    let start = std::time::Instant::now();
+    let start_opt = if debug_enabled {
+        Some(std::time::Instant::now())
+    } else {
+        None
+    };
     let override_match = super::db::match_override_endpoint(
         &state.db,
         req.method().as_str(),
@@ -412,12 +416,12 @@ pub async fn padi_response_middleware(
         apply_security_headers(res.headers_mut(), rate_info);
         return res;
     }
-    let state_for_exec = state.clone();
 
+    let db_driver = state.db.driver_name();
     let exec_req = async move {
         if let Some((ep, path_params)) = override_match {
             crate::api::custom::run_override_endpoint_request(
-                state_for_exec,
+                state,
                 ep,
                 path_params,
                 req,
@@ -428,7 +432,7 @@ pub async fn padi_response_middleware(
         }
     };
 
-    let (mut res, captured_queries) = if debug_enabled {
+    let (mut res, captured_queries) = if let Some(start) = start_opt {
         let queries = std::sync::Arc::new(std::sync::Mutex::new(Vec::with_capacity(4)));
         let q_clone = queries.clone();
         let r = REQUEST_QUERIES
@@ -442,7 +446,8 @@ pub async fn padi_response_middleware(
         (exec_req.await, Vec::new())
     };
 
-    if Env::response_format() == ResponseFormat::Raw && !debug_enabled {
+    let format = Env::response_format();
+    if format == ResponseFormat::Raw && !debug_enabled {
         apply_security_headers(res.headers_mut(), rate_info);
         return res;
     }
@@ -476,27 +481,70 @@ pub async fn padi_response_middleware(
         return res;
     }
 
-    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-    let db_driver = state.db.driver_name();
+    let elapsed_ms = start_opt
+        .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+        .unwrap_or(0.0);
 
     let (mut parts, body) = res.into_parts();
     let Ok(bytes) = to_bytes(body, 16 * 1024 * 1024).await else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
 
-    let Ok(raw_json) = serde_json::from_slice::<Value>(&bytes) else {
-        apply_security_headers(&mut parts.headers, rate_info);
-        return Response::from_parts(parts, Body::from(bytes));
-    };
+    let status_u16 = status.as_u16();
+    let trimmed = bytes.trim_ascii();
 
-    let formatted = format_padi_json(
-        status.as_u16(),
-        raw_json,
-        db_driver,
-        elapsed_ms,
-        &captured_queries,
-    );
-    let out_bytes = serde_json::to_vec(&formatted).unwrap_or_else(|_| bytes.to_vec());
+    // Zero-parse fast-path for JSON array responses (e.g. GET /api/{collection}/all):
+    // Splices the already-serialized JSON array directly into the envelope without deserializing/reserializing items.
+    let out_bytes = if status_u16 < 400
+        && format != ResponseFormat::Raw
+        && trimmed.starts_with(b"[")
+        && trimmed.ends_with(b"]")
+    {
+        let code_name = status_code_name(status_u16);
+        let mut buf = Vec::with_capacity(trimmed.len() + if debug_enabled { 256 } else { 96 });
+        buf.extend_from_slice(br#"{"message":"Success","message_code":""#);
+        buf.extend_from_slice(code_name.as_bytes());
+        buf.extend_from_slice(br#"","success":true,"item":"#);
+        buf.extend_from_slice(trimmed);
+        if debug_enabled {
+            let app_env = if Env::is_production() {
+                "production"
+            } else {
+                "development"
+            };
+            let debug_val = json!({
+                "env": app_env,
+                "database": db_driver,
+                "execution_time": format!("{:.2}ms", elapsed_ms),
+                "queries_count": captured_queries.len(),
+                "queries": captured_queries,
+                "timestamp": chrono::Utc::now().to_rfc3339(),
+            });
+            buf.extend_from_slice(br#","debug":"#);
+            let _ = serde_json::to_writer(&mut buf, &debug_val);
+        }
+        buf.push(b'}');
+        buf
+    } else {
+        let Ok(raw_json) = serde_json::from_slice::<Value>(&bytes) else {
+            apply_security_headers(&mut parts.headers, rate_info);
+            return Response::from_parts(parts, Body::from(bytes));
+        };
+
+        let formatted = format_padi_json(
+            status_u16,
+            raw_json,
+            db_driver,
+            elapsed_ms,
+            &captured_queries,
+        );
+        let mut buf = Vec::with_capacity(bytes.len() + 256);
+        if serde_json::to_writer(&mut buf, &formatted).is_err() {
+            bytes.to_vec()
+        } else {
+            buf
+        }
+    };
 
     parts.headers.remove(header::CONTENT_LENGTH);
     parts.headers.insert(

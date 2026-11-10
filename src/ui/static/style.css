@@ -1,56 +1,565 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+/* ==========================================================================
+   PADIBASE STUDIO — SIGNATURE OBSIDIAN EMERALD DARK THEME
+   Engineered for Multi-DB BaaS Ergonomics (SQLite · MySQL · MariaDB · Postgres)
+   ========================================================================== */
+
+:root {
+  --padi-bg-base: #070c18;
+  --padi-bg-surface: #0b1120;
+  --padi-bg-card: #0e172a;
+  --padi-bg-elevated: #111c35;
+  --padi-border: #1e293b;
+  --padi-border-subtle: rgba(255, 255, 255, 0.08);
+  
+  --padi-emerald: #10b981;
+  --padi-emerald-glow: rgba(16, 185, 129, 0.25);
+  --padi-amber: #f59e0b;
+  --padi-amber-light: #fbbf24;
+  --padi-cyan: #38bdf8;
+  --padi-rose: #f43f5e;
+}
+
+* {
+  box-sizing: border-box;
+}
 
 body {
   font-family: 'Plus Jakarta Sans', sans-serif;
-  color: #0f172a;
+  background-color: #070c18 !important;
+  color: #f1f5f9 !important;
+  margin: 0;
 }
 
 code, pre, .font-mono {
   font-family: 'JetBrains Mono', monospace;
 }
 
-/* Custom Scrollbars */
+/* Custom Obsidian Emerald Scrollbars */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: #070c18;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #1e293b;
   border-radius: 9999px;
+  border: 1px solid #0b1120;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #334155;
 }
 
-/* Modal and Backdrop effects */
-.modal-backdrop {
-  background: rgba(15, 23, 42, 0.45);
-  backdrop-filter: blur(4px);
+/* ==========================================================================
+   LEFT NAVIGATION RAIL & ACTIVE MENU STYLING (Image 1 Signature)
+   ========================================================================== */
+
+aside.w-16,
+aside.md\:w-64,
+aside.md\:w-56 {
+  background-color: #070c18 !important;
+  border-right: 1px solid #1e293b !important;
+}
+
+/* Active Navigation Item (Left Rail, Modal Sidebars, & Drawer Tabs) */
+.rail-nav-active,
+aside nav button.rail-nav-active,
+aside nav button.bg-emerald-600,
+#apiPreviewTabs button.rail-nav-active,
+#workspaceSettingsPane aside button.rail-nav-active {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+  border: 1px solid rgba(16, 185, 129, 0.5) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 16px rgba(16, 185, 129, 0.18) !important;
+  font-weight: 700 !important;
+}
+
+.rail-nav-active i,
+aside nav button.rail-nav-active i,
+aside nav button.bg-emerald-600 i,
+#apiPreviewTabs button.rail-nav-active i,
+#workspaceSettingsPane aside button.rail-nav-active i {
+  color: #34d399 !important;
+  opacity: 1 !important;
+}
+
+/* Inactive Navigation Item (Left Rail, Modal Sidebars, & Drawer Tabs) */
+.rail-nav-inactive,
+aside nav button.rail-nav-inactive,
+#apiPreviewTabs button.rail-nav-inactive,
+#workspaceSettingsPane aside button.rail-nav-inactive {
+  background-color: transparent !important;
+  border: 1px solid transparent !important;
+  color: #94a3b8 !important;
+  font-weight: 600 !important;
+}
+
+.rail-nav-inactive:hover,
+aside nav button.rail-nav-inactive:hover,
+#apiPreviewTabs button.rail-nav-inactive:hover,
+#workspaceSettingsPane aside button.rail-nav-inactive:hover {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border-color: #1e293b !important;
+  color: #ffffff !important;
+}
+
+/* ==========================================================================
+   GLOBAL THEME OVERRIDES (Covers #dashboardApp AND All Modals / Drawers)
+   ========================================================================== */
+
+#dashboardApp {
+  background-color: #070c18 !important;
+  color: #f1f5f9 !important;
+}
+
+/* Base Surfaces & Cards (Exact non-hover classes to prevent matching hover:bg-*) */
+body .bg-white,
+body .bg-white\/50,
+body .bg-white\/60,
+body .bg-white\/70,
+body .bg-white\/80,
+body .bg-white\/90,
+body .bg-white\/95 {
+  background-color: #0b1120 !important;
+  color: #f1f5f9 !important;
+}
+
+body .bg-slate-50,
+body .bg-slate-50\/40,
+body .bg-slate-50\/50,
+body .bg-slate-50\/60,
+body .bg-slate-50\/70,
+body .bg-slate-50\/80,
+body .bg-slate-50\/90 {
+  background-color: #090d16 !important;
+  color: #e2e8f0 !important;
+}
+
+body .bg-slate-100,
+body .bg-slate-100\/50,
+body .bg-slate-100\/60,
+body .bg-slate-100\/70,
+body .bg-slate-100\/80,
+body .bg-slate-100\/90 {
+  background-color: #0e172a !important;
+  color: #f1f5f9 !important;
+}
+
+body .bg-slate-200,
+body .bg-slate-200\/50,
+body .bg-slate-200\/60,
+body .bg-slate-200\/70,
+body .bg-slate-200\/80 {
+  background-color: #1e293b !important;
+  color: #f1f5f9 !important;
+}
+
+/* Pastel Gradients -> Dark Obsidian Slate Gradients */
+body .from-emerald-50,
+body .from-emerald-50\/70,
+body .from-emerald-50\/80,
+body .from-teal-50,
+body .from-teal-50\/70,
+body .from-indigo-50,
+body .from-slate-50,
+body .from-amber-50,
+body .via-white,
+body .to-white {
+  background-image: linear-gradient(135deg, rgba(15, 23, 42, 0.98) 0%, rgba(11, 17, 32, 0.98) 100%) !important;
+  background-color: #0e172a !important;
+  border-color: #1e293b !important;
+}
+
+/* Borders */
+body .border-slate-100,
+body .border-slate-200,
+body .border-slate-200\/60,
+body .border-slate-200\/80,
+body .border-slate-300,
+body .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+body .divide-slate-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: #1e293b !important;
+}
+
+/* Text Colors across Dashboard & Modals */
+body .text-slate-900,
+body .text-slate-800,
+body .text-slate-700 {
+  color: #f8fafc !important;
+}
+
+body .text-slate-600,
+body .text-slate-500 {
+  color: #94a3b8 !important;
+}
+
+body .text-slate-400 {
+  color: #64748b !important;
+}
+
+/* Hover States */
+body .hover\:bg-slate-50:hover,
+body .hover\:bg-slate-50\/80:hover,
+body .hover\:bg-slate-100:hover,
+body .hover\:bg-slate-100\/80:hover,
+body .hover\:bg-slate-200:hover,
+body .hover\:bg-slate-200\/60:hover,
+body .hover\:bg-slate-200\/70:hover {
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+}
+
+body .hover\:bg-white:hover {
+  background-color: #111c35 !important;
+}
+
+/* ==========================================================================
+   SUB-SIDEBAR ACTIVE / INACTIVE MENU ITEMS (Collections, Storage, Endpoints)
+   ========================================================================== */
+
+/* Active Card in Sub-sidebars */
+#collectionsList .bg-emerald-50,
+#storageBucketsList .bg-emerald-50,
+#customEndpointsList .bg-emerald-50,
+#settingsSidebar .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+  border: 1px solid rgba(16, 185, 129, 0.5) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.15) !important;
+}
+
+/* Fix text legibility inside active cards: must be white & mint! */
+#collectionsList .bg-emerald-50 *,
+#storageBucketsList .bg-emerald-50 *,
+#customEndpointsList .bg-emerald-50 *,
+#settingsSidebar .bg-emerald-50 * {
+  color: #ffffff !important;
+}
+
+#collectionsList .bg-emerald-50 i,
+#storageBucketsList .bg-emerald-50 i,
+#customEndpointsList .bg-emerald-50 i,
+#settingsSidebar .bg-emerald-50 i {
+  color: #34d399 !important;
+}
+
+#collectionsList .bg-emerald-50 .text-emerald-700\/80,
+#collectionsList .bg-emerald-50 .text-slate-400,
+#customEndpointsList .bg-emerald-50 .text-slate-400 {
+  color: #a7f3d0 !important;
+}
+
+#collectionsList .bg-emerald-50 .bg-emerald-100,
+#customEndpointsList .bg-emerald-50 .bg-emerald-100,
+#settingsSidebar .bg-emerald-50 .bg-emerald-100 {
+  background-color: rgba(16, 185, 129, 0.3) !important;
+  border: 1px solid rgba(16, 185, 129, 0.5) !important;
+}
+
+/* Inactive Cards in Sub-sidebars */
+#collectionsList .bg-white,
+#customEndpointsList .bg-white,
+#settingsSidebar .bg-white {
+  background-color: #0b1120 !important;
+  border: 1px solid #1e293b !important;
+  color: #cbd5e1 !important;
+}
+
+#collectionsList .bg-white:hover,
+#customEndpointsList .bg-white:hover,
+#settingsSidebar .bg-white:hover {
+  background-color: #111c35 !important;
+  border-color: #334155 !important;
+  color: #ffffff !important;
+}
+
+/* Inactive Storage Button */
+#storageBucketsList button.text-slate-600 {
+  color: #94a3b8 !important;
+}
+#storageBucketsList button.text-slate-600:hover {
+  background-color: #111c35 !important;
+  color: #ffffff !important;
+}
+
+/* ==========================================================================
+   INPUTS, SELECTS, AND FORM CONTROLS
+   ========================================================================== */
+
+body input:not([type="checkbox"]):not([type="radio"]):not(#recordFilterInput),
+body select,
+body textarea {
+  background-color: #0e172a !important;
+  border: 1px solid #1e293b !important;
+  color: #f8fafc !important;
+}
+
+#recordFilterInput {
+  background-color: transparent !important;
+  color: #f8fafc !important;
+}
+
+body input::placeholder,
+body textarea::placeholder {
+  color: #64748b !important;
+}
+
+body input:not(#recordFilterInput):focus,
+body select:focus,
+body textarea:focus {
+  border-color: #10b981 !important;
+  background-color: #111c35 !important;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25) !important;
+  outline: none !important;
+}
+
+/* Checkbox styling */
+input[type="checkbox"] {
+  accent-color: #10b981 !important;
+}
+
+/* Radio tab labels (e.g. Storage Upload "Existing Record / Create New Record") */
+body label.has-\[\:checked\]\:bg-white:has(:checked) {
+  background-color: rgba(16, 185, 129, 0.18) !important;
+  border: 1px solid rgba(16, 185, 129, 0.45) !important;
+  color: #34d399 !important;
+}
+
+/* ==========================================================================
+   TABLES & DATA GRID ERGONOMICS (Clean Deep Obsidian Slate — ZERO Green Tint)
+   ========================================================================== */
+
+#recordsTable,
+#storageTable,
+table {
+  background-color: #090d16 !important;
+  color: #f8fafc !important;
+  border-collapse: collapse;
+}
+
+thead,
+thead tr,
+thead th {
+  background-color: #0e172a !important;
+  color: #94a3b8 !important;
+  border-color: #1e293b !important;
+  font-weight: 700 !important;
+  font-size: 0.75rem !important;
+  letter-spacing: 0.04em;
+}
+
+thead th:hover {
+  background-color: #162238 !important;
+  color: #f8fafc !important;
+}
+
+tbody tr {
+  background-color: #090d16 !important;
+  border-color: #1e293b !important;
+  transition: background-color 0.12s ease;
+}
+
+tbody tr:hover {
+  background-color: #111a2e !important;
+}
+
+tbody td {
+  background-color: transparent !important;
+  border-color: #1e293b !important;
+  color: #f1f5f9 !important;
+}
+
+/* Auto-Loaded Relations / JSON Badge */
+.json-relation-pill {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  border: 1px solid rgba(16, 185, 129, 0.35) !important;
+  color: #6ee7b7 !important;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+}
+
+/* File Preview Tag */
+.file-preview-pill {
+  background-color: #1e293b !important;
+  border: 1px solid #334155 !important;
+  color: #cbd5e1 !important;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.74rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Safe Edit Drawer Button (Image 1 Signature Amber Outline) */
+.safe-edit-btn {
+  background-color: rgba(245, 158, 11, 0.12) !important;
+  border: 1px solid rgba(245, 158, 11, 0.45) !important;
+  color: #fbbf24 !important;
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+}
+.safe-edit-btn i {
+  color: #fbbf24 !important;
+}
+.safe-edit-btn:hover {
+  background-color: rgba(245, 158, 11, 0.25) !important;
+  border-color: #fbbf24 !important;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+}
+
+/* ==========================================================================
+   BADGES & PILLS (Exact Class Tokens Only — Never Matches hover:bg-*)
+   ========================================================================== */
+
+/* Emerald / Padi Brand Badges */
+body .bg-emerald-50,
+body .bg-emerald-100,
+body .bg-emerald-50\/50,
+body .bg-emerald-50\/60,
+body .bg-emerald-50\/70,
+body .bg-emerald-50\/80,
+body .bg-emerald-100\/70,
+body .bg-emerald-100\/80 {
+  background-color: rgba(16, 185, 129, 0.14) !important;
+  border-color: rgba(16, 185, 129, 0.38) !important;
+}
+body .text-emerald-700,
+body .text-emerald-800,
+body .text-emerald-900,
+body .text-emerald-950 {
+  color: #34d399 !important;
+}
+
+/* Amber / Gold Badges (PK, Engine, Actions) */
+body .bg-amber-50,
+body .bg-amber-100,
+body .bg-amber-50\/50,
+body .bg-amber-50\/60,
+body .bg-amber-50\/70,
+body .bg-amber-100\/80 {
+  background-color: rgba(245, 158, 11, 0.14) !important;
+  border-color: rgba(245, 158, 11, 0.4) !important;
+}
+body .text-amber-700,
+body .text-amber-800,
+body .text-amber-900,
+body .text-amber-950 {
+  color: #fbbf24 !important;
+}
+
+/* Cyan / Tech Badges (FK, FILE) */
+body .bg-teal-50,
+body .bg-teal-100,
+body .bg-teal-50\/50,
+body .bg-teal-50\/70,
+body .bg-cyan-50,
+body .bg-cyan-100,
+body .bg-sky-50,
+body .bg-sky-100 {
+  background-color: rgba(6, 182, 212, 0.14) !important;
+  border-color: rgba(6, 182, 212, 0.38) !important;
+}
+body .text-teal-700,
+body .text-teal-800,
+body .text-teal-900,
+body .text-cyan-700,
+body .text-sky-800 {
+  color: #38bdf8 !important;
+}
+
+/* Indigo / Purple Badges */
+body .bg-indigo-50,
+body .bg-indigo-100,
+body .bg-indigo-50\/50,
+body .bg-indigo-50\/70,
+body .bg-indigo-100\/80,
+body .bg-purple-50,
+body .bg-purple-100 {
+  background-color: rgba(99, 102, 241, 0.15) !important;
+  border-color: rgba(99, 102, 241, 0.4) !important;
+}
+body .text-indigo-600,
+body .text-indigo-700,
+body .text-indigo-800,
+body .text-indigo-900,
+body .text-purple-800 {
+  color: #a5b4fc !important;
+}
+
+/* Rose / Danger Badges */
+body .bg-rose-50,
+body .bg-rose-100,
+body .bg-rose-50\/50,
+body .bg-rose-50\/70 {
+  background-color: rgba(244, 63, 94, 0.14) !important;
+  border-color: rgba(244, 63, 94, 0.38) !important;
+}
+body .text-rose-700,
+body .text-rose-800,
+body .text-rose-900 {
+  color: #fb7185 !important;
+}
+
+/* ==========================================================================
+   BUTTONS & ACTIONS
+   ========================================================================== */
+
+.padi-btn-primary {
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+  font-weight: 700;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.25);
+  transition: all 0.2s ease;
+}
+.padi-btn-primary:hover {
+  background-color: #059669 !important;
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.35);
 }
 
 .padi-gradient {
-  background: linear-gradient(135deg, #064e3b 0%, #0f172a 60%, #115e59 100%);
+  background: linear-gradient(135deg, #064e3b 0%, #070c18 60%, #0b1120 100%) !important;
 }
 
-.padi-btn-primary {
-  background-color: #059669;
+/* Mode Switcher Active / Inactive Buttons */
+.mode-btn-active {
+  background-color: #059669 !important;
+  color: #ffffff !important;
+  font-weight: 800 !important;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.3) !important;
 }
-.padi-btn-primary:hover {
-  background-color: #047857;
-}
-
-.toggle-checkbox:checked {
-  right: 0;
-  border-color: #059669;
-}
-.toggle-checkbox:checked + .toggle-label {
-  background-color: #059669;
+.mode-btn-active i {
+  color: #ffffff !important;
 }
 
-/* Slide-over Drawer Animation */
+.mode-btn-inactive {
+  background-color: transparent !important;
+  color: #94a3b8 !important;
+  font-weight: 600 !important;
+}
+.mode-btn-inactive:hover {
+  background-color: #1e293b !important;
+  color: #ffffff !important;
+}
+.mode-btn-inactive i {
+  color: #cbd5e1 !important;
+}
+
+/* ==========================================================================
+   SLIDE-OVER DRAWERS & MODALS
+   ========================================================================== */
+
 @keyframes slideInRight {
   from {
     transform: translateX(100%);
@@ -60,33 +569,55 @@ code, pre, .font-mono {
   }
 }
 
+.modal-backdrop {
+  background: rgba(5, 8, 15, 0.75) !important;
+  backdrop-filter: blur(8px) !important;
+}
+
 .drawer-backdrop {
   transition: opacity 0.2s ease-in-out;
 }
+
 .drawer-panel {
   animation: slideInRight 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  background-color: #0b1120 !important;
+  border-left: 1px solid #1e293b !important;
+  box-shadow: -10px 0 35px rgba(0, 0, 0, 0.6) !important;
 }
 
-/* Mode Switcher Active / Inactive Buttons */
-.mode-btn-active {
-  background-color: #059669 !important;
-  color: #ffffff !important;
-  font-weight: 800 !important;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1) !important;
-}
-.mode-btn-active i {
-  color: #ffffff !important;
+/* ==========================================================================
+   SIDEBARS & NAVIGATION
+   ========================================================================== */
+
+#schemaSidebar,
+#storageSidebar,
+#endpointsSidebar,
+#settingsSidebar,
+#apiPreviewTabs {
+  background-color: #090d16 !important;
+  border-right: 1px solid #1e293b !important;
 }
 
-.mode-btn-inactive {
-  background-color: transparent !important;
-  color: #64748b !important;
-  font-weight: 600 !important;
+/* Sub-Sidebar Headers & Footers */
+#schemaSidebar > div,
+#storageSidebar > div,
+#endpointsSidebar > div,
+#settingsSidebar > div {
+  background-color: #090d16 !important;
+  border-color: #1e293b !important;
 }
-.mode-btn-inactive:hover {
-  background-color: rgba(255, 255, 255, 0.7) !important;
-  color: #0f172a !important;
+
+/* Dropdowns & Popovers */
+.group-hover\:block {
+  background-color: #0b1120 !important;
+  border: 1px solid #1e293b !important;
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.5) !important;
 }
-.mode-btn-inactive i {
-  color: #94a3b8 !important;
+
+/* Highlight Boxes */
+.studio-highlight-box {
+  background: #0b1120;
+  border: 1px solid #1e293b;
+  border-radius: 12px;
+  padding: 14px;
 }

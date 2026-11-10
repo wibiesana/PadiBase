@@ -10,14 +10,24 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous},
     Column, Row,
 };
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, RwLock};
+use std::time::Instant;
 use tracing::info;
 
 use super::env::Env;
 use super::schema::{generate_id, Collection, CollectionType, CustomEndpoint, FieldType, SchemaField};
+
+static PROCESS_START: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+#[inline]
+fn monotonic_ms() -> u64 {
+    PROCESS_START.elapsed().as_millis() as u64
+}
 
 /// Tenant/Database Schema Cache - populated once at startup, served entirely from RAM.
 #[derive(Default, Debug)]
@@ -27,6 +37,8 @@ pub struct SchemaCache {
     pub collections: RwLock<HashMap<String, Collection>>,
     pub collections_list: RwLock<Option<Vec<Collection>>>,
     pub endpoints: RwLock<HashMap<String, CustomEndpoint>>,
+    pub has_endpoints: AtomicBool,
+    pub last_health_ok_ms: AtomicU64,
     pub settings: RwLock<Option<serde_json::Value>>,
 }
 
@@ -203,8 +215,18 @@ fn redact_binding(v: Value) -> Value {
 }
 
 fn clean_sql_for_log(sql: &str) -> String {
-    let mut result = String::with_capacity(sql.len());
-    let mut chars = sql.chars().peekable();
+    let trimmed = sql.trim();
+    if !trimmed.contains('\n')
+        && !trimmed.contains('\r')
+        && !trimmed.contains("--")
+        && !trimmed.contains("/*")
+        && !trimmed.contains("  ")
+    {
+        return trimmed.to_string();
+    }
+
+    let mut result = String::with_capacity(trimmed.len());
+    let mut chars = trimmed.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '-' && chars.peek() == Some(&'-') {
             chars.next();
@@ -229,13 +251,17 @@ fn clean_sql_for_log(sql: &str) -> String {
     }
     let collapsed = result.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() {
-        sql.split_whitespace().collect::<Vec<_>>().join(" ")
+        trimmed.split_whitespace().collect::<Vec<_>>().join(" ")
     } else {
         collapsed
     }
 }
 
+#[inline]
 pub fn record_query(sql: &str, params: &[Val], start: std::time::Instant) {
+    if !Env::is_debug() {
+        return;
+    }
     // Profiling is only active inside a request scope with debug enabled; skip all work otherwise.
     let _ = REQUEST_QUERIES.try_with(|cell| {
         let duration = start.elapsed();
@@ -366,6 +392,8 @@ impl DbPool {
         if let Ok(mut cache) = self.cache.endpoints.write() {
             cache.clear();
         }
+        self.cache.has_endpoints.store(false, Ordering::Release);
+        self.cache.last_health_ok_ms.store(0, Ordering::Release);
         if let Ok(mut cache) = self.cache.settings.write() {
             *cache = None;
         }
@@ -453,10 +481,11 @@ impl DbPool {
 
     /// Translate SQL dialect details:
     /// - For PostgreSQL: converts backtick identifiers `` `col` `` to `"col"` and `?` placeholders to `$1, $2, ...`.
-    /// - For SQLite and MySQL/MariaDB: preserves `` `col` `` and `?`.
-    pub fn prepare_sql(&self, sql: &str) -> String {
+    /// - For SQLite and MySQL/MariaDB: preserves `` `col` `` and `?` with zero allocation (`Cow::Borrowed`).
+    #[inline]
+    pub fn prepare_sql<'a>(&self, sql: &'a str) -> Cow<'a, str> {
         if !self.is_postgres() {
-            return sql.to_string();
+            return Cow::Borrowed(sql);
         }
 
         let mut out = String::with_capacity(sql.len() + 16);
@@ -491,7 +520,23 @@ impl DbPool {
             }
         }
 
-        out
+        Cow::Owned(out)
+    }
+
+    /// Fast cached health check (2-second TTL) so high-concurrency health probes do not saturate the DB pool.
+    pub async fn check_health_cached(&self) -> bool {
+        let now = monotonic_ms();
+        let last = self.cache.last_health_ok_ms.load(Ordering::Relaxed);
+        if last > 0 && now.saturating_sub(last) < 2_000 && !Env::is_debug() {
+            return true;
+        }
+        let ok = self.fetch_optional("SELECT 1", &[]).await.is_ok();
+        if ok {
+            self.cache.last_health_ok_ms.store(monotonic_ms().max(1), Ordering::Relaxed);
+        } else {
+            self.cache.last_health_ok_ms.store(0, Ordering::Relaxed);
+        }
+        ok
     }
 
     /// Execute a query and return all matching rows as JSON objects.
@@ -518,7 +563,24 @@ impl DbPool {
 
     /// Execute a query and return the first matching row if any.
     pub async fn fetch_optional(&self, sql: &str, params: &[Val]) -> Result<Option<Value>> {
-        Ok(self.fetch_all(sql, params).await?.into_iter().next())
+        let prepared = self.prepare_sql(sql);
+        let start = std::time::Instant::now();
+        let res = match &self.driver_pool {
+            DbDriverPool::Sqlite(p) => {
+                let row_opt = bind_sqlite(&prepared, params).fetch_optional(p).await?;
+                row_opt.as_ref().map(sqlite_row_to_json)
+            }
+            DbDriverPool::MySql(p, _) => {
+                let row_opt = bind_mysql(&prepared, params).fetch_optional(p).await?;
+                row_opt.as_ref().map(mysql_row_to_json)
+            }
+            DbDriverPool::Postgres(p) => {
+                let row_opt = bind_postgres(&prepared, params).fetch_optional(p).await?;
+                row_opt.as_ref().map(pg_row_to_json)
+            }
+        };
+        record_query(&prepared, params, start);
+        Ok(res)
     }
 
     /// Execute a query and return the first matching row, or error if none.
@@ -608,7 +670,24 @@ impl<'a> DbTx<'a> {
 
     /// Execute a query inside the transaction and return the first matching row if any.
     pub async fn fetch_optional(&mut self, pool: &DbPool, sql: &str, params: &[Val]) -> Result<Option<Value>> {
-        Ok(self.fetch_all(pool, sql, params).await?.into_iter().next())
+        let prepared = pool.prepare_sql(sql);
+        let start = std::time::Instant::now();
+        let res = match self {
+            DbTx::Sqlite(tx) => {
+                let row_opt = bind_sqlite(&prepared, params).fetch_optional(&mut **tx).await?;
+                row_opt.as_ref().map(sqlite_row_to_json)
+            }
+            DbTx::MySql(tx, _) => {
+                let row_opt = bind_mysql(&prepared, params).fetch_optional(&mut **tx).await?;
+                row_opt.as_ref().map(mysql_row_to_json)
+            }
+            DbTx::Postgres(tx) => {
+                let row_opt = bind_postgres(&prepared, params).fetch_optional(&mut **tx).await?;
+                row_opt.as_ref().map(pg_row_to_json)
+            }
+        };
+        record_query(&prepared, params, start);
+        Ok(res)
     }
 
     /// Execute a query inside the transaction and return the first matching row, or error if none.
@@ -729,8 +808,9 @@ fn parse_json_str_or_val(s: String) -> Value {
 }
 
 fn sqlite_row_to_json(row: &sqlx::sqlite::SqliteRow) -> Value {
-    let mut map = Map::new();
-    for (i, col) in row.columns().iter().enumerate() {
+    let cols = row.columns();
+    let mut map = Map::with_capacity(cols.len());
+    for (i, col) in cols.iter().enumerate() {
         let v = if let Ok(v) = row.try_get::<Option<i64>, _>(i) {
             v.map(|x| json!(x))
         } else if let Ok(v) = row.try_get::<Option<f64>, _>(i) {
@@ -750,8 +830,9 @@ fn sqlite_row_to_json(row: &sqlx::sqlite::SqliteRow) -> Value {
 }
 
 fn mysql_row_to_json(row: &sqlx::mysql::MySqlRow) -> Value {
-    let mut map = Map::new();
-    for (i, col) in row.columns().iter().enumerate() {
+    let cols = row.columns();
+    let mut map = Map::with_capacity(cols.len());
+    for (i, col) in cols.iter().enumerate() {
         let v = if let Ok(v) = row.try_get::<Option<i64>, _>(i) {
             v.map(|x| json!(x))
         } else if let Ok(v) = row.try_get::<Option<u64>, _>(i) {
@@ -783,8 +864,9 @@ fn mysql_row_to_json(row: &sqlx::mysql::MySqlRow) -> Value {
 }
 
 fn pg_row_to_json(row: &sqlx::postgres::PgRow) -> Value {
-    let mut map = Map::new();
-    for (i, col) in row.columns().iter().enumerate() {
+    let cols = row.columns();
+    let mut map = Map::with_capacity(cols.len());
+    for (i, col) in cols.iter().enumerate() {
         let v = if let Ok(v) = row.try_get::<Option<i64>, _>(i) {
             v.map(|x| json!(x))
         } else if let Ok(v) = row.try_get::<Option<i32>, _>(i) {
@@ -912,7 +994,7 @@ pub async fn init_db_with_url<P: AsRef<Path>>(
     }
 
     let (db_url, driver) = resolve_db_config(dir, db_url_override);
-    let max_conn = Env::get_int("DB_MAX_CONNECTIONS", 20).max(1) as u32;
+    let max_conn = Env::get_int("DB_MAX_CONNECTIONS", 100).max(1) as u32;
 
     let pool = match driver {
         DbDriver::Sqlite => {
@@ -930,10 +1012,13 @@ pub async fn init_db_with_url<P: AsRef<Path>>(
                 .create_if_missing(true)
                 .journal_mode(SqliteJournalMode::Wal)
                 .synchronous(SqliteSynchronous::Normal)
+                .pragma("temp_store", "MEMORY")
+                .pragma("cache_size", "-64000")
                 .busy_timeout(std::time::Duration::from_secs(15));
 
             let p = SqlitePoolOptions::new()
                 .max_connections(max_conn)
+                .test_before_acquire(false)
                 .connect_with(options)
                 .await?;
             info!("Connected to SQLite database ({})", db_url);
@@ -942,6 +1027,8 @@ pub async fn init_db_with_url<P: AsRef<Path>>(
         DbDriver::MySql | DbDriver::MariaDb => {
             let p = MySqlPoolOptions::new()
                 .max_connections(max_conn)
+                .test_before_acquire(false)
+                .idle_timeout(std::time::Duration::from_secs(300))
                 .connect(&db_url)
                 .await?;
             info!("Connected to {} database", driver.as_str().to_uppercase());
@@ -950,6 +1037,8 @@ pub async fn init_db_with_url<P: AsRef<Path>>(
         DbDriver::Postgres => {
             let p = PgPoolOptions::new()
                 .max_connections(max_conn)
+                .test_before_acquire(false)
+                .idle_timeout(std::time::Duration::from_secs(300))
                 .connect(&db_url)
                 .await?;
             info!("Connected to PostgreSQL database");
@@ -2844,10 +2933,12 @@ pub async fn get_all_custom_endpoints(pool: &DbPool) -> Result<Vec<CustomEndpoin
             cache.insert(ep.id.clone(), ep.clone());
             list.push(ep);
         }
+        pool.cache.has_endpoints.store(!cache.is_empty(), Ordering::Release);
     } else {
         for r in &rows {
             list.push(row_to_custom_endpoint(r));
         }
+        pool.cache.has_endpoints.store(!list.is_empty(), Ordering::Release);
     }
     Ok(list)
 }
@@ -2886,6 +2977,7 @@ pub async fn get_custom_endpoint_by_path_or_id(
             cache.insert(ep.path.to_lowercase(), ep.clone());
             cache.insert(ep.id.clone(), ep.clone());
         }
+        pool.cache.has_endpoints.store(true, Ordering::Release);
         Ok(Some(ep))
     } else {
         Ok(None)
@@ -3016,6 +3108,10 @@ pub fn match_override_endpoint(
     http_method: &str,
     request_path: &str,
 ) -> Option<(CustomEndpoint, HashMap<String, String>)> {
+    if !pool.cache.has_endpoints.load(Ordering::Relaxed) {
+        return None;
+    }
+
     let norm = request_path.trim().trim_matches('/');
     let lower = norm.to_lowercase();
 

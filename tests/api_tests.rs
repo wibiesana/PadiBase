@@ -8,6 +8,7 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn test_full_padi_baas_flow() {
+    PadiBase::core::env::Env::set("APP_DEBUG", "true");
     let test_dir = std::path::PathBuf::from(format!("./target/test_data_{}", uuid::Uuid::new_v4().simple()));
     let _ = std::fs::remove_dir_all(&test_dir);
     let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));

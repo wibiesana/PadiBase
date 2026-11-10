@@ -9,12 +9,15 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use crate::core::app::AppState;
-use crate::core::auth::{authenticate_headers, check_permission, Claims, RecordAction};
+use crate::core::auth::{
+    authenticate_headers, build_row_level_security_filter, check_permission, Claims, RecordAction,
+};
 use crate::core::db::get_collection_by_name_or_id;
 use crate::core::realtime::RealtimeMessage;
 use crate::core::record::{
     count_records, create_record, delete_record, delete_records_batch, get_all_records_with_limit,
     get_record, get_record_with, list_records_with, project_record_fields, update_record,
+    PaginatedRecords,
 };
 use crate::core::schema::{Collection, CollectionType, FieldType};
 
@@ -422,7 +425,12 @@ pub async fn list(
     let auth = authenticate_headers(&headers)?;
     check_permission(RecordAction::List, &col, auth.as_ref(), None)?;
 
-    let (sort_clause, filter_clause) = resolve_list_sort_and_filter(&params);
+    let (sort_clause, client_filter) = resolve_list_sort_and_filter(&params);
+    let filter_clause = build_row_level_security_filter(
+        col.list_rule.as_deref(),
+        auth.as_ref(),
+        client_filter.as_deref(),
+    );
     let client_with = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
     let with_vec = resolve_resource_relations(col.effective_resource_relations(Some("list")), client_with);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
@@ -466,13 +474,13 @@ pub async fn list(
         }
 
         let total = records.len() as i64;
-        return Ok(Json(json!({
-            "page": 1,
-            "perPage": total,
-            "totalItems": total,
-            "totalPages": 1,
-            "items": records,
-        })));
+        return Ok(Json(PaginatedRecords {
+            page: 1,
+            per_page: total,
+            total_items: total,
+            total_pages: 1,
+            items: records,
+        }));
     }
 
     let mut res = list_records_with(
@@ -498,7 +506,7 @@ pub async fn list(
         }
     }
 
-    Ok(Json(json!(res)))
+    Ok(Json(res))
 }
 
 pub async fn all(
@@ -525,7 +533,13 @@ pub async fn all(
     let auth = authenticate_headers(&headers)?;
     check_permission(RecordAction::All, &col, auth.as_ref(), None)?;
 
-    let (sort_clause, filter_clause) = resolve_all_sort_and_filter(&params);
+    let (sort_clause, client_filter) = resolve_all_sort_and_filter(&params);
+    let all_or_list_rule = col.all_rule.as_deref().or(col.list_rule.as_deref());
+    let filter_clause = build_row_level_security_filter(
+        all_or_list_rule,
+        auth.as_ref(),
+        client_filter.as_deref(),
+    );
     let client_with = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
     let with_vec = resolve_resource_relations(col.effective_resource_relations(Some("all")), client_with);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
@@ -564,7 +578,7 @@ pub async fn all(
         }
     }
 
-    Ok(Json(json!(records)))
+    Ok(Json(records))
 }
 
 pub async fn count(
@@ -591,7 +605,13 @@ pub async fn count(
     let auth = authenticate_headers(&headers)?;
     check_permission(RecordAction::List, &col, auth.as_ref(), None)?;
 
-    let (_, filter_clause) = resolve_all_sort_and_filter(&params);
+    let (_, client_filter) = resolve_all_sort_and_filter(&params);
+    let all_or_list_rule = col.all_rule.as_deref().or(col.list_rule.as_deref());
+    let filter_clause = build_row_level_security_filter(
+        all_or_list_rule,
+        auth.as_ref(),
+        client_filter.as_deref(),
+    );
     let total = count_records(&state.db, &col, filter_clause.as_deref())
         .await
         .map_err(|e| {
@@ -632,7 +652,13 @@ pub async fn first(
     let auth = authenticate_headers(&headers)?;
     check_permission(RecordAction::View, &col, auth.as_ref(), None)?;
 
-    let (sort_clause, filter_clause) = resolve_all_sort_and_filter(&params);
+    let (sort_clause, client_filter) = resolve_all_sort_and_filter(&params);
+    let all_or_list_rule = col.all_rule.as_deref().or(col.list_rule.as_deref());
+    let filter_clause = build_row_level_security_filter(
+        all_or_list_rule,
+        auth.as_ref(),
+        client_filter.as_deref(),
+    );
     let client_with = parse_with_param(params.with.as_deref(), params.expand.as_deref(), params.auto_load);
     let with_vec = resolve_resource_relations(col.effective_resource_relations(Some("all")), client_with);
     let with_refs: Option<Vec<&str>> = with_vec.as_ref().map(|v| v.iter().map(String::as_str).collect());
