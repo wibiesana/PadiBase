@@ -545,6 +545,18 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/storage", get(files::list_storage))
         .route("/api/storage/files", get(files::list_storage))
         .route(
+            "/api/storage/{bucket}",
+            post(files::upload_to_bucket),
+        )
+        .route(
+            "/api/storage/{bucket}/{filename}",
+            get(files::get_storage_file).delete(files::delete_storage_file),
+        )
+        .route(
+            "/api/files/{bucket}",
+            post(files::upload_to_bucket),
+        )
+        .route(
             "/api/files/{collection}/{record_id}",
             post(files::upload_file),
         )

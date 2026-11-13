@@ -71,6 +71,9 @@ fn is_auth_sensitive_path(path: &str) -> bool {
         || path.ends_with("/request-password-reset")
         || path.ends_with("/reset-password")
         || path.ends_with("/confirm-password-reset")
+        || path.ends_with("/change-password")
+        || path.ends_with("/request-verification")
+        || path.ends_with("/confirm-verification")
 }
 
 /// Check rate limit for bucket key if `max_per_min > 0`. Returns `Ok((limit, remaining))` or `Err(retry_after_secs)`.

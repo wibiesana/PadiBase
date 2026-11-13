@@ -454,7 +454,212 @@ pub async fn delete_file(
 #[derive(Debug, serde::Deserialize)]
 pub struct StorageListQuery {
     pub collection: Option<String>,
+    pub bucket: Option<String>,
     pub search: Option<String>,
+}
+
+/// Upload one or more standalone files directly into a storage bucket (`POST /api/storage/{bucket}`)
+/// Returns the public/relative URL and key so the client can store the link in any table column.
+pub async fn upload_to_bucket(
+    State(state): State<AppState>,
+    Path(bucket): Path<String>,
+    headers: axum::http::HeaderMap,
+    mut multipart: Multipart,
+) -> Result<impl IntoResponse, ApiError> {
+    if !is_safe_segment(&bucket) {
+        return Err(invalid_path());
+    }
+
+    let auth = authenticate_with_query_token(&state, &headers, None).await?;
+    if auth.is_none() {
+        return Err(err(StatusCode::UNAUTHORIZED, "Authentication required to upload files to storage."));
+    }
+
+    let bucket_dir = state.storage_dir.join(&bucket);
+    tokio::fs::create_dir_all(&bucket_dir)
+        .await
+        .map_err(|e| internal("Failed to create storage bucket directory", e))?;
+
+    let max_bytes = max_file_bytes();
+    let mut uploaded_files = Vec::new();
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| err(StatusCode::BAD_REQUEST, format!("Invalid multipart body: {}", e)))?
+    {
+        let field_name = field.name().unwrap_or("file").to_string();
+        let file_name = field.file_name().map(String::from);
+
+        if let Some(orig_name) = file_name {
+            if orig_name.trim().is_empty() {
+                continue;
+            }
+            let safe_name = sanitize_filename(&orig_name);
+            let dest = bucket_dir.join(&safe_name);
+
+            let data = field
+                .bytes()
+                .await
+                .map_err(|e| err(StatusCode::BAD_REQUEST, format!("Failed to read file bytes: {}", e)))?;
+
+            let size = data.len();
+            if size > max_bytes {
+                return Err(err(
+                    StatusCode::PAYLOAD_TOO_LARGE,
+                    format!("File exceeds the maximum size of {} MB.", max_bytes / 1024 / 1024),
+                ));
+            }
+            tokio::fs::write(&dest, &data)
+                .await
+                .map_err(|e| internal("Failed to save file to storage", e))?;
+
+            let file_url = format!("/api/storage/{}/{}", bucket, safe_name);
+            let key = format!("{}/{}", bucket, safe_name);
+            let mime = from_path(&safe_name).first_or_octet_stream().to_string();
+
+            uploaded_files.push(json!({
+                "field": field_name,
+                "bucket": bucket,
+                "filename": safe_name,
+                "original_name": orig_name,
+                "key": key,
+                "path": file_url,
+                "url": file_url,
+                "size": size,
+                "mime": mime,
+            }));
+        }
+    }
+
+    if uploaded_files.is_empty() {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "No files provided in multipart request.",
+        ));
+    }
+
+    let primary = uploaded_files[0].clone();
+
+    Ok((
+        StatusCode::OK,
+        Json(json!({
+            "message": "File(s) uploaded to storage successfully.",
+            "bucket": bucket,
+            "filename": primary["filename"],
+            "original_name": primary["original_name"],
+            "key": primary["key"],
+            "path": primary["path"],
+            "url": primary["url"],
+            "size": primary["size"],
+            "mime": primary["mime"],
+            "uploaded": uploaded_files,
+        })),
+    ))
+}
+
+/// Download / serve a standalone file from a storage bucket (`GET /api/storage/{bucket}/{filename}`)
+pub async fn get_storage_file(
+    State(state): State<AppState>,
+    Path((bucket, filename)): Path<(String, String)>,
+    axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>,
+    _headers: axum::http::HeaderMap,
+) -> Result<Response, ApiError> {
+    if !is_safe_segment(&bucket) || !is_safe_segment(&filename) {
+        return Err(invalid_path());
+    }
+
+    let file_path = state.storage_dir.join(&bucket).join(&filename);
+
+    let canonical = tokio::fs::canonicalize(&file_path)
+        .await
+        .map_err(|_| err(StatusCode::NOT_FOUND, "File not found."))?;
+    let storage_root = tokio::fs::canonicalize(&state.storage_dir)
+        .await
+        .map_err(|e| internal("Storage directory unavailable", e))?;
+    if !canonical.starts_with(&storage_root) || !canonical.is_file() {
+        return Err(err(StatusCode::NOT_FOUND, "File not found."));
+    }
+
+    let file = File::open(&canonical)
+        .await
+        .map_err(|e| internal("Failed to open file", e))?;
+
+    let guessed = from_path(&file_path).first_or_octet_stream();
+    let active = is_active_content(guessed.as_ref());
+    let content_type = if active {
+        "application/octet-stream".to_string()
+    } else {
+        guessed.to_string()
+    };
+
+    let stream = ReaderStream::new(file);
+    let body = Body::from_stream(stream);
+
+    let is_download = query
+        .get("download")
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false);
+    let disposition = if is_download || active {
+        format!("attachment; filename=\"{}\"", filename)
+    } else {
+        format!("inline; filename=\"{}\"", filename)
+    };
+
+    let res = Response::builder()
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str(&content_type)
+                .unwrap_or(HeaderValue::from_static("application/octet-stream")),
+        )
+        .header(
+            header::CONTENT_DISPOSITION,
+            HeaderValue::from_str(&disposition).unwrap_or(HeaderValue::from_static("attachment")),
+        )
+        .header(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("public, max-age=3600, stale-while-revalidate=86400"),
+        )
+        .header(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        )
+        .header(
+            HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static("default-src 'none'; sandbox"),
+        )
+        .body(body)
+        .map_err(|e| internal("Failed to build response", e))?;
+
+    Ok(res)
+}
+
+/// Delete a standalone file from a storage bucket (`DELETE /api/storage/{bucket}/{filename}`)
+pub async fn delete_storage_file(
+    State(state): State<AppState>,
+    Path((bucket, filename)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+) -> Result<impl IntoResponse, ApiError> {
+    if !is_safe_segment(&bucket) || !is_safe_segment(&filename) {
+        return Err(invalid_path());
+    }
+
+    let auth = authenticate_with_query_token(&state, &headers, None).await?;
+    if auth.is_none() {
+        return Err(err(StatusCode::UNAUTHORIZED, "Authentication required."));
+    }
+
+    let file_path = state.storage_dir.join(&bucket).join(&filename);
+    if file_path.exists() {
+        tokio::fs::remove_file(&file_path)
+            .await
+            .map_err(|e| internal("Failed to delete storage file", e))?;
+    }
+
+    Ok(Json(json!({
+        "success": true,
+        "message": format!("File '{}' deleted from bucket '{}' successfully.", filename, bucket)
+    })))
 }
 
 /// List all storage buckets and files across collections with aggregates
@@ -504,10 +709,50 @@ pub async fn list_storage(
                             continue;
                         }
                         let rec_path = rec_entry.path();
+
+                        // Case 1: Direct file inside storage/{bucket}/{filename}
+                        if rec_path.is_file() {
+                            if let Ok(metadata) = rec_entry.metadata() {
+                                let size = metadata.len();
+                                let modified = metadata
+                                    .modified()
+                                    .ok()
+                                    .and_then(|t| {
+                                        let duration = t.duration_since(std::time::UNIX_EPOCH).ok()?;
+                                        Some(duration.as_millis() as i64)
+                                    })
+                                    .unwrap_or(0);
+
+                                let stat = buckets.entry(col_name.clone()).or_insert((0, 0));
+                                stat.0 += 1;
+                                stat.1 += size;
+
+                                tot_files += 1;
+                                tot_bytes += size;
+
+                                let mime = from_path(&rec_id).first_or_octet_stream().to_string();
+                                let url = format!("/api/storage/{}/{}", col_name, rec_id);
+
+                                files.push(json!({
+                                    "name": rec_id,
+                                    "bucket": col_name,
+                                    "collection": col_name,
+                                    "record_id": "-",
+                                    "key": format!("{}/{}", col_name, rec_id),
+                                    "size": size,
+                                    "mime": mime,
+                                    "modified_at": modified,
+                                    "url": url,
+                                }));
+                            }
+                            continue;
+                        }
+
                         if !rec_path.is_dir() {
                             continue;
                         }
 
+                        // Case 2: Nested file inside storage/{bucket}/{record_id}/{filename}
                         if let Ok(file_entries) = std::fs::read_dir(&rec_path) {
                             for file_entry in file_entries.flatten() {
                                 let file_name = file_entry.file_name().to_string_lossy().to_string();
@@ -540,8 +785,10 @@ pub async fn list_storage(
 
                                     files.push(json!({
                                         "name": file_name,
+                                        "bucket": col_name,
                                         "collection": col_name,
                                         "record_id": rec_id,
+                                        "key": format!("{}/{}/{}", col_name, rec_id, file_name),
                                         "size": size,
                                         "mime": mime,
                                         "modified_at": modified,
@@ -559,16 +806,21 @@ pub async fn list_storage(
     .await
     .map_err(|e| internal("Failed to inspect storage directory", e))?;
 
-    // Also register any collections that declare a File field but have no files yet
+    // Ensure default "uploads" bucket and existing table names are available as buckets
+    buckets_map.entry("uploads".to_string()).or_insert((0, 0));
     if let Ok(collections) = list_collections(&state.db).await {
         for col in collections {
-            if col.schema.iter().any(|f| f.field_type == FieldType::File) {
-                buckets_map.entry(col.name.clone()).or_insert((0, 0));
-            }
+            buckets_map.entry(col.name.clone()).or_insert((0, 0));
         }
     }
 
-    let target_col = query.collection.as_deref().unwrap_or("").trim().to_lowercase();
+    let target_col = query
+        .bucket
+        .as_deref()
+        .or(query.collection.as_deref())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
     let search_q = query.search.as_deref().unwrap_or("").trim().to_lowercase();
 
     let mut filtered_files: Vec<serde_json::Value> = all_files

@@ -1029,6 +1029,7 @@ pub async fn init_db_with_url<P: AsRef<Path>>(
                 .max_connections(max_conn)
                 .test_before_acquire(false)
                 .idle_timeout(std::time::Duration::from_secs(300))
+                .max_lifetime(Some(std::time::Duration::from_secs(1800)))
                 .connect(&db_url)
                 .await?;
             info!("Connected to {} database", driver.as_str().to_uppercase());
@@ -1039,6 +1040,7 @@ pub async fn init_db_with_url<P: AsRef<Path>>(
                 .max_connections(max_conn)
                 .test_before_acquire(false)
                 .idle_timeout(std::time::Duration::from_secs(300))
+                .max_lifetime(Some(std::time::Duration::from_secs(1800)))
                 .connect(&db_url)
                 .await?;
             info!("Connected to PostgreSQL database");
@@ -1247,10 +1249,10 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
                 },
                 super::schema::SchemaField {
                     name: "avatar".to_string(),
-                    field_type: FieldType::File,
+                    field_type: FieldType::Text,
                     required: false,
                     unique: false,
-                    options: serde_json::json!({ "maxSelect": 1 }),
+                    options: serde_json::json!({}),
                 },
             ],
             realtime: true,
@@ -2346,12 +2348,6 @@ pub fn map_column_to_schema_field(col: &IntrospectedColumn) -> SchemaField {
         FieldType::Email
     } else if name_lower.contains("url") || name_lower.contains("website") {
         FieldType::Url
-    } else if name_lower.contains("avatar")
-        || name_lower.contains("image")
-        || name_lower.contains("photo")
-        || name_lower.contains("file")
-    {
-        FieldType::File
     } else {
         FieldType::Text
     };

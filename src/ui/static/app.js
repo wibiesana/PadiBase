@@ -21,7 +21,6 @@ let currentCollection = "users";
           { type: 'bool', sqlType: 'INTEGER', label: 'Bool', sub: 'BOOLEAN', icon: 'fa-toggle-on' },
           { type: 'date', sqlType: 'TEXT', label: 'Datetime', sub: 'DATETIME', icon: 'fa-calendar-days' },
           { type: 'json', sqlType: 'TEXT', label: 'JSON', sub: 'JSON', icon: 'fa-code' },
-          { type: 'file', sqlType: 'TEXT', label: 'File / Blob', sub: 'BLOB', icon: 'fa-paperclip' },
           { type: 'relation', sqlType: 'INTEGER', label: 'Relation (FK)', sub: 'FOREIGN KEY', icon: 'fa-diagram-project' },
           { type: 'email', sqlType: 'TEXT', label: 'Email', sub: 'TEXT', icon: 'fa-envelope' },
           { type: 'select', sqlType: 'TEXT', label: 'Select', sub: 'TEXT', icon: 'fa-list-check' }
@@ -39,7 +38,6 @@ let currentCollection = "users";
           { type: 'date', sqlType: 'TIMESTAMPTZ', label: 'Timestamp (TZ)', sub: 'TIMESTAMPTZ', icon: 'fa-calendar-days' },
           { type: 'json', sqlType: 'JSONB', label: 'JSONB', sub: 'BINARY JSON', icon: 'fa-code' },
           { type: 'text', sqlType: 'UUID', label: 'UUID', sub: 'UUID', icon: 'fa-fingerprint' },
-          { type: 'file', sqlType: 'BYTEA', label: 'File / Bytea', sub: 'BYTEA', icon: 'fa-paperclip' },
           { type: 'relation', sqlType: 'BIGINT', label: 'Relation (FK)', sub: 'FOREIGN KEY', icon: 'fa-diagram-project' },
           { type: 'email', sqlType: 'VARCHAR(255)', label: 'Email', sub: 'VARCHAR', icon: 'fa-envelope' },
           { type: 'select', sqlType: 'VARCHAR(100)', label: 'Select (Enum)', sub: 'VARCHAR', icon: 'fa-list-check' }
@@ -56,7 +54,6 @@ let currentCollection = "users";
           { type: 'bool', sqlType: 'TINYINT(1)', label: 'Bool', sub: 'TINYINT(1)', icon: 'fa-toggle-on' },
           { type: 'date', sqlType: 'DATETIME', label: 'DateTime', sub: 'DATETIME', icon: 'fa-calendar-days' },
           { type: 'json', sqlType: 'JSON', label: 'JSON', sub: 'JSON', icon: 'fa-code' },
-          { type: 'file', sqlType: 'LONGBLOB', label: 'File / Blob', sub: 'BLOB', icon: 'fa-paperclip' },
           { type: 'relation', sqlType: 'BIGINT', label: 'Relation (FK)', sub: 'FOREIGN KEY', icon: 'fa-diagram-project' },
           { type: 'email', sqlType: 'VARCHAR(255)', label: 'Email', sub: 'VARCHAR', icon: 'fa-envelope' },
           { type: 'select', sqlType: 'VARCHAR(100)', label: 'Select (Enum)', sub: 'VARCHAR', icon: 'fa-list-check' }
@@ -73,7 +70,6 @@ let currentCollection = "users";
           { type: 'bool', sqlType: 'TINYINT(1)', label: 'Bool', sub: 'TINYINT(1)', icon: 'fa-toggle-on' },
           { type: 'date', sqlType: 'DATETIME', label: 'DateTime', sub: 'DATETIME', icon: 'fa-calendar-days' },
           { type: 'json', sqlType: 'JSON', label: 'JSON', sub: 'JSON', icon: 'fa-code' },
-          { type: 'file', sqlType: 'LONGBLOB', label: 'File / Blob', sub: 'BLOB', icon: 'fa-paperclip' },
           { type: 'relation', sqlType: 'BIGINT', label: 'Relation (FK)', sub: 'FOREIGN KEY', icon: 'fa-diagram-project' },
           { type: 'email', sqlType: 'VARCHAR(255)', label: 'Email', sub: 'VARCHAR', icon: 'fa-envelope' },
           { type: 'select', sqlType: 'VARCHAR(100)', label: 'Select (Enum)', sub: 'VARCHAR', icon: 'fa-list-check' }
@@ -6020,24 +6016,30 @@ let currentCollection = "users";
           `;
         }
       }
-      if (type === 'file' || (typeof val === 'string' && /\.(jpg|jpeg|png|gif|webp|svg|pdf|docx|xlsx|zip|mp4|mp3|txt)$/i.test(val))) {
-        const isImg = /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(String(val));
+      if (type === 'file' || (typeof val === 'string' && (val.startsWith('/api/storage/') || val.startsWith('/api/files/') || /\.(jpg|jpeg|png|gif|webp|svg|pdf|docx|xlsx|zip|mp4|mp3|txt)(\?.*)?$/i.test(val)))) {
+        const strVal = String(val);
+        const isImg = /\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i.test(strVal);
+        const isDirectUrl = strVal.startsWith('http://') || strVal.startsWith('https://') || strVal.startsWith('/');
         const recId = item ? item.id : '';
-        const url = `/api/files/${currentCollection}/${recId}/${val}${fileTokenQuery()}`;
-        if (isImg && item) {
+        const baseFileUrl = isDirectUrl ? strVal : `/api/files/${currentCollection}/${recId}/${strVal}`;
+        const tokenQs = fileTokenQuery();
+        const url = baseFileUrl.includes('?') ? baseFileUrl : `${baseFileUrl}${tokenQs}`;
+        const displayLabel = strVal.split('/').pop().split('?')[0] || strVal;
+        if (isImg) {
           return `
-            <div onclick="event.stopPropagation(); openImageLightbox('${url}', '${val}')" class="inline-flex items-center space-x-2 text-xs group/img cursor-pointer py-0.5" title="Click to view full image">
+            <div onclick="event.stopPropagation(); openImageLightbox('${url}', '${displayLabel}')" class="inline-flex items-center space-x-2 text-xs group/img cursor-pointer py-0.5" title="Click to view full image (${strVal})">
               <div class="relative w-8 h-8 rounded-xl overflow-hidden border border-slate-300 bg-slate-100 shrink-0 shadow-2xs group-hover/img:border-emerald-500 transition">
                 <img src="${url}" class="w-full h-full object-cover group-hover/img:scale-110 transition duration-150" onerror="this.parentElement.innerHTML='<div class=\\\'w-full h-full flex items-center justify-center text-slate-400 text-[10px]\\\'><i class=\\\'fa-regular fa-image\\\'></i></div>'">
               </div>
-              <span class="font-mono text-[11px] truncate max-w-[130px] font-semibold text-slate-800 group-hover/img:text-emerald-700 group-hover/img:underline">${val}</span>
+              <span class="font-mono text-[11px] truncate max-w-[130px] font-semibold text-slate-800 group-hover/img:text-emerald-700 group-hover/img:underline">${displayLabel}</span>
             </div>
           `;
         }
+        const dlUrl = url.includes('?') ? `${url}&download=1` : `${url}?download=1`;
         return `
-          <a href="${url}?download=1" target="_blank" onclick="event.stopPropagation()" class="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200 hover:border-emerald-300 text-[11px] font-mono inline-flex items-center space-x-1.5 transition">
+          <a href="${dlUrl}" target="_blank" onclick="event.stopPropagation()" class="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200 hover:border-emerald-300 text-[11px] font-mono inline-flex items-center space-x-1.5 transition" title="${strVal}">
             <i class="fa-solid fa-paperclip text-[10px] text-slate-400"></i>
-            <span class="truncate max-w-[130px] font-semibold">${val}</span>
+            <span class="truncate max-w-[130px] font-semibold">${displayLabel}</span>
           </a>
         `;
       }
@@ -6346,7 +6348,29 @@ let currentCollection = "users";
                 </select>
               `;
             } else {
-              inputEl = `<input type="${f.type === 'email' ? 'email' : (f.type === 'url' ? 'url' : 'text')}" id="recField_${f.name}" value="${val !== undefined && val !== null ? val : ''}" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:bg-white focus:outline-none focus:border-emerald-600" placeholder="Enter ${f.name}...">`;
+              const strVal = val !== undefined && val !== null ? String(val) : '';
+              inputEl = `
+                <div class="space-y-1">
+                  <div class="flex items-center space-x-2">
+                    <input type="${f.type === 'email' ? 'email' : (f.type === 'url' ? 'url' : 'text')}" 
+                           id="recField_${f.name}" 
+                           value="${escapeHtml(strVal)}" 
+                           oninput="updateInlineFieldPreview('${f.name}', this.value)"
+                           class="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs focus:bg-white focus:outline-none focus:border-emerald-600" 
+                           placeholder="Enter ${f.name}...">
+                    <button type="button" 
+                            onclick="triggerRecordFieldUpload('${f.name}')" 
+                            class="px-2.5 py-2 rounded-xl bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-200 hover:border-emerald-300 font-semibold text-xs flex items-center space-x-1.5 transition shrink-0 shadow-2xs cursor-pointer" 
+                            title="Upload file to /api/storage/${currentCollection} and insert returned file URL">
+                      <i class="fa-solid fa-cloud-arrow-up text-emerald-600 text-[11px]"></i>
+                      <span>Upload</span>
+                    </button>
+                  </div>
+                  <div id="fieldUrlPreview_${f.name}" class="${strVal ? '' : 'hidden'} text-xs">
+                    ${strVal ? renderInlineMediaPreview(strVal) : ''}
+                  </div>
+                </div>
+              `;
             }
             break;
         }
@@ -6519,6 +6543,95 @@ let currentCollection = "users";
         }
       } catch (err) {
         showToast(err.message, 'error');
+      }
+    }
+
+    function renderInlineMediaPreview(url) {
+      if (!url || typeof url !== 'string') return '';
+      const cleanUrl = url.trim();
+      const isImg = /\.(jpg|jpeg|png|gif|webp|svg)(\?.*)?$/i.test(cleanUrl) || cleanUrl.includes('/storage/') || cleanUrl.includes('/files/');
+      const displayLabel = cleanUrl.split('/').pop().split('?')[0] || cleanUrl;
+      const token = sessionStorage.getItem('padi_admin_token') || '';
+      const authUrl = cleanUrl.includes('token=') || !token ? cleanUrl : (cleanUrl.includes('?') ? `${cleanUrl}&token=${encodeURIComponent(token)}` : `${cleanUrl}?token=${encodeURIComponent(token)}`);
+
+      if (isImg) {
+        return `
+          <div class="inline-flex items-center space-x-2.5 p-1.5 rounded-xl bg-slate-100 border border-slate-200 mt-1">
+            <div onclick="openImageLightbox('${authUrl}', '${escapeHtml(displayLabel)}')" class="w-8 h-8 rounded-lg overflow-hidden bg-white border border-slate-300 shrink-0 cursor-pointer shadow-2xs hover:scale-105 transition" title="View High-Res">
+              <img src="${authUrl}" class="w-full h-full object-cover" onerror="this.parentElement.innerHTML='<div class=\\\'w-full h-full flex items-center justify-center text-slate-400 text-[10px]\\\'><i class=\\\'fa-solid fa-file-image\\\'></i></div>'">
+            </div>
+            <span class="font-mono text-[11px] font-semibold text-slate-700 truncate max-w-[200px]">${escapeHtml(displayLabel)}</span>
+            <a href="${authUrl}" target="_blank" class="text-[10px] text-emerald-700 hover:underline font-bold px-1.5 py-0.5 rounded bg-emerald-50 border border-emerald-200">Open</a>
+          </div>
+        `;
+      }
+      return `
+        <div class="inline-flex items-center space-x-2 p-1.5 rounded-xl bg-slate-100 border border-slate-200 mt-1">
+          <i class="fa-solid fa-paperclip text-slate-500 text-xs"></i>
+          <span class="font-mono text-[11px] font-semibold text-slate-700 truncate max-w-[200px]">${escapeHtml(displayLabel)}</span>
+          <a href="${authUrl}" target="_blank" class="text-[10px] text-indigo-700 hover:underline font-bold px-1.5 py-0.5 rounded bg-indigo-50 border border-indigo-200">Open File</a>
+        </div>
+      `;
+    }
+
+    function updateInlineFieldPreview(fieldName, value) {
+      const previewEl = document.getElementById('fieldUrlPreview_' + fieldName);
+      if (!previewEl) return;
+      if (value && value.trim()) {
+        previewEl.innerHTML = renderInlineMediaPreview(value.trim());
+        previewEl.classList.remove('hidden');
+      } else {
+        previewEl.innerHTML = '';
+        previewEl.classList.add('hidden');
+      }
+    }
+
+    function triggerRecordFieldUpload(fieldName) {
+      let fileInput = document.getElementById('tempUploadInput_' + fieldName);
+      if (!fileInput) {
+        fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.id = 'tempUploadInput_' + fieldName;
+        fileInput.style.display = 'none';
+        document.body.appendChild(fileInput);
+      }
+      fileInput.onchange = async () => {
+        if (fileInput.files && fileInput.files[0]) {
+          await uploadDirectRecordField(fieldName, fileInput.files[0]);
+        }
+      };
+      fileInput.value = '';
+      fileInput.click();
+    }
+
+    async function uploadDirectRecordField(fieldName, file) {
+      const token = sessionStorage.getItem('padi_admin_token') || '';
+      const bucket = currentCollection || 'uploads';
+      const formData = new FormData();
+      formData.append('file', file);
+      showToast('Uploading to storage...');
+
+      try {
+        const res = await fetch(`/api/storage/${bucket}`, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token
+          },
+          body: formData
+        });
+        const data = await res.json();
+        if (res.ok && data.url) {
+          const inputEl = document.getElementById('recField_' + fieldName);
+          if (inputEl) {
+            inputEl.value = data.url;
+            updateInlineFieldPreview(fieldName, data.url);
+          }
+          showToast(`Uploaded: ${data.filename || file.name}`);
+        } else {
+          showToast(data.message || 'Upload failed', 'error');
+        }
+      } catch (err) {
+        showToast(err.message || 'Upload error', 'error');
       }
     }
 
@@ -11222,7 +11335,11 @@ let currentCollection = "users";
       if (!confirmed) return;
 
       try {
-        const res = await fetch(`/api/files/${encodeURIComponent(colName)}/${encodeURIComponent(recId)}/${encodeURIComponent(fileName)}`, {
+        const endpoint = (!recId || recId === '-')
+          ? `/api/storage/${encodeURIComponent(colName)}/${encodeURIComponent(fileName)}`
+          : `/api/files/${encodeURIComponent(colName)}/${encodeURIComponent(recId)}/${encodeURIComponent(fileName)}`;
+
+        const res = await fetch(endpoint, {
           method: 'DELETE'
         });
         if (res.ok) {
@@ -11237,42 +11354,33 @@ let currentCollection = "users";
       }
     }
 
-    // Modal Upload handlers & Record Picker / New Record Schema Builder
-    let storageCandidateRecords = [];
-    let storageRecPickerPage = 1;
-    let storageRecPickerTotalPages = 1;
-    let storageRecPickerTotalItems = 0;
-    const STORAGE_REC_PICKER_PER_PAGE = 20;
-    let storageShowOptionalNewFields = false;
-    let storageSearchDebounceTimer = null;
-
     function openStorageUploadModal() {
       const modal = document.getElementById('storageUploadModal');
       if (!modal) return;
 
       const bucketSelect = document.getElementById('storageUploadBucketSelect');
       if (bucketSelect) {
-        // Prefer collections that have at least one file column, but list all collections
-        const sortedCols = [...collections].sort((a, b) => {
-          const aHasFile = Array.isArray(a.schema) && a.schema.some(f => f.type === 'file');
-          const bHasFile = Array.isArray(b.schema) && b.schema.some(f => f.type === 'file');
-          if (aHasFile && !bHasFile) return -1;
-          if (!aHasFile && bHasFile) return 1;
-          return a.name.localeCompare(b.name);
+        const bucketSet = new Set(['uploads']);
+        if (Array.isArray(storageBuckets)) {
+          storageBuckets.forEach(b => { if (b) bucketSet.add(b); });
+        }
+        if (Array.isArray(collections)) {
+          collections.forEach(c => { if (c && c.name) bucketSet.add(c.name); });
+        }
+        const sortedBuckets = Array.from(bucketSet).sort((a, b) => {
+          if (a === 'uploads') return -1;
+          if (b === 'uploads') return 1;
+          return a.localeCompare(b);
         });
-        bucketSelect.innerHTML = sortedCols.map(c => {
-          const hasFile = Array.isArray(c.schema) && c.schema.some(f => f.type === 'file');
-          return `<option value="${c.name}" ${currentStorageBucket === c.name ? 'selected' : ''}>${c.name}${hasFile ? '' : ' (no file col)'}</option>`;
-        }).join('');
+        const defaultBucket = currentStorageBucket || 'uploads';
+        bucketSelect.innerHTML = sortedBuckets.map(b =>
+          `<option value="${escapeHtml(b)}" ${defaultBucket === b ? 'selected' : ''}>${escapeHtml(b)}</option>`
+        ).join('');
       }
 
-      const searchInput = document.getElementById('storageRecordSearchInput');
-      if (searchInput) searchInput.value = '';
-      const recIdInput = document.getElementById('storageUploadRecordIdInput');
-      if (recIdInput) recIdInput.value = '';
+      const customBucketInput = document.getElementById('storageCustomBucketInput');
+      if (customBucketInput) customBucketInput.value = '';
 
-      storageRecPickerPage = 1;
-      storageShowOptionalNewFields = false;
       onStorageUploadBucketChanged();
       clearStorageSelectedFile();
       modal.classList.remove('hidden');
@@ -11284,336 +11392,7 @@ let currentCollection = "users";
     }
 
     function onStorageUploadBucketChanged() {
-      const bucketSelect = document.getElementById('storageUploadBucketSelect');
-      const fieldSelect = document.getElementById('storageUploadFieldSelect');
-      if (!bucketSelect || !fieldSelect) return;
-
-      const colName = bucketSelect.value;
-      const col = collections.find(c => c.name === colName);
-      const fileFields = (col && Array.isArray(col.schema))
-        ? col.schema.filter(f => f.type === 'file')
-        : [];
-
-      if (fileFields.length > 0) {
-        fieldSelect.innerHTML = fileFields.map(f => `<option value="${f.name}">${f.name}${f.required ? ' *' : ''}</option>`).join('');
-      } else {
-        fieldSelect.innerHTML = `<option value="file">file (auto)</option>`;
-      }
-
-      const recIdInput = document.getElementById('storageUploadRecordIdInput');
-      if (recIdInput) recIdInput.value = '';
-      const searchInput = document.getElementById('storageRecordSearchInput');
-      if (searchInput) searchInput.value = '';
-
-      storageRecPickerPage = 1;
-      loadStorageCandidateRecords(colName, 1, '');
-      renderStorageNewRecordFields(col);
-    }
-
-    function changeStorageRecordPickerPage(delta) {
-      const bucketSelect = document.getElementById('storageUploadBucketSelect');
-      const colName = bucketSelect ? bucketSelect.value : '';
-      if (!colName) return;
-      const nextPage = Math.max(1, Math.min(storageRecPickerTotalPages, storageRecPickerPage + delta));
-      if (nextPage === storageRecPickerPage) return;
-      storageRecPickerPage = nextPage;
-      const searchInput = document.getElementById('storageRecordSearchInput');
-      const q = searchInput ? searchInput.value.trim() : '';
-      loadStorageCandidateRecords(colName, storageRecPickerPage, q);
-    }
-
-    async function loadStorageCandidateRecords(colName, page = 1, searchQuery = '') {
-      const listEl = document.getElementById('storageRecordPickerList');
-      const countEl = document.getElementById('storageRecordPickerCount');
-      const pageLabelEl = document.getElementById('storageRecPickerPageLabel');
-      const prevBtn = document.getElementById('storageRecPickerPrevBtn');
-      const nextBtn = document.getElementById('storageRecPickerNextBtn');
-      if (!colName) return;
-
-      if (listEl) {
-        listEl.innerHTML = `<div class="p-3 text-center text-slate-400 text-[11px]"><i class="fa-solid fa-circle-notch fa-spin mr-1.5 text-emerald-600"></i>Loading page ${page} from <b>${escapeHtml(colName)}</b>...</div>`;
-      }
-
-      try {
-        const params = new URLSearchParams({
-          page: String(page),
-          perPage: String(STORAGE_REC_PICKER_PER_PAGE),
-        });
-        if (searchQuery) {
-          params.set('search', searchQuery);
-        }
-
-        const res = await fetch(`/api/${encodeURIComponent(colName)}?${params.toString()}`);
-        if (!res.ok) {
-          storageCandidateRecords = [];
-          storageRecPickerTotalItems = 0;
-          storageRecPickerTotalPages = 1;
-          renderStorageCandidateRecords();
-          return;
-        }
-        const raw = await res.json();
-        const items = Array.isArray(raw.item)
-          ? raw.item
-          : (Array.isArray(raw.items) ? raw.items : (raw.item && Array.isArray(raw.item.items) ? raw.item.items : []));
-        storageCandidateRecords = items;
-
-        const total = raw.meta?.total ?? raw.totalItems ?? raw.item?.totalItems ?? items.length;
-        const lastPage = raw.meta?.last_page ?? raw.totalPages ?? raw.item?.totalPages ?? Math.max(1, Math.ceil(total / STORAGE_REC_PICKER_PER_PAGE));
-
-        storageRecPickerTotalItems = Number(total) || items.length;
-        storageRecPickerTotalPages = Math.max(1, Number(lastPage) || 1);
-        storageRecPickerPage = Math.min(page, storageRecPickerTotalPages);
-
-        if (countEl) {
-          countEl.textContent = `${storageRecPickerTotalItems.toLocaleString()} total record(s)`;
-        }
-        if (pageLabelEl) {
-          pageLabelEl.textContent = `${storageRecPickerPage.toLocaleString()} / ${storageRecPickerTotalPages.toLocaleString()}`;
-        }
-        if (prevBtn) prevBtn.disabled = storageRecPickerPage <= 1;
-        if (nextBtn) nextBtn.disabled = storageRecPickerPage >= storageRecPickerTotalPages;
-
-        renderStorageCandidateRecords();
-      } catch (e) {
-        storageCandidateRecords = [];
-        storageRecPickerTotalItems = 0;
-        storageRecPickerTotalPages = 1;
-        renderStorageCandidateRecords();
-      }
-    }
-
-    function onStorageRecordSearchInput() {
-      if (storageSearchDebounceTimer) clearTimeout(storageSearchDebounceTimer);
-      storageSearchDebounceTimer = setTimeout(() => {
-        const bucketSelect = document.getElementById('storageUploadBucketSelect');
-        const colName = bucketSelect ? bucketSelect.value : '';
-        const searchInput = document.getElementById('storageRecordSearchInput');
-        const q = searchInput ? searchInput.value.trim() : '';
-        storageRecPickerPage = 1;
-        loadStorageCandidateRecords(colName, 1, q);
-      }, 250);
-    }
-
-    function getRecordReadableSummary(rec, fileFieldName) {
-      if (!rec || typeof rec !== 'object') return '';
-      const priorityKeys = ['name', 'title', 'bank_name', 'account_name', 'full_name', 'username', 'email', 'code', 'slug', 'label', 'subject', 'phone', 'description'];
-      const parts = [];
-      const usedKeys = new Set(['id', 'created', 'updated', 'created_at', 'updated_at', 'password', 'tokenKey', 'collectionId', 'collectionName', fileFieldName]);
-
-      for (const k of priorityKeys) {
-        if (usedKeys.has(k)) continue;
-        const v = rec[k];
-        if (v !== undefined && v !== null && String(v).trim() !== '' && typeof v !== 'object') {
-          parts.push(`${k}: ${String(v).trim()}`);
-          usedKeys.add(k);
-          if (parts.length >= 2) break;
-        }
-      }
-
-      if (parts.length < 2) {
-        for (const [k, v] of Object.entries(rec)) {
-          if (usedKeys.has(k) || k.startsWith('@')) continue;
-          if (v !== undefined && v !== null && String(v).trim() !== '' && typeof v !== 'object') {
-            parts.push(`${k}: ${String(v).trim()}`);
-            usedKeys.add(k);
-            if (parts.length >= 2) break;
-          }
-        }
-      }
-
-      return parts.join(' • ');
-    }
-
-    function renderStorageCandidateRecords() {
-      const listEl = document.getElementById('storageRecordPickerList');
-      if (!listEl) return;
-
-      const recIdInput = document.getElementById('storageUploadRecordIdInput');
-      const selectedId = recIdInput ? recIdInput.value.trim() : '';
-      const fieldSelect = document.getElementById('storageUploadFieldSelect');
-      const fileFieldName = fieldSelect ? fieldSelect.value : 'file';
-      const searchInput = document.getElementById('storageRecordSearchInput');
-      const q = searchInput ? searchInput.value.trim() : '';
-
-      if (storageCandidateRecords.length === 0) {
-        listEl.innerHTML = `
-          <div class="p-3 text-center text-slate-400 text-[11px]">
-            ${!q
-              ? 'No existing records found in this table. Switch to <b>Create New Record</b> above.'
-              : 'No records match your search query. You can also type a Record ID manually.'}
-          </div>
-        `;
-        return;
-      }
-
-      listEl.innerHTML = storageCandidateRecords.map(rec => {
-        const idVal = String(rec.id ?? '');
-        const isSelected = selectedId !== '' && selectedId === idVal;
-        const summary = getRecordReadableSummary(rec, fileFieldName);
-        const existingFile = rec[fileFieldName];
-        const hasFile = existingFile !== undefined && existingFile !== null && String(existingFile).trim() !== '';
-
-        return `
-          <button type="button" onclick="selectStorageCandidateRecord('${escapeHtml(idVal)}')" class="w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition cursor-pointer ${isSelected ? 'bg-emerald-50 text-emerald-950 font-semibold' : 'hover:bg-slate-50 text-slate-700'}">
-            <div class="flex items-center space-x-2 min-w-0 truncate">
-              <span class="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold shrink-0 ${isSelected ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-700 border border-slate-200'}">#${escapeHtml(idVal)}</span>
-              <span class="truncate text-[11px] ${summary ? 'text-slate-700 font-medium' : 'text-slate-400 italic'}">${summary ? escapeHtml(summary) : 'Record #' + escapeHtml(idVal)}</span>
-            </div>
-            <div class="flex items-center space-x-1.5 shrink-0">
-              ${hasFile ? `<span class="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 text-[9px] font-mono" title="Current file: ${escapeHtml(String(existingFile))}"><i class="fa-solid fa-paperclip mr-0.5"></i>replace</span>` : ''}
-              ${isSelected ? `<i class="fa-solid fa-circle-check text-emerald-600 text-xs"></i>` : ''}
-            </div>
-          </button>
-        `;
-      }).join('');
-    }
-
-    function selectStorageCandidateRecord(idVal) {
-      const recIdInput = document.getElementById('storageUploadRecordIdInput');
-      if (recIdInput) {
-        recIdInput.value = idVal;
-      }
-      renderStorageCandidateRecords();
-    }
-
-    function highlightSelectedStorageRecord() {
-      renderStorageCandidateRecords();
-    }
-
-    function getStorageNewRecordSchemaFields(col) {
-      if (!col) return { requiredFields: [], optionalFields: [] };
-      const allFields = [];
-
-      if (col.type === 'auth') {
-        allFields.push({ name: 'email', type: 'email', required: true });
-        allFields.push({ name: 'password', type: 'password', required: true });
-        allFields.push({ name: 'name', type: 'text', required: false });
-        allFields.push({ name: 'username', type: 'text', required: false });
-        allFields.push({ name: 'role', type: 'text', required: false, defaultValue: 'user' });
-      }
-
-      if (Array.isArray(col.schema)) {
-        for (const f of col.schema) {
-          if (f.type === 'file') continue;
-          if (allFields.some(existing => existing.name === f.name)) continue;
-          allFields.push(f);
-        }
-      }
-
-      const requiredFields = allFields.filter(f => !!f.required);
-      const optionalFields = allFields.filter(f => !f.required);
-      return { requiredFields, optionalFields };
-    }
-
-    function renderStorageNewRecordFieldInput(f) {
-      const reqBadge = f.required
-        ? `<span class="text-rose-500 font-bold ml-0.5" title="Required field">*</span>`
-        : `<span class="text-slate-400 font-normal ml-1 text-[10px]">(optional)</span>`;
-      const inputId = `storageNewRecField_${f.name}`;
-
-      if (f.type === 'bool') {
-        return `
-          <div class="flex items-center justify-between py-1">
-            <label for="${inputId}" class="text-[11px] font-bold text-slate-700">${escapeHtml(f.name)}${reqBadge}</label>
-            <label class="inline-flex items-center space-x-1.5 cursor-pointer">
-              <input type="checkbox" id="${inputId}" data-field-name="${escapeHtml(f.name)}" data-field-type="bool" class="rounded border-slate-300 text-emerald-600">
-              <span class="text-[11px] text-slate-600">True</span>
-            </label>
-          </div>
-        `;
-      }
-
-      const inputType = f.type === 'number'
-        ? 'number'
-        : (f.type === 'date' ? 'datetime-local' : (f.type === 'email' ? 'email' : (f.type === 'password' ? 'password' : 'text')));
-
-      return `
-        <div>
-          <label for="${inputId}" class="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
-            <span>${escapeHtml(f.name)}${reqBadge}</span>
-            <span class="text-[9px] font-mono uppercase text-slate-400">${escapeHtml(f.type || 'text')}</span>
-          </label>
-          <input
-            type="${inputType}"
-            ${f.type === 'number' ? 'step="any"' : ''}
-            id="${inputId}"
-            data-field-name="${escapeHtml(f.name)}"
-            data-field-type="${escapeHtml(f.type || 'text')}"
-            data-field-required="${f.required ? '1' : '0'}"
-            value="${f.defaultValue || ''}"
-            placeholder="Enter ${escapeHtml(f.name)}${f.required ? ' (required)' : ''}..."
-            class="w-full bg-white border ${f.required ? 'border-emerald-300' : 'border-slate-300'} rounded-xl px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-600"
-          >
-        </div>
-      `;
-    }
-
-    function toggleStorageOptionalNewFields() {
-      storageShowOptionalNewFields = !storageShowOptionalNewFields;
-      const bucketSelect = document.getElementById('storageUploadBucketSelect');
-      const col = collections.find(c => c.name === (bucketSelect ? bucketSelect.value : ''));
-      renderStorageNewRecordFields(col);
-    }
-
-    function renderStorageNewRecordFields(col) {
-      const box = document.getElementById('storageNewRecordFieldsBox');
-      if (!box) return;
-
-      const { requiredFields, optionalFields } = getStorageNewRecordSchemaFields(col);
-      let html = '';
-
-      if (requiredFields.length > 0) {
-        html += `
-          <div class="flex items-center justify-between text-[11px] font-bold text-emerald-900 bg-emerald-50/90 border border-emerald-200 px-2.5 py-1.5 rounded-lg">
-            <span><i class="fa-solid fa-asterisk text-rose-500 mr-1 text-[9px]"></i>Required fields for new <b>${escapeHtml(col.name)}</b> record:</span>
-            <span class="font-mono text-[10px] text-emerald-700">${requiredFields.length} required</span>
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-0.5">
-            ${requiredFields.map(f => renderStorageNewRecordFieldInput(f)).join('')}
-          </div>
-        `;
-      } else {
-        html += `
-          <div class="text-[11px] text-emerald-800 bg-emerald-50/70 border border-emerald-200/80 px-3 py-2 rounded-lg flex items-center space-x-2">
-            <i class="fa-solid fa-circle-check text-emerald-600"></i>
-            <span>No other required columns in <b>${escapeHtml(col ? col.name : '')}</b>. A new record will be created automatically with this file.</span>
-          </div>
-        `;
-      }
-
-      if (optionalFields.length > 0) {
-        html += `
-          <div class="pt-1">
-            <button type="button" onclick="toggleStorageOptionalNewFields()" class="text-[11px] font-bold text-emerald-700 hover:text-emerald-800 flex items-center space-x-1 cursor-pointer">
-              <i class="fa-solid ${storageShowOptionalNewFields ? 'fa-chevron-up' : 'fa-plus'} text-[10px]"></i>
-              <span>${storageShowOptionalNewFields ? 'Hide' : 'Fill'} optional fields (${optionalFields.length})</span>
-            </button>
-            ${storageShowOptionalNewFields ? `
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-2 pt-2 border-t border-slate-200/80">
-                ${optionalFields.map(f => renderStorageNewRecordFieldInput(f)).join('')}
-              </div>
-            ` : ''}
-          </div>
-        `;
-      }
-
-      box.innerHTML = html;
-    }
-
-    function toggleStorageRecordMode() {
-      const radios = document.getElementsByName('storageRecordOption');
-      let val = 'existing';
-      for (const r of radios) {
-        if (r.checked) val = r.value;
-      }
-      const existingContainer = document.getElementById('storageExistingRecordContainer');
-      const newContainer = document.getElementById('storageNewRecordContainer');
-      if (existingContainer) {
-        existingContainer.classList.toggle('hidden', val === 'new');
-      }
-      if (newContainer) {
-        newContainer.classList.toggle('hidden', val !== 'new');
-      }
+      // Bucket changed in storageUploadModal
     }
 
     function handleStorageFileSelect(event) {
@@ -11644,57 +11423,18 @@ let currentCollection = "users";
         return;
       }
 
+      const customBucketInput = document.getElementById('storageCustomBucketInput');
       const bucketSelect = document.getElementById('storageUploadBucketSelect');
-      const fieldSelect = document.getElementById('storageUploadFieldSelect');
-      const bucket = bucketSelect ? bucketSelect.value : '';
-      const fieldName = fieldSelect ? fieldSelect.value : 'file';
+      const customBucket = customBucketInput ? customBucketInput.value.trim() : '';
+      const bucket = customBucket || (bucketSelect ? bucketSelect.value : 'uploads');
 
       if (!bucket) {
-        showToast('Please choose a target bucket.', 'error');
-        return;
-      }
-
-      const radios = document.getElementsByName('storageRecordOption');
-      let mode = 'existing';
-      for (const r of radios) {
-        if (r.checked) mode = r.value;
-      }
-
-      const recIdInput = document.getElementById('storageUploadRecordIdInput');
-      const recId = recIdInput ? recIdInput.value.trim() : '';
-
-      if (mode === 'existing' && !recId) {
-        showToast('Please select a record from the list or enter a Record ID.', 'error');
-        if (recIdInput) recIdInput.focus();
+        showToast('Please choose or enter a target bucket.', 'error');
         return;
       }
 
       const formData = new FormData();
-
-      if (mode === 'new') {
-        const fieldInputs = document.querySelectorAll('#storageNewRecordFieldsBox [data-field-name]');
-        for (const el of fieldInputs) {
-          const fname = el.getAttribute('data-field-name');
-          const ftype = el.getAttribute('data-field-type');
-          const isReq = el.getAttribute('data-field-required') === '1';
-
-          if (ftype === 'bool') {
-            formData.append(fname, el.checked ? 'true' : 'false');
-          } else {
-            const val = el.value.trim();
-            if (isReq && val === '') {
-              showToast(`Field '${fname}' is required to create a new record in '${bucket}'.`, 'error');
-              el.focus();
-              return;
-            }
-            if (val !== '') {
-              formData.append(fname, val);
-            }
-          }
-        }
-      }
-
-      formData.append(fieldName, selectedStorageUploadFile);
+      formData.append('file', selectedStorageUploadFile);
 
       const btn = document.getElementById('storageSubmitUploadBtn');
       const oldHtml = btn ? btn.innerHTML : '';
@@ -11704,9 +11444,7 @@ let currentCollection = "users";
       }
 
       try {
-        const url = mode === 'existing'
-          ? `/api/files/${encodeURIComponent(bucket)}/${encodeURIComponent(recId)}`
-          : `/api/${encodeURIComponent(bucket)}`;
+        const url = `/api/storage/${encodeURIComponent(bucket)}`;
 
         const res = await fetch(url, {
           method: 'POST',
@@ -11714,7 +11452,12 @@ let currentCollection = "users";
         });
 
         if (res.ok) {
-          showToast(`File '${selectedStorageUploadFile.name}' uploaded successfully!`, 'success');
+          const data = await res.json().catch(() => ({}));
+          const fileUrl = data.url || '';
+          if (fileUrl && navigator.clipboard) {
+            navigator.clipboard.writeText(window.location.origin + fileUrl).catch(() => {});
+          }
+          showToast(`File uploaded to '${bucket}'! URL copied: ${fileUrl || selectedStorageUploadFile.name}`, 'success');
           closeStorageUploadModal();
           loadStorageData(bucket);
         } else {

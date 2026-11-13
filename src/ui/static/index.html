@@ -2836,7 +2836,7 @@
             </div>
             <div class="min-w-0">
               <h3 class="text-sm font-extrabold text-slate-900 truncate">Upload to Storage</h3>
-              <p class="text-[11px] text-slate-500 truncate">Upload files and attach them to records or buckets.</p>
+              <p class="text-[11px] text-slate-500 truncate">Upload files to a storage bucket and copy the link to save in your table.</p>
             </div>
           </div>
           <button type="button" onclick="closeStorageUploadModal()" class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200 transition shrink-0" title="Close Drawer (Esc)">
@@ -2846,71 +2846,24 @@
 
         <!-- Drawer Body -->
         <div class="flex-1 overflow-y-auto p-5 space-y-4 text-xs">
-          <!-- Bucket / Collection & File Column Selection -->
+          <!-- Bucket Selection & Custom Bucket Name -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Target Bucket / Collection:</label>
+              <label class="block font-bold text-slate-700 mb-1">Select Bucket / Folder:</label>
               <select id="storageUploadBucketSelect" onchange="onStorageUploadBucketChanged()" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-emerald-500">
                 <!-- Populated via JS -->
               </select>
             </div>
             <div>
-              <label class="block font-bold text-slate-700 mb-1">Target File Column:</label>
-              <select id="storageUploadFieldSelect" onchange="renderStorageCandidateRecords()" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono font-bold text-slate-800 focus:outline-none focus:border-emerald-500">
-                <!-- Populated via JS -->
-              </select>
+              <label class="block font-bold text-slate-700 mb-1">Or Custom Bucket Name:</label>
+              <input type="text" id="storageCustomBucketInput" placeholder="e.g. avatars, covers, media..." class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-800 focus:bg-white focus:outline-none focus:border-emerald-500">
             </div>
           </div>
 
-          <!-- Target Record Option -->
-          <div class="space-y-2.5">
-            <label class="block font-bold text-slate-700">Attach to Record:</label>
-            <div class="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
-              <label class="flex items-center justify-center space-x-1.5 py-1.5 px-3 rounded-lg cursor-pointer transition has-[:checked]:bg-white has-[:checked]:text-emerald-800 has-[:checked]:shadow-2xs text-slate-600 font-bold">
-                <input type="radio" name="storageRecordOption" value="existing" checked onchange="toggleStorageRecordMode()" class="hidden">
-                <i class="fa-solid fa-magnifying-glass text-[10px]"></i>
-                <span>Existing Record</span>
-              </label>
-              <label class="flex items-center justify-center space-x-1.5 py-1.5 px-3 rounded-lg cursor-pointer transition has-[:checked]:bg-white has-[:checked]:text-emerald-800 has-[:checked]:shadow-2xs text-slate-600 font-bold">
-                <input type="radio" name="storageRecordOption" value="new" onchange="toggleStorageRecordMode()" class="hidden">
-                <i class="fa-solid fa-plus text-[10px]"></i>
-                <span>Create New Record</span>
-              </label>
-            </div>
-
-            <!-- Mode 1: Existing Record Search & Picker -->
-            <div id="storageExistingRecordContainer" class="space-y-2 bg-slate-50/70 p-3 rounded-xl border border-slate-200">
-              <div class="grid grid-cols-1 sm:grid-cols-12 gap-2">
-                <div class="sm:col-span-8 relative">
-                  <i class="fa-solid fa-magnifying-glass text-slate-400 text-[11px] absolute left-3 top-2.5"></i>
-                  <input type="text" id="storageRecordSearchInput" oninput="onStorageRecordSearchInput()" placeholder="Search record by ID, name, code, title..." class="w-full bg-white border border-slate-300 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-emerald-500">
-                </div>
-                <div class="sm:col-span-4 relative">
-                  <input type="text" id="storageUploadRecordIdInput" oninput="highlightSelectedStorageRecord()" placeholder="Record ID *" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-1.5 font-mono font-bold text-xs text-emerald-800 focus:outline-none focus:border-emerald-500" title="Selected Record ID">
-                </div>
-              </div>
-              <div id="storageRecordPickerList" class="max-h-48 overflow-y-auto rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
-                <!-- Populated via JS -->
-              </div>
-              <div class="flex items-center justify-between flex-wrap gap-2 pt-0.5 text-[10px] text-slate-500">
-                <span id="storageRecordPickerCount" class="font-mono">0 records</span>
-                <div class="flex items-center space-x-1">
-                  <button type="button" id="storageRecPickerPrevBtn" onclick="changeStorageRecordPickerPage(-1)" class="px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-bold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
-                    <i class="fa-solid fa-chevron-left text-[8px]"></i> Prev
-                  </button>
-                  <span id="storageRecPickerPageLabel" class="px-2 py-0.5 font-mono font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded">1 / 1</span>
-                  <button type="button" id="storageRecPickerNextBtn" onclick="changeStorageRecordPickerPage(1)" class="px-2 py-0.5 rounded border border-slate-200 bg-white hover:bg-slate-100 text-slate-700 font-bold disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer">
-                    Next <i class="fa-solid fa-chevron-right text-[8px]"></i>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Mode 2: Create New Record Dynamic Fields (Required & Optional) -->
-            <div id="storageNewRecordContainer" class="hidden space-y-2.5 bg-slate-50/70 p-3 rounded-xl border border-slate-200">
-              <div id="storageNewRecordFieldsBox" class="space-y-2.5">
-                <!-- Dynamically rendered required & optional fields for the selected bucket -->
-              </div>
+          <div class="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 text-[11px] text-emerald-900 flex items-start space-x-2">
+            <i class="fa-solid fa-circle-info text-emerald-600 mt-0.5"></i>
+            <div>
+              <strong>Storage-First Architecture:</strong> Files are stored directly in Storage Buckets. Once uploaded, copy the generated URL (e.g. <code class="font-mono bg-white/80 px-1 py-0.5 rounded">/api/storage/uploads/file.png</code>) and save it in a <code class="font-mono font-bold">TEXT</code> or <code class="font-mono font-bold">URL</code> column in your table.
             </div>
           </div>
 
