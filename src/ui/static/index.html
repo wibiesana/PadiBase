@@ -149,35 +149,35 @@
             <span class="hidden md:inline-block shrink-0 whitespace-nowrap ml-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-slate-300">No N+1</span>
           </button>
 
-          <!-- 2. Visual SQL Builder -->
-          <button id="railSqlbuilderBtn" onclick="switchMainView('sqlbuilder')" class="w-full flex items-center justify-between px-2.5 py-2.5 rounded-xl text-[11px] font-semibold rail-nav-inactive transition relative cursor-pointer" title="Visual SQL Builder">
-            <div class="flex items-center space-x-2.5 min-w-0 truncate">
-              <i class="fa-solid fa-wand-magic-sparkles text-xs w-4 text-center text-cyan-400 shrink-0"></i>
-              <span class="hidden md:inline truncate">Visual SQL Builder</span>
-            </div>
-            <span class="hidden md:inline-block shrink-0 whitespace-nowrap ml-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-slate-400">JSON_OBJECT</span>
-          </button>
-
-          <!-- 3. Custom API & Endpoints -->
-          <button id="railEndpointsBtn" onclick="switchMainView('endpoints')" class="w-full flex items-center justify-between px-2.5 py-2.5 rounded-xl text-[11px] font-semibold rail-nav-inactive transition relative cursor-pointer" title="API & Access Rules">
+          <!-- 2. Custom API -->
+          <button id="railEndpointsBtn" onclick="switchMainView('endpoints')" class="w-full flex items-center justify-between px-2.5 py-2.5 rounded-xl text-[11px] font-semibold rail-nav-inactive transition relative cursor-pointer" title="Custom API">
             <div class="flex items-center space-x-2.5 min-w-0 truncate">
               <i class="fa-solid fa-shield-halved text-xs w-4 text-center text-amber-400 shrink-0"></i>
-              <span class="hidden md:inline truncate">API &amp; Access Rules</span>
+              <span class="hidden md:inline truncate">Custom API</span>
             </div>
-            <span class="hidden md:inline-block shrink-0 whitespace-nowrap ml-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-slate-400">list vs all</span>
+            <span class="hidden md:inline-block shrink-0 whitespace-nowrap ml-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-slate-400">SQL &amp; Rules</span>
           </button>
 
-          <!-- 4. Storage & Files (Supabase style) -->
-          <button id="railStorageBtn" onclick="switchMainView('storage')" class="w-full flex items-center justify-between px-2.5 py-2.5 rounded-xl text-[11px] font-semibold rail-nav-inactive transition relative cursor-pointer" title="Storage & Files (Buckets & Media)">
+          <!-- 3. Storage -->
+          <button id="railStorageBtn" onclick="switchMainView('storage')" class="w-full flex items-center justify-between px-2.5 py-2.5 rounded-xl text-[11px] font-semibold rail-nav-inactive transition relative cursor-pointer" title="Storage">
             <div class="flex items-center space-x-2.5 min-w-0 truncate">
               <i class="fa-solid fa-box-archive text-xs w-4 text-center text-emerald-400 shrink-0"></i>
-              <span class="hidden md:inline truncate">Supabase Storage</span>
+              <span class="hidden md:inline truncate">Storage</span>
             </div>
             <span class="hidden md:inline-block shrink-0 whitespace-nowrap ml-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-slate-400">Buckets</span>
           </button>
 
-          <!-- 5. Realtime Logs -->
-          <button id="railLogsBtn" onclick="switchMainView('logs')" class="w-full flex items-center justify-between px-2.5 py-2.5 rounded-xl text-[11px] font-semibold rail-nav-inactive transition relative cursor-pointer" title="Realtime Event Monitor">
+          <!-- 4. Visual Query Builder -->
+          <button id="railSqlbuilderBtn" onclick="switchMainView('sqlbuilder')" class="w-full flex items-center justify-between px-2.5 py-2.5 rounded-xl text-[11px] font-semibold rail-nav-inactive transition relative cursor-pointer" title="Visual Query Builder">
+            <div class="flex items-center space-x-2.5 min-w-0 truncate">
+              <i class="fa-solid fa-wand-magic-sparkles text-xs w-4 text-center text-cyan-400 shrink-0"></i>
+              <span class="hidden md:inline truncate">Visual Query Builder</span>
+            </div>
+            <span class="hidden md:inline-block shrink-0 whitespace-nowrap ml-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-slate-400">JSON_OBJECT</span>
+          </button>
+
+          <!-- 5. Realtime Monitor -->
+          <button id="railLogsBtn" onclick="switchMainView('logs')" class="w-full flex items-center justify-between px-2.5 py-2.5 rounded-xl text-[11px] font-semibold rail-nav-inactive transition relative cursor-pointer" title="Realtime Monitor">
             <div class="flex items-center space-x-2.5 min-w-0 truncate">
               <i class="fa-solid fa-wave-square text-xs w-4 text-center text-cyan-400 shrink-0"></i>
               <span class="hidden md:inline truncate">Realtime Monitor</span>
@@ -185,11 +185,11 @@
             <span class="hidden md:inline-block shrink-0 whitespace-nowrap ml-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-cyan-400">SSE Live</span>
           </button>
 
-          <!-- 6. Settings & System -->
-          <button id="railSettingsBtn" onclick="switchMainView('settings')" class="w-full flex items-center justify-between px-2.5 py-2.5 rounded-xl text-[11px] font-semibold rail-nav-inactive transition relative cursor-pointer" title="Settings & System">
+          <!-- 5. Setting -->
+          <button id="railSettingsBtn" onclick="switchMainView('settings')" class="w-full flex items-center justify-between px-2.5 py-2.5 rounded-xl text-[11px] font-semibold rail-nav-inactive transition relative cursor-pointer" title="Setting">
             <div class="flex items-center space-x-2.5 min-w-0 truncate">
               <i class="fa-solid fa-sliders text-xs w-4 text-center text-indigo-400 shrink-0"></i>
-              <span class="hidden md:inline truncate">Settings &amp; System</span>
+              <span class="hidden md:inline truncate">Setting</span>
             </div>
             <span class="hidden md:inline-block shrink-0 whitespace-nowrap ml-1 text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-900 border border-slate-700/80 text-slate-400">Config</span>
           </button>
@@ -1639,6 +1639,12 @@
 
           <!-- Top Action Buttons -->
           <div class="flex items-center space-x-2 flex-wrap gap-1.5">
+            <!-- Back to Custom API Button -->
+            <button type="button" onclick="switchMainView('endpoints')" class="px-3 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-bold text-xs transition flex items-center space-x-1.5 shadow-2xs cursor-pointer" title="Back to Custom API">
+              <i class="fa-solid fa-arrow-left text-[11px] text-slate-500"></i>
+              <span>Back to Custom API</span>
+            </button>
+
             <!-- Copy SQL Button -->
             <button type="button" onclick="copyGeneratedSql()" class="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-850 text-white font-bold text-xs transition flex items-center space-x-1.5 shadow-2xs cursor-pointer" title="Copy generated SQL to clipboard">
               <i class="fa-regular fa-copy text-xs text-slate-300"></i>
