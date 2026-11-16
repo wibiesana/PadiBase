@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use crate::core::app::AppState;
 use crate::core::auth::{authenticate_with_query_token, check_permission, RecordAction};
-use crate::core::db::{get_collection_by_name_or_id, list_collections};
+use crate::core::db::get_collection_by_name_or_id;
 use crate::core::env::Env;
 use crate::core::realtime::RealtimeMessage;
 use crate::core::record::{get_record, update_record};
@@ -662,6 +662,102 @@ pub async fn delete_storage_file(
     })))
 }
 
+#[derive(serde::Deserialize)]
+pub struct CreateBucketPayload {
+    pub name: Option<String>,
+    pub bucket: Option<String>,
+}
+
+/// Create a new storage bucket directory (`POST /api/storage/buckets`)
+pub async fn create_bucket(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    axum::extract::Json(payload): axum::extract::Json<CreateBucketPayload>,
+) -> Result<impl IntoResponse, ApiError> {
+    let auth = authenticate_with_query_token(&state, &headers, None).await?;
+    if auth.is_none() {
+        return Err(err(StatusCode::UNAUTHORIZED, "Authentication required."));
+    }
+
+    let bucket_name = payload.name.or(payload.bucket).unwrap_or_default().trim().to_lowercase();
+    if bucket_name.is_empty() {
+        return Err(err(StatusCode::BAD_REQUEST, "Bucket name is required."));
+    }
+
+    if !is_safe_segment(&bucket_name) {
+        return Err(err(
+            StatusCode::BAD_REQUEST,
+            "Invalid bucket name. Use lowercase letters, numbers, dashes, or underscores.",
+        ));
+    }
+
+    let bucket_dir = state.storage_dir.join(&bucket_name);
+    if bucket_dir.exists() {
+        return Err(err(StatusCode::CONFLICT, format!("Bucket '{}' already exists.", bucket_name)));
+    }
+
+    tokio::fs::create_dir_all(&bucket_dir)
+        .await
+        .map_err(|e| internal("Failed to create storage bucket directory", e))?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "success": true,
+            "message": format!("Bucket '{}' created successfully.", bucket_name),
+            "bucket": bucket_name
+        })),
+    ))
+}
+
+/// Create bucket by path parameter (`POST /api/storage/buckets/{bucket}`)
+pub async fn create_bucket_by_path(
+    state: State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(bucket): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    create_bucket(
+        state,
+        headers,
+        Json(CreateBucketPayload {
+            name: Some(bucket),
+            bucket: None,
+        }),
+    )
+    .await
+}
+
+/// Delete an entire storage bucket directory (`DELETE /api/storage/buckets/{bucket}`)
+pub async fn delete_bucket(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Path(bucket): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let auth = authenticate_with_query_token(&state, &headers, None).await?;
+    if auth.is_none() {
+        return Err(err(StatusCode::UNAUTHORIZED, "Authentication required."));
+    }
+
+    let bucket = bucket.trim().to_lowercase();
+    if !is_safe_segment(&bucket) {
+        return Err(err(StatusCode::BAD_REQUEST, "Invalid bucket name."));
+    }
+
+    let bucket_dir = state.storage_dir.join(&bucket);
+    if !bucket_dir.exists() {
+        return Err(err(StatusCode::NOT_FOUND, format!("Bucket '{}' does not exist.", bucket)));
+    }
+
+    tokio::fs::remove_dir_all(&bucket_dir)
+        .await
+        .map_err(|e| internal("Failed to delete storage bucket directory", e))?;
+
+    Ok(Json(json!({
+        "success": true,
+        "message": format!("Bucket '{}' deleted successfully.", bucket)
+    })))
+}
+
 /// List all storage buckets and files across collections with aggregates
 pub async fn list_storage(
     State(state): State<AppState>,
@@ -675,7 +771,7 @@ pub async fn list_storage(
 
     let storage_dir = state.storage_dir.clone();
 
-    let (mut buckets_map, all_files, total_files, total_bytes) = tokio::task::spawn_blocking(move || {
+    let (buckets_map, all_files, total_files, total_bytes) = tokio::task::spawn_blocking(move || {
         let mut buckets: std::collections::HashMap<String, (usize, u64)> = std::collections::HashMap::new();
         let mut files = Vec::new();
         let mut tot_files: usize = 0;
@@ -806,13 +902,7 @@ pub async fn list_storage(
     .await
     .map_err(|e| internal("Failed to inspect storage directory", e))?;
 
-    // Ensure default "uploads" bucket and existing table names are available as buckets
-    buckets_map.entry("uploads".to_string()).or_insert((0, 0));
-    if let Ok(collections) = list_collections(&state.db).await {
-        for col in collections {
-            buckets_map.entry(col.name.clone()).or_insert((0, 0));
-        }
-    }
+    // Keep only user-created bucket directories discovered in actual_dir
 
     let target_col = query
         .bucket

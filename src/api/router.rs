@@ -544,6 +544,11 @@ pub fn create_router(state: AppState) -> Router {
         // File upload, download & storage explorer (Supabase style)
         .route("/api/storage", get(files::list_storage))
         .route("/api/storage/files", get(files::list_storage))
+        .route("/api/storage/buckets", get(files::list_storage).post(files::create_bucket))
+        .route(
+            "/api/storage/buckets/{bucket}",
+            post(files::create_bucket_by_path).delete(files::delete_bucket),
+        )
         .route(
             "/api/storage/{bucket}",
             post(files::upload_to_bucket),

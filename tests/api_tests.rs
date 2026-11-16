@@ -2157,3 +2157,174 @@ async fn test_security_hardening_and_access_control() {
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }
+
+#[tokio::test]
+async fn test_storage_buckets_crud_and_no_tables_in_buckets() {
+    let test_dir = std::path::PathBuf::from(format!(
+        "./target/test_buckets_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let _ = std::fs::remove_dir_all(&test_dir);
+
+    let sqlite_url = format!("sqlite://{}/data.db", test_dir.display().to_string().replace('\\', "/"));
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
+        .await
+        .unwrap();
+
+    let app = PadiBase::api::router::create_router(state.clone());
+
+    // 1. Create admin and login
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admins")
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&json!({
+                    "email": "bucketadmin@padi.local",
+                    "password": "Password123!"
+                })).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let res_login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admins/auth-with-password")
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&json!({
+                    "identity": "bucketadmin@padi.local",
+                    "password": "Password123!"
+                })).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let login_bytes = axum::body::to_bytes(res_login.into_body(), 1024 * 1024).await.unwrap();
+    let login_val: serde_json::Value = serde_json::from_slice(&login_bytes).unwrap();
+    let token = login_val["token"].as_str().or_else(|| login_val["item"]["token"].as_str()).unwrap().to_string();
+
+    // 2. Create a table 'test_customers' in the database
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/collections")
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(serde_json::to_vec(&json!({
+                    "name": "test_customers",
+                    "type": "base",
+                    "schema": []
+                })).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // 3. GET /api/storage - Should NOT list database table 'test_customers' as a bucket
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/storage")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let buckets = json.get("buckets")
+        .or_else(|| json.get("item").and_then(|i| i.get("buckets")))
+        .or_else(|| json.get("data").and_then(|d| d.get("buckets")))
+        .and_then(|v| v.as_array())
+        .expect("buckets array must be present");
+    assert!(!buckets.iter().any(|b| b["name"] == "test_customers"), "Database tables must not appear as storage buckets");
+
+    // 4. POST /api/storage/buckets with {"name": "avatar"} - Create bucket
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/storage/buckets")
+                .header("Authorization", format!("Bearer {}", token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(json!({"name": "avatar"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+
+    // 5. GET /api/storage - 'avatar' bucket should exist, but 'test_customers' still must not
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/storage")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let buckets = json.get("buckets")
+        .or_else(|| json.get("item").and_then(|i| i.get("buckets")))
+        .or_else(|| json.get("data").and_then(|d| d.get("buckets")))
+        .and_then(|v| v.as_array())
+        .expect("buckets array must be present");
+    assert!(buckets.iter().any(|b| b["name"] == "avatar"), "User created bucket 'avatar' must exist");
+    assert!(!buckets.iter().any(|b| b["name"] == "test_customers"), "Database tables must not appear as storage buckets");
+
+    // 6. DELETE /api/storage/buckets/avatar - Delete bucket
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/storage/buckets/avatar")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // 7. GET /api/storage - 'avatar' should no longer exist
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/storage")
+                .header("Authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let buckets = json.get("buckets")
+        .or_else(|| json.get("item").and_then(|i| i.get("buckets")))
+        .or_else(|| json.get("data").and_then(|d| d.get("buckets")))
+        .and_then(|v| v.as_array())
+        .expect("buckets array must be present");
+    assert!(!buckets.iter().any(|b| b["name"] == "avatar"), "Bucket 'avatar' should be deleted");
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}

@@ -437,14 +437,16 @@ let currentCollection = "users";
         let opts = typeof options === 'string' ? { message: options } : (options || {});
         const title = opts.title || 'Input';
         const rawMsg = opts.message || 'Please enter a value:';
+        const type = opts.type || 'primary';
         const defaultValue = opts.defaultValue != null ? String(opts.defaultValue) : '';
         const placeholder = opts.placeholder || '';
         const label = opts.label || 'New Name';
         const hint = opts.hint || '';
         const confirmText = opts.confirmText || 'Save Changes';
         const cancelText = opts.cancelText || 'Cancel';
-        const icon = opts.icon || 'fa-solid fa-pen-to-square';
-        const inputIcon = opts.inputIcon || 'fa-solid fa-table-columns';
+        const icon = opts.icon || (type === 'danger' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-pen-to-square');
+        const inputIcon = opts.inputIcon || (type === 'danger' ? 'fa-solid fa-trash-can' : 'fa-solid fa-table-columns');
+        const confirmMatch = opts.confirmMatch ? String(opts.confirmMatch).trim().toLowerCase() : null;
         const validate = typeof opts.validate === 'function' ? opts.validate : null;
 
         const modal = ensurePromptModalElement();
@@ -478,6 +480,31 @@ let currentCollection = "users";
         if (inputIconEl) inputIconEl.className = `${inputIcon} text-xs`;
         if (okTextEl) okTextEl.textContent = confirmText;
         if (cancelTextEl) cancelTextEl.textContent = cancelText;
+
+        // Danger vs Primary Theme
+        if (type === 'danger') {
+          if (iconBgEl) iconBgEl.className = 'w-10 h-10 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-400 flex items-center justify-center text-lg shrink-0 shadow-2xs';
+          if (okBtn) {
+            okBtn.className = 'px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed';
+            const okIcon = okBtn.querySelector('i');
+            if (okIcon) okIcon.className = 'fa-solid fa-trash-can text-[11px]';
+          }
+        } else {
+          if (iconBgEl) iconBgEl.className = 'w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 flex items-center justify-center text-lg shrink-0 shadow-2xs';
+          if (okBtn) {
+            okBtn.className = 'px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs transition flex items-center space-x-1.5 cursor-pointer bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed';
+            const okIcon = okBtn.querySelector('i');
+            if (okIcon) okIcon.className = 'fa-solid fa-check text-[11px]';
+          }
+        }
+
+        if (confirmMatch) {
+          okBtn.disabled = true;
+          okBtn.classList.add('opacity-40', 'cursor-not-allowed');
+        } else {
+          okBtn.disabled = false;
+          okBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+        }
 
         if (hintEl) {
           if (hint) {
@@ -522,11 +549,28 @@ let currentCollection = "users";
             errorEl.classList.add('hidden');
             inputEl.classList.remove('border-rose-400', 'ring-2', 'ring-rose-200');
           }
+          if (confirmMatch) {
+            const isMatch = inputEl.value.trim().toLowerCase() === confirmMatch;
+            okBtn.disabled = !isMatch;
+            okBtn.classList.toggle('opacity-40', !isMatch);
+            okBtn.classList.toggle('cursor-not-allowed', !isMatch);
+          }
         }
 
         function onOk(e) {
           if (e) e.preventDefault();
           const val = inputEl.value;
+          if (confirmMatch) {
+            if (val.trim().toLowerCase() !== confirmMatch) {
+              if (errorEl) {
+                errorEl.textContent = `Please type "${opts.confirmMatch}" to confirm deletion.`;
+                errorEl.classList.remove('hidden');
+              }
+              inputEl.classList.add('border-rose-400', 'ring-2', 'ring-rose-200');
+              inputEl.focus();
+              return;
+            }
+          }
           if (validate) {
             const err = validate(val);
             if (err) {
@@ -10970,6 +11014,103 @@ let currentCollection = "users";
       return 'fa-regular fa-file text-slate-400';
     }
 
+    async function openCreateBucketModal() {
+      const bucketName = await showPrompt({
+        title: 'Create Storage Bucket',
+        message: 'Enter a name for the new storage bucket (e.g. <code>avatar</code>, <code>media</code>, <code>banners</code>). Standalone files and assets will be stored under this bucket.',
+        label: 'Bucket Name',
+        placeholder: 'e.g. avatar',
+        defaultValue: '',
+        hint: 'Use lowercase letters, numbers, dashes, and underscores.',
+        confirmText: 'Create Bucket',
+        cancelText: 'Cancel',
+        icon: 'fa-solid fa-folder-plus',
+        inputIcon: 'fa-solid fa-box-archive',
+        validate: (val) => {
+          const v = (val || '').trim().toLowerCase();
+          if (!v) return 'Bucket name is required.';
+          if (!/^[a-zA-Z0-9_-]+$/.test(v)) return 'Invalid name. Only letters, numbers, dashes, and underscores are allowed.';
+          if (storageBuckets.some(b => (b.name || '').toLowerCase() === v)) {
+            return `Bucket "${v}" already exists.`;
+          }
+          return null;
+        }
+      });
+
+      if (!bucketName) return;
+      const safeName = bucketName.trim().toLowerCase();
+
+      try {
+        const token = sessionStorage.getItem('padi_admin_token') || '';
+        const res = await fetch('/api/storage/buckets', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ name: safeName })
+        });
+
+        if (res.ok) {
+          showToast(`Bucket '${safeName}' created successfully!`, 'success');
+          selectStorageBucket(safeName);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showToast(err.message || 'Failed to create bucket.', 'error');
+        }
+      } catch (err) {
+        showToast('Network error while creating bucket.', 'error');
+      }
+    }
+
+    async function deleteStorageBucket(bucketName, event) {
+      if (event) event.stopPropagation();
+      if (!bucketName) return;
+
+      const confirmed = await showPrompt({
+        title: 'Delete Storage Bucket',
+        message: `Are you sure you want to delete bucket <span class="font-bold text-rose-400 font-mono">"${escapeHtml(bucketName)}"</span>? All files stored inside this bucket will be permanently deleted.<br><br>To confirm this action, please type <span class="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-mono font-bold text-xs border border-rose-500/30 select-all">delete</span> below:`,
+        label: 'Type "delete" to confirm',
+        placeholder: 'type "delete" here...',
+        confirmText: 'Delete Bucket',
+        cancelText: 'Cancel',
+        type: 'danger',
+        icon: 'fa-solid fa-triangle-exclamation text-rose-400',
+        inputIcon: 'fa-solid fa-trash-can text-rose-400',
+        confirmMatch: 'delete'
+      });
+      if (!confirmed) return;
+
+      try {
+        const token = sessionStorage.getItem('padi_admin_token') || '';
+        const res = await fetch(`/api/storage/buckets/${encodeURIComponent(bucketName)}`, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': 'Bearer ' + token
+          }
+        });
+
+        if (res.ok) {
+          showToast(`Bucket '${bucketName}' deleted successfully.`, 'success');
+          if (currentStorageBucket.toLowerCase() === bucketName.toLowerCase()) {
+            currentStorageBucket = '';
+          }
+          loadStorageData(currentStorageBucket);
+        } else {
+          const err = await res.json().catch(() => ({}));
+          showToast(err.message || 'Failed to delete bucket.', 'error');
+        }
+      } catch (err) {
+        showToast('Network error while deleting bucket.', 'error');
+      }
+    }
+
+    function deleteCurrentStorageBucket() {
+      if (currentStorageBucket) {
+        deleteStorageBucket(currentStorageBucket);
+      }
+    }
+
     async function loadStorageData(targetBucket) {
       if (targetBucket !== undefined) {
         currentStorageBucket = targetBucket || '';
@@ -10977,6 +11118,15 @@ let currentCollection = "users";
       const titleEl = document.getElementById('storageCurrentBucketTitle');
       if (titleEl) {
         titleEl.textContent = currentStorageBucket || 'All Buckets';
+      }
+      const deleteBucketBtn = document.getElementById('storageDeleteCurrentBucketBtn');
+      if (deleteBucketBtn) {
+        if (currentStorageBucket) {
+          deleteBucketBtn.classList.remove('hidden');
+          deleteBucketBtn.title = `Delete bucket "${currentStorageBucket}"`;
+        } else {
+          deleteBucketBtn.classList.add('hidden');
+        }
       }
 
       const q = currentStorageBucket ? `?collection=${encodeURIComponent(currentStorageBucket)}` : '';
@@ -10995,7 +11145,15 @@ let currentCollection = "users";
           ? raw.item
           : ((raw && typeof raw === 'object' && raw.data && typeof raw.data === 'object' && !Array.isArray(raw.data)) ? raw.data : raw);
         console.log('[Storage] Data received:', data);
-        storageBuckets = data.buckets || [];
+        const rawBuckets = data.buckets || [];
+        const colNames = new Set((collections || []).map(c => (c.name || '').toLowerCase()));
+        storageBuckets = rawBuckets.filter(b => {
+          const bName = (b.name || '').toLowerCase();
+          if (colNames.has(bName) && (!b.file_count || b.file_count === 0)) {
+            return false;
+          }
+          return true;
+        });
         storageFiles = data.files || [];
 
         // Update sidebar metrics
@@ -11130,7 +11288,30 @@ let currentCollection = "users";
       const pagBar = document.getElementById('storagePaginationBar');
 
       if (filtered.length === 0) {
-        if (emptyEl) emptyEl.classList.remove('hidden');
+        if (emptyEl) {
+          emptyEl.classList.remove('hidden');
+          const emptyTitle = document.getElementById('storageEmptyStateTitle');
+          const emptyDesc = document.getElementById('storageEmptyStateDesc');
+          const emptyBtn = document.getElementById('storageEmptyStateActionBtn');
+          const emptyBtnText = document.getElementById('storageEmptyStateActionText');
+
+          if (storageBuckets.length === 0) {
+            if (emptyTitle) emptyTitle.textContent = 'No Storage Buckets Created';
+            if (emptyDesc) emptyDesc.textContent = 'Create your first bucket (e.g. avatar, media) to start uploading files.';
+            if (emptyBtn) emptyBtn.setAttribute('onclick', 'openCreateBucketModal()');
+            if (emptyBtnText) emptyBtnText.textContent = 'Add Bucket';
+          } else if (currentStorageBucket) {
+            if (emptyTitle) emptyTitle.textContent = `No files in bucket "${currentStorageBucket}"`;
+            if (emptyDesc) emptyDesc.textContent = `Upload files to bucket "${currentStorageBucket}" to view and manage them here.`;
+            if (emptyBtn) emptyBtn.setAttribute('onclick', `openStorageUploadModal('${currentStorageBucket}')`);
+            if (emptyBtnText) emptyBtnText.textContent = `Upload File to ${currentStorageBucket}`;
+          } else {
+            if (emptyTitle) emptyTitle.textContent = 'No files found';
+            if (emptyDesc) emptyDesc.textContent = 'No files match your current search or filter criteria.';
+            if (emptyBtn) emptyBtn.setAttribute('onclick', 'openStorageUploadModal()');
+            if (emptyBtnText) emptyBtnText.textContent = 'Upload File';
+          }
+        }
         if (tableWrapper) tableWrapper.classList.add('hidden');
         if (gridWrapper) gridWrapper.classList.add('hidden');
         if (pagBar) pagBar.classList.add('hidden');
@@ -11354,26 +11535,26 @@ let currentCollection = "users";
       }
     }
 
-    function openStorageUploadModal() {
+    function openStorageUploadModal(targetBucket) {
+      if (!Array.isArray(storageBuckets) || storageBuckets.length === 0) {
+        showToast('Please create a storage bucket first (e.g. avatar) before uploading files.', 'info');
+        openCreateBucketModal();
+        return;
+      }
+
       const modal = document.getElementById('storageUploadModal');
       if (!modal) return;
 
+      const defaultBucket = targetBucket || currentStorageBucket || (storageBuckets[0] ? (storageBuckets[0].name || storageBuckets[0]) : '');
+
       const bucketSelect = document.getElementById('storageUploadBucketSelect');
       if (bucketSelect) {
-        const bucketSet = new Set(['uploads']);
-        if (Array.isArray(storageBuckets)) {
-          storageBuckets.forEach(b => { if (b) bucketSet.add(b); });
+        const bucketList = storageBuckets.map(b => (typeof b === 'object' && b ? b.name : b)).filter(Boolean);
+        if (defaultBucket && !bucketList.includes(defaultBucket)) {
+          bucketList.unshift(defaultBucket);
         }
-        if (Array.isArray(collections)) {
-          collections.forEach(c => { if (c && c.name) bucketSet.add(c.name); });
-        }
-        const sortedBuckets = Array.from(bucketSet).sort((a, b) => {
-          if (a === 'uploads') return -1;
-          if (b === 'uploads') return 1;
-          return a.localeCompare(b);
-        });
-        const defaultBucket = currentStorageBucket || 'uploads';
-        bucketSelect.innerHTML = sortedBuckets.map(b =>
+
+        bucketSelect.innerHTML = bucketList.map(b =>
           `<option value="${escapeHtml(b)}" ${defaultBucket === b ? 'selected' : ''}>${escapeHtml(b)}</option>`
         ).join('');
       }
@@ -11383,7 +11564,38 @@ let currentCollection = "users";
 
       onStorageUploadBucketChanged();
       clearStorageSelectedFile();
+      setupStorageDropzone();
       modal.classList.remove('hidden');
+    }
+
+    function setupStorageDropzone() {
+      const dropzone = document.getElementById('storageDropzone');
+      if (!dropzone || dropzone._dndReady) return;
+      dropzone._dndReady = true;
+
+      ['dragenter', 'dragover'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropzone.classList.add('dragover');
+        }, false);
+      });
+
+      ['dragleave', 'drop'].forEach(eventName => {
+        dropzone.addEventListener(eventName, (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          dropzone.classList.remove('dragover');
+        }, false);
+      });
+
+      dropzone.addEventListener('drop', (e) => {
+        const dt = e.dataTransfer;
+        const files = dt && dt.files;
+        if (files && files.length > 0) {
+          handleStorageFileSelect({ target: { files: files } });
+        }
+      }, false);
     }
 
     function closeStorageUploadModal() {
@@ -11425,11 +11637,11 @@ let currentCollection = "users";
 
       const customBucketInput = document.getElementById('storageCustomBucketInput');
       const bucketSelect = document.getElementById('storageUploadBucketSelect');
-      const customBucket = customBucketInput ? customBucketInput.value.trim() : '';
-      const bucket = customBucket || (bucketSelect ? bucketSelect.value : 'uploads');
+      const customBucket = customBucketInput ? customBucketInput.value.trim().toLowerCase() : '';
+      const bucket = customBucket || (bucketSelect ? bucketSelect.value : '');
 
       if (!bucket) {
-        showToast('Please choose or enter a target bucket.', 'error');
+        showToast('Please select or enter a target bucket.', 'error');
         return;
       }
 
@@ -11446,8 +11658,12 @@ let currentCollection = "users";
       try {
         const url = `/api/storage/${encodeURIComponent(bucket)}`;
 
+        const token = sessionStorage.getItem('padi_admin_token') || '';
         const res = await fetch(url, {
           method: 'POST',
+          headers: {
+            'Authorization': 'Bearer ' + token
+          },
           body: formData
         });
 
@@ -11457,9 +11673,9 @@ let currentCollection = "users";
           if (fileUrl && navigator.clipboard) {
             navigator.clipboard.writeText(window.location.origin + fileUrl).catch(() => {});
           }
-          showToast(`File uploaded to '${bucket}'! URL copied: ${fileUrl || selectedStorageUploadFile.name}`, 'success');
+          showToast(`File uploaded to bucket '${bucket}'! URL copied: ${fileUrl || selectedStorageUploadFile.name}`, 'success');
           closeStorageUploadModal();
-          loadStorageData(bucket);
+          selectStorageBucket(bucket);
         } else {
           const err = await res.json().catch(() => ({}));
           showToast(err.message || 'Failed to upload file.', 'error');

@@ -67,23 +67,46 @@ aside.md\:w-56 {
 /* Active Navigation Item (Left Rail, Modal Sidebars, & Drawer Tabs) */
 .rail-nav-active,
 aside nav button.rail-nav-active,
+#mainRailNav button.rail-nav-active,
 aside nav button.bg-emerald-600,
 #apiPreviewTabs button.rail-nav-active,
 #workspaceSettingsPane aside button.rail-nav-active {
-  background-color: rgba(16, 185, 129, 0.15) !important;
-  border: 1px solid rgba(16, 185, 129, 0.5) !important;
+  background-color: #059669 !important;
+  background-image: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+  border: 1px solid #10b981 !important;
   color: #ffffff !important;
-  box-shadow: 0 0 16px rgba(16, 185, 129, 0.18) !important;
+  box-shadow: 0 2px 12px rgba(5, 150, 105, 0.45) !important;
   font-weight: 700 !important;
+}
+
+aside nav button.rail-nav-active:hover,
+#mainRailNav button.rail-nav-active:hover {
+  background-color: #047857 !important;
+  background-image: linear-gradient(135deg, #047857 0%, #059669 100%) !important;
 }
 
 .rail-nav-active i,
 aside nav button.rail-nav-active i,
+#mainRailNav button.rail-nav-active i,
 aside nav button.bg-emerald-600 i,
 #apiPreviewTabs button.rail-nav-active i,
 #workspaceSettingsPane aside button.rail-nav-active i {
-  color: #34d399 !important;
+  color: #ffffff !important;
   opacity: 1 !important;
+}
+
+.rail-nav-active span,
+aside nav button.rail-nav-active span,
+#mainRailNav button.rail-nav-active span {
+  color: #ffffff !important;
+}
+
+/* Badges inside active rail nav button (e.g. No N+1, SQL & Rules, Buckets, SSE Live, Config) */
+aside nav button.rail-nav-active span.font-mono,
+#mainRailNav button.rail-nav-active span.font-mono {
+  background-color: rgba(0, 0, 0, 0.3) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  color: #ffffff !important;
 }
 
 /* Inactive Navigation Item (Left Rail, Modal Sidebars, & Drawer Tabs) */
@@ -620,4 +643,127 @@ body .text-rose-900 {
   border: 1px solid #1e293b;
   border-radius: 12px;
   padding: 14px;
+}
+
+/* ==========================================================================
+   STORAGE DROPZONE & FILE INPUT STYLING
+   ========================================================================== */
+
+#storageDropzone {
+  background-color: rgba(16, 185, 129, 0.05) !important;
+  border: 2px dashed rgba(16, 185, 129, 0.45) !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+#storageDropzone:hover,
+#storageDropzone.dragover {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  border-color: #10b981 !important;
+  box-shadow: 0 0 25px rgba(16, 185, 129, 0.22) !important;
+  transform: translateY(-1px);
+}
+
+#storageDropzone .dropzone-icon {
+  background-color: rgba(16, 185, 129, 0.15) !important;
+  border: 1px solid rgba(16, 185, 129, 0.35) !important;
+  color: #34d399 !important;
+}
+
+#storageDropzone .dropzone-title {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+}
+
+#storageDropzone .dropzone-subtitle {
+  color: #94a3b8 !important;
+}
+
+#storageSelectedFileInfo {
+  background-color: #0c1427 !important;
+  border: 1px solid rgba(16, 185, 129, 0.35) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
+}
+
+#storageSelectedFileInfo #storageSelectedFileName {
+  color: #f8fafc !important;
+}
+
+#storageSelectedFileInfo #storageSelectedFileSize {
+  color: #94a3b8 !important;
+}
+
+/* Generic File Inputs & File Selector Buttons Across Dashboard & Modals */
+input[type="file"] {
+  background-color: #0e172a !important;
+  border: 1px solid #1e293b !important;
+  color: #cbd5e1 !important;
+}
+
+input[type="file"]::file-selector-button {
+  background-color: #059669 !important;
+  background-image: linear-gradient(135deg, #059669 0%, #10b981 100%) !important;
+  color: #ffffff !important;
+  border: none !important;
+  border-radius: 0.5rem !important;
+  padding: 0.4rem 0.85rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  margin-right: 0.75rem !important;
+  transition: all 0.2s ease !important;
+  box-shadow: 0 2px 6px rgba(5, 150, 105, 0.3) !important;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background-color: #047857 !important;
+  background-image: linear-gradient(135deg, #047857 0%, #059669 100%) !important;
+  box-shadow: 0 2px 10px rgba(5, 150, 105, 0.5) !important;
+}
+
+/* ==========================================================================
+   GLOBAL PROMPT & CONFIRM MODALS DARK THEME
+   ========================================================================== */
+
+#padiPromptCard,
+#padiConfirmCard {
+  background-color: #0c1427 !important;
+  border: 1px solid #1e293b !important;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7) !important;
+}
+
+#padiPromptTitle,
+#padiConfirmTitle {
+  color: #f8fafc !important;
+}
+
+#padiPromptMessage,
+#padiConfirmMessage {
+  color: #cbd5e1 !important;
+}
+
+#padiPromptLabel {
+  color: #94a3b8 !important;
+}
+
+#padiPromptInput {
+  background-color: #070c18 !important;
+  border-color: #1e293b !important;
+  color: #f8fafc !important;
+}
+
+#padiPromptCard > div:last-child,
+#padiConfirmCard > div:last-child {
+  background-color: #070c18 !important;
+  border-top: 1px solid #1e293b !important;
+}
+
+#padiPromptCancelBtn,
+#padiConfirmCancelBtn {
+  color: #94a3b8 !important;
+}
+
+#padiPromptCancelBtn:hover,
+#padiConfirmCancelBtn:hover {
+  background-color: #1e293b !important;
+  color: #f8fafc !important;
 }
