@@ -76,7 +76,8 @@ pub async fn list(
         "perPage": cols.len(),
         "totalItems": cols.len(),
         "totalPages": 1,
-        "items": cols
+        "items": cols,
+        "engine": state.db.driver_name()
     })))
 }
 

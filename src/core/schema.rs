@@ -61,7 +61,7 @@ pub struct Collection {
     #[serde(default)]
     pub id: String,
     pub name: String,
-    #[serde(rename = "type", default)]
+    #[serde(rename = "type", alias = "collection_type", default)]
     pub collection_type: CollectionType,
     #[serde(default)]
     pub schema: Vec<SchemaField>,

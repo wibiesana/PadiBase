@@ -1032,8 +1032,13 @@ pub async fn init_db_with_url<P: AsRef<Path>>(
                 .max_lifetime(Some(std::time::Duration::from_secs(1800)))
                 .connect(&db_url)
                 .await?;
-            info!("Connected to {} database", driver.as_str().to_uppercase());
-            DbPool::new_mysql(p, driver)
+            let detected_driver = match sqlx::query_scalar::<_, String>("SELECT VERSION()").fetch_one(&p).await {
+                Ok(v) if v.to_lowercase().contains("mariadb") => DbDriver::MariaDb,
+                Ok(_) if driver == DbDriver::MariaDb => DbDriver::MariaDb,
+                _ => driver,
+            };
+            info!("Connected to {} database", detected_driver.as_str().to_uppercase());
+            DbPool::new_mysql(p, detected_driver)
         }
         DbDriver::Postgres => {
             let p = PgPoolOptions::new()
@@ -1279,6 +1284,14 @@ async fn bootstrap_system_tables(pool: &DbPool) -> Result<()> {
 
         create_or_update_collection_table(pool, &default_users_collection).await?;
         save_collection_metadata(pool, &default_users_collection).await?;
+    } else {
+        // Ensure existing users collection is marked as Auth type
+        let _ = pool
+            .execute(
+                "UPDATE `_collections` SET `type` = 'auth' WHERE `name` = 'users' AND `type` != 'auth';",
+                &[],
+            )
+            .await;
     }
 
     // 5. Introspect and sync existing physical database tables into _collections
@@ -1538,11 +1551,18 @@ pub async fn save_collection_metadata(pool: &DbPool, col: &Collection) -> Result
 }
 
 fn value_to_collection(r: &Value) -> Collection {
+    let name = json_get_str(r, "name");
     let type_str = json_get_str(r, "type");
-    let collection_type = match type_str.as_str() {
+    let collection_type = match type_str.to_lowercase().as_str() {
         "auth" => CollectionType::Auth,
         "view" => CollectionType::View,
-        _ => CollectionType::Base,
+        _ => {
+            if name.eq_ignore_ascii_case("users") {
+                CollectionType::Auth
+            } else {
+                CollectionType::Base
+            }
+        }
     };
 
     let schema_raw = json_get_str(r, "schema");
@@ -2378,7 +2398,16 @@ pub async fn sync_existing_tables(pool: &DbPool) -> Result<Vec<String>> {
         // Check if collection already exists in _collections
         if let Ok(Some(mut existing_col)) = get_collection_by_name_or_id(pool, table_name).await {
             let mut schema_updated = false;
+            let mut has_email = false;
+            let mut has_password = false;
             for col_info in &cols {
+                let col_name_lower = col_info.name.to_lowercase();
+                if col_name_lower == "email" {
+                    has_email = true;
+                }
+                if col_name_lower.contains("password") {
+                    has_password = true;
+                }
                 if col_info.name.eq_ignore_ascii_case("id")
                     || col_info.name.eq_ignore_ascii_case("created")
                     || col_info.name.eq_ignore_ascii_case("updated")
@@ -2394,6 +2423,13 @@ pub async fn sync_existing_tables(pool: &DbPool) -> Result<Vec<String>> {
                     schema_updated = true;
                 }
             }
+
+            let is_auth = (has_email && has_password) || table_name.eq_ignore_ascii_case("users");
+            if is_auth && existing_col.collection_type != CollectionType::Auth {
+                existing_col.collection_type = CollectionType::Auth;
+                schema_updated = true;
+            }
+
             if schema_updated {
                 existing_col.updated = now.clone();
                 let _ = save_collection_metadata(pool, &existing_col).await;
