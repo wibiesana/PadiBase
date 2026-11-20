@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 use tracing::info;
 
 use crate::api::router::create_router;
-use crate::core::api_collection::{build_all_collections_json, build_single_collection_json};
+use crate::core::api_collection::{
+    build_all_collections_with_custom_json, build_single_collection_json,
+};
 use crate::core::app::AppState;
-use crate::core::db::{get_collection_by_name_or_id, list_collections};
+use crate::core::db::{get_all_custom_endpoints, get_collection_by_name_or_id, list_collections};
 use crate::core::env::Env;
 
 #[derive(Parser)]
@@ -112,11 +114,12 @@ async fn export_api_collection_cli(
         println!("\x1b[32m✓ Single Collection exported:\x1b[0m {:?}", file_path);
     } else {
         let cols = list_collections(&state.db).await?;
+        let custom_eps = get_all_custom_endpoints(&state.db).await.unwrap_or_default();
 
         // 1. Export master full collection
         let full_path = output_dir.join("padi_base_api_collection.json");
         if !full_path.exists() || force {
-            let full_json = build_all_collections_json(&cols, base_url);
+            let full_json = build_all_collections_with_custom_json(&cols, &custom_eps, base_url);
             let formatted = serde_json::to_string_pretty(&full_json)?;
             fs::write(&full_path, formatted)?;
             println!("\x1b[32m✓ Full System API Collection saved:\x1b[0m {:?}", full_path);

@@ -2350,7 +2350,15 @@ pub fn map_column_to_schema_field(col: &IntrospectedColumn) -> SchemaField {
     let col_type_lower = col.column_type.to_lowercase();
     let name_lower = col.name.to_lowercase();
 
-    let field_type = if col_type_lower.contains("tinyint(1)") || type_lower == "bool" || type_lower == "boolean" {
+    let field_type = if col_type_lower.contains("tinyint(1)")
+        || type_lower == "bool"
+        || type_lower == "boolean"
+        || name_lower == "verified"
+        || name_lower == "emailvisibility"
+        || name_lower == "email_visibility"
+        || name_lower.starts_with("is_")
+        || name_lower.starts_with("has_")
+    {
         FieldType::Bool
     } else if type_lower.contains("int")
         || type_lower.contains("float")

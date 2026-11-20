@@ -401,6 +401,18 @@ PadiBase menentukan perilaku `ON DELETE` secara cerdas dan otomatis melalui chec
 ### Realtime SSE Stream
 - `GET /api/realtime` : Koneksi Server-Sent Events untuk live updates
 
+```javascript
+// Contoh Menggunakan PadiBase SDK:
+// 1. Subscribe semua data di tabel:
+const unsubAll = padi.table('posts').subscribe('*', (e) => console.log(e.action, e.record));
+
+// 2. Subscribe ke record tertentu saja (berdasarkan Record ID):
+const unsubSingle = padi.table('posts').subscribe('105', (e) => console.log('Single record:', e.record));
+
+// 3. Unsubscribe:
+unsubSingle();
+```
+
 ### 📁 File Storage & Image Management (PocketBase / Supabase Style)
 
 PadiBase menyediakan penanganan file dan lampiran media (*file storage system*) berperforma tinggi dengan proteksi ketat dan pembersihan otomatis tanpa meninggalkan file sampah (*zero orphaned files*):

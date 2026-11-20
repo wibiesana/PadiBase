@@ -966,6 +966,16 @@ fn parse_relation_token(raw: &str) -> (String, Option<Vec<String>>) {
     (s.to_string(), None)
 }
 
+fn is_hidden_sensitive_column(name: &str) -> bool {
+    name.eq_ignore_ascii_case("password")
+        || name.eq_ignore_ascii_case("password_hash")
+        || name.eq_ignore_ascii_case("passwordHash")
+        || name.eq_ignore_ascii_case("tokenKey")
+        || name.eq_ignore_ascii_case("token_key")
+        || name.eq_ignore_ascii_case("remember_token")
+        || name.eq_ignore_ascii_case("reset_token")
+}
+
 pub async fn eager_load_relations(
     pool: &DbPool,
     table_name: &str,
@@ -1061,7 +1071,7 @@ pub async fn eager_load_relations(
 
             for f in fields {
                 let clean = f.trim();
-                if clean.is_empty() {
+                if clean.is_empty() || is_hidden_sensitive_column(clean) {
                     continue;
                 }
                 // Check if valid identifier (alphanumeric and underscore) to protect against injection
@@ -1112,6 +1122,9 @@ pub async fn eager_load_relations(
             let mut rel_obj = Map::new();
             if let Some(obj) = row.as_object() {
                 for (k, v) in obj {
+                    if is_hidden_sensitive_column(k) {
+                        continue;
+                    }
                     if let Some(ref allowed) = filter_fields {
                         if allowed.iter().any(|af| af.eq_ignore_ascii_case(k)) || k.eq_ignore_ascii_case(&rel.target_pk) || k == "id" {
                             rel_obj.insert(k.clone(), v.clone());
@@ -1319,11 +1332,7 @@ fn json_row_into_record(row: Value, col: &Collection, meta: &TableMetadata) -> R
             let mut out = Map::with_capacity(obj.len() + 1);
             for (raw_name, raw_val) in obj {
                 // Do not expose sensitive credentials in record output (matching padi_rust / padi_go / padi_php hidden fields)
-                if raw_name.eq_ignore_ascii_case("passwordHash")
-                    || raw_name.eq_ignore_ascii_case("password")
-                    || raw_name.eq_ignore_ascii_case("tokenKey")
-                    || raw_name.eq_ignore_ascii_case("remember_token")
-                {
+                if is_hidden_sensitive_column(&raw_name) {
                     continue;
                 }
 
@@ -1434,4 +1443,37 @@ pub fn project_record_fields(rec: &mut Record, fields: Option<&[&str]>) {
         k.eq_ignore_ascii_case("id")
             || field_list.iter().any(|f| f.eq_ignore_ascii_case(k))
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_hidden_sensitive_column;
+
+    #[test]
+    fn test_hidden_sensitive_columns_filter() {
+        for sensitive in [
+            "password",
+            "password_hash",
+            "passwordHash",
+            "PASSWORDHASH",
+            "tokenKey",
+            "token_key",
+            "remember_token",
+            "reset_token",
+        ] {
+            assert!(
+                is_hidden_sensitive_column(sensitive),
+                "expected '{}' to be hidden",
+                sensitive
+            );
+        }
+
+        for safe in ["id", "name", "email", "username", "avatar", "created_at"] {
+            assert!(
+                !is_hidden_sensitive_column(safe),
+                "expected '{}' to be allowed",
+                safe
+            );
+        }
+    }
 }

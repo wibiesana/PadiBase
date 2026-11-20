@@ -2328,3 +2328,212 @@ async fn test_storage_buckets_crud_and_no_tables_in_buckets() {
 
     let _ = std::fs::remove_dir_all(&test_dir);
 }
+
+#[tokio::test]
+async fn test_api_collection_export_with_custom_endpoints_and_formats() {
+    let test_dir = std::path::PathBuf::from(format!(
+        "./target/test_api_export_{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let _ = std::fs::remove_dir_all(&test_dir);
+    let sqlite_url = format!(
+        "sqlite://{}/data.db",
+        test_dir.display().to_string().replace('\\', "/")
+    );
+    let state = AppState::new_with_db_url(&test_dir, Some(&sqlite_url))
+        .await
+        .expect("init app state");
+    state
+        .create_admin("admin@example.com", "AdminPassword123!")
+        .await
+        .expect("create admin");
+    let app = create_router(state);
+
+    // 1. Login as Admin
+    let res_login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/admins/auth-with-password")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "identity": "admin@example.com",
+                        "password": "AdminPassword123!"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_login.status(), StatusCode::OK);
+    let login_bytes = axum::body::to_bytes(res_login.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let login_json: serde_json::Value = serde_json::from_slice(&login_bytes).unwrap();
+    let admin_token = login_json["item"]["token"]
+        .as_str()
+        .or_else(|| login_json["token"].as_str())
+        .expect("admin token");
+
+    // 2. Create a custom table + a custom SQL endpoint with path & query params
+    let res_col = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/collections")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "orders",
+                        "type": "base",
+                        "schema": [
+                            { "name": "status", "type": "text", "required": true },
+                            { "name": "total", "type": "number", "required": true }
+                        ]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_col.status(), StatusCode::CREATED);
+
+    let res_ep = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/endpoints")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "name": "Sales Report",
+                        "method": "GET",
+                        "path": "api/custom/sales-report",
+                        "sql": "SELECT * FROM orders WHERE status = :status LIMIT :limit",
+                        "authRule": "public",
+                        "description": "Filtered sales report"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_ep.status(), StatusCode::CREATED);
+
+    // 3. Export Postman v2.1 (default) and verify both tables and custom endpoints are present
+    let res_pm = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/api-collection?download=true")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_pm.status(), StatusCode::OK);
+    let pm_bytes = axum::body::to_bytes(res_pm.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let pm_json: serde_json::Value = serde_json::from_slice(&pm_bytes).unwrap();
+    assert_eq!(pm_json["info"]["name"], "PadiBase API Collection (Full)");
+    let items = pm_json["item"].as_array().expect("root items array");
+    let custom_folder = items
+        .iter()
+        .find(|f| {
+            f["name"]
+                .as_str()
+                .map(|s| s.contains("Custom API"))
+                .unwrap_or(false)
+        })
+        .expect("Custom API Endpoints folder must be included");
+    let sales_req = custom_folder["item"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "Sales Report")
+        .expect("Sales Report custom endpoint must be exported");
+    let query_keys: Vec<&str> = sales_req["request"]["url"]["query"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|q| q["key"].as_str())
+        .collect();
+    assert_eq!(query_keys, vec!["status", "limit"]);
+    assert!(
+        items.iter().any(|f| f["name"] == "📂 Orders"),
+        "Orders table folder must be exported"
+    );
+
+    // 4. Export Insomnia v4
+    let res_ins = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/api-collection?format=insomnia&download=true")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_ins.status(), StatusCode::OK);
+    assert!(res_ins
+        .headers()
+        .get("content-disposition")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("attachment; filename=\"padi_base_api_insomnia.json\""));
+    let ins_bytes = axum::body::to_bytes(res_ins.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let ins_json: serde_json::Value = serde_json::from_slice(&ins_bytes).unwrap();
+    assert_eq!(ins_json["_type"], "export");
+    assert_eq!(ins_json["__export_format"], 4);
+    let resources = ins_json["resources"].as_array().unwrap();
+    assert!(resources.iter().any(|r| r["_type"] == "workspace"));
+    assert!(resources
+        .iter()
+        .any(|r| r["_type"] == "request" && r["name"] == "Sales Report"));
+
+    // 5. Export OpenAPI 3.0.3
+    let res_oas = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/api-collection?format=openapi&download=true")
+                .header("Authorization", format!("Bearer {}", admin_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res_oas.status(), StatusCode::OK);
+    assert!(res_oas
+        .headers()
+        .get("content-disposition")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .contains("attachment; filename=\"padi_base_api_openapi.json\""));
+    let oas_bytes = axum::body::to_bytes(res_oas.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let oas_json: serde_json::Value = serde_json::from_slice(&oas_bytes).unwrap();
+    assert_eq!(oas_json["openapi"], "3.0.3");
+    assert!(oas_json["paths"]["/api/custom/sales-report"]["get"].is_object());
+    assert!(oas_json["paths"]["/api/orders"]["get"].is_object());
+
+    let _ = std::fs::remove_dir_all(&test_dir);
+}
