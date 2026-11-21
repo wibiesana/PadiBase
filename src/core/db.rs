@@ -2943,6 +2943,128 @@ fn row_to_custom_endpoint(row: &Value) -> CustomEndpoint {
     }
 }
 
+/// Computes all equivalent route path aliases for custom endpoints and table API overrides.
+/// For example, `api/bank`, `bank`, `api/collections/bank/records`, `collections/bank/records`,
+/// and `api/bank/records` will all resolve to the same underlying endpoint.
+pub fn collection_route_aliases(path: &str) -> Vec<String> {
+    let clean = path.trim().trim_matches('/').to_lowercase();
+    let mut aliases = Vec::with_capacity(8);
+
+    let mut add = |s: String| {
+        if !aliases.contains(&s) {
+            aliases.push(s);
+        }
+    };
+
+    add(clean.clone());
+    if let Some(without_api) = clean.strip_prefix("api/") {
+        add(without_api.to_string());
+    } else {
+        add(format!("api/{}", clean));
+    }
+
+    if let Some(without_custom) = clean.strip_prefix("api/custom/") {
+        add(without_custom.to_string());
+        add(format!("custom/{}", without_custom));
+    } else if let Some(without_custom) = clean.strip_prefix("custom/") {
+        add(without_custom.to_string());
+        add(format!("api/custom/{}", without_custom));
+    }
+
+    let is_system = clean.starts_with("api/admins")
+        || clean.starts_with("admins")
+        || clean.starts_with("api/settings")
+        || clean.starts_with("settings")
+        || clean.starts_with("api/backups")
+        || clean.starts_with("backups")
+        || clean.starts_with("api/endpoints")
+        || clean.starts_with("endpoints")
+        || clean.starts_with("api/cron")
+        || clean.starts_with("cron")
+        || clean.starts_with("api/health")
+        || clean.starts_with("health")
+        || clean.starts_with("api/custom")
+        || clean.starts_with("custom")
+        || clean.starts_with("api/storage")
+        || clean.starts_with("storage")
+        || clean.starts_with("api/export")
+        || clean.starts_with("api/auth")
+        || clean.starts_with("auth")
+        || clean.starts_with("_padibase")
+        || clean.starts_with("dashboard");
+
+    if !is_system {
+        let col_opt = if let Some(rest) = clean
+            .strip_prefix("api/collections/")
+            .or_else(|| clean.strip_prefix("collections/"))
+        {
+            if let Some(col) = rest.strip_suffix("/records") {
+                if !col.contains('/') {
+                    Some(col.to_string())
+                } else {
+                    None
+                }
+            } else if !rest.contains('/') {
+                Some(rest.to_string())
+            } else {
+                None
+            }
+        } else if let Some(rest) = clean
+            .strip_prefix("api/tables/")
+            .or_else(|| clean.strip_prefix("tables/"))
+        {
+            if let Some(col) = rest.strip_suffix("/records") {
+                if !col.contains('/') {
+                    Some(col.to_string())
+                } else {
+                    None
+                }
+            } else if !rest.contains('/') {
+                Some(rest.to_string())
+            } else {
+                None
+            }
+        } else if let Some(rest) = clean.strip_prefix("api/") {
+            if let Some(col) = rest.strip_suffix("/records") {
+                if !col.contains('/') {
+                    Some(col.to_string())
+                } else {
+                    None
+                }
+            } else if !rest.contains('/') {
+                Some(rest.to_string())
+            } else {
+                None
+            }
+        } else if let Some(col) = clean.strip_suffix("/records") {
+            if !col.contains('/') {
+                Some(col.to_string())
+            } else {
+                None
+            }
+        } else if !clean.contains('/') {
+            Some(clean.clone())
+        } else {
+            None
+        };
+
+        if let Some(col) = col_opt {
+            if !col.is_empty() {
+                add(format!("api/{}", col));
+                add(col.clone());
+                add(format!("api/{}/records", col));
+                add(format!("{}/records", col));
+                add(format!("api/collections/{}/records", col));
+                add(format!("collections/{}/records", col));
+                add(format!("api/tables/{}/records", col));
+                add(format!("tables/{}/records", col));
+            }
+        }
+    }
+
+    aliases
+}
+
 pub async fn get_all_custom_endpoints(pool: &DbPool) -> Result<Vec<CustomEndpoint>> {
     let rows = pool
         .fetch_all(
@@ -2956,19 +3078,8 @@ pub async fn get_all_custom_endpoints(pool: &DbPool) -> Result<Vec<CustomEndpoin
         cache.clear();
         for r in &rows {
             let ep = row_to_custom_endpoint(r);
-            let clean = ep.path.trim().trim_matches('/').to_lowercase();
-            cache.insert(clean.clone(), ep.clone());
-            if let Some(without_api) = clean.strip_prefix("api/") {
-                cache.insert(without_api.to_string(), ep.clone());
-            } else {
-                cache.insert(format!("api/{}", clean), ep.clone());
-            }
-            if let Some(without_custom) = clean.strip_prefix("api/custom/") {
-                cache.insert(without_custom.to_string(), ep.clone());
-                cache.insert(format!("custom/{}", without_custom), ep.clone());
-            } else if let Some(without_custom) = clean.strip_prefix("custom/") {
-                cache.insert(without_custom.to_string(), ep.clone());
-                cache.insert(format!("api/custom/{}", without_custom), ep.clone());
+            for alias in collection_route_aliases(&ep.path) {
+                cache.insert(alias, ep.clone());
             }
             cache.insert(ep.id.clone(), ep.clone());
             list.push(ep);
@@ -3173,11 +3284,10 @@ pub fn match_override_endpoint(
     }
 
     let method_upper = http_method.trim().to_uppercase();
-    let without_api = lower.strip_prefix("api/").unwrap_or(&lower);
 
-    // 1. Fast O(1) exact path lookup
-    for candidate in [lower.as_str(), without_api] {
-        if let Some(ep) = cache.get(candidate) {
+    // 1. Fast O(1) exact path & collection alias lookup
+    for candidate in collection_route_aliases(&lower) {
+        if let Some(ep) = cache.get(&candidate) {
             let ep_m = ep.method.trim().to_uppercase();
             if ep_m == method_upper || ep_m == "ANY" || ep_m == "*" {
                 return Some((ep.clone(), HashMap::new()));
@@ -3186,12 +3296,46 @@ pub fn match_override_endpoint(
     }
 
     // 2. Pattern matching for routes with `{param}` or `:param` (e.g. `api/collections/siswa/records/{id}`)
-    let req_segments: Vec<&str> = norm.split('/').collect();
-    let req_no_api_segments: Vec<&str> = norm
-        .strip_prefix("api/")
-        .unwrap_or(norm)
-        .split('/')
-        .collect();
+    let mut candidate_target_segs: Vec<Vec<&str>> = Vec::new();
+    candidate_target_segs.push(norm.split('/').collect());
+    if let Some(without_api) = norm.strip_prefix("api/") {
+        candidate_target_segs.push(without_api.split('/').collect());
+    }
+
+    let req_segs = norm.split('/').collect::<Vec<_>>();
+    let col_record_id: Option<(&str, &str)> = if req_segs.len() == 3 && req_segs[0].eq_ignore_ascii_case("api") {
+        Some((req_segs[1], req_segs[2]))
+    } else if req_segs.len() == 2 {
+        Some((req_segs[0], req_segs[1]))
+    } else if req_segs.len() == 5
+        && req_segs[0].eq_ignore_ascii_case("api")
+        && req_segs[1].eq_ignore_ascii_case("collections")
+        && req_segs[3].eq_ignore_ascii_case("records")
+    {
+        Some((req_segs[2], req_segs[4]))
+    } else if req_segs.len() == 4
+        && req_segs[0].eq_ignore_ascii_case("collections")
+        && req_segs[2].eq_ignore_ascii_case("records")
+    {
+        Some((req_segs[1], req_segs[3]))
+    } else {
+        None
+    };
+
+    let synth_api_col_records;
+    let synth_col_records;
+    let synth_api_col;
+    let synth_col;
+    if let Some((col, id)) = col_record_id {
+        synth_api_col_records = vec!["api", "collections", col, "records", id];
+        synth_col_records = vec!["collections", col, "records", id];
+        synth_api_col = vec!["api", col, id];
+        synth_col = vec![col, id];
+        candidate_target_segs.push(synth_api_col_records);
+        candidate_target_segs.push(synth_col_records);
+        candidate_target_segs.push(synth_api_col);
+        candidate_target_segs.push(synth_col);
+    }
 
     for (k, ep) in cache.iter() {
         // Skip duplicate ID keys in cache (only check path keys that match `ep.path.to_lowercase()`)
@@ -3207,7 +3351,7 @@ pub fn match_override_endpoint(
         }
 
         let pat_segments: Vec<&str> = ep.path.trim_matches('/').split('/').collect();
-        for target_segs in [&req_segments, &req_no_api_segments] {
+        for target_segs in &candidate_target_segs {
             if pat_segments.len() != target_segs.len() {
                 continue;
             }
@@ -3259,6 +3403,24 @@ mod tests {
         let (url, drv) = resolve_db_config(tmp, Some("sqlite://./test.db"));
         assert_eq!(drv, DbDriver::Sqlite);
         assert_eq!(url, "sqlite://./test.db");
+    }
+
+    #[test]
+    fn test_collection_route_aliases() {
+        let aliases = collection_route_aliases("api/bank");
+        assert!(aliases.contains(&"api/bank".to_string()));
+        assert!(aliases.contains(&"bank".to_string()));
+        assert!(aliases.contains(&"api/collections/bank/records".to_string()));
+        assert!(aliases.contains(&"collections/bank/records".to_string()));
+        assert!(aliases.contains(&"api/bank/records".to_string()));
+
+        let col_aliases = collection_route_aliases("collections/bank/records");
+        assert!(col_aliases.contains(&"bank".to_string()));
+        assert!(col_aliases.contains(&"api/bank".to_string()));
+
+        let custom_aliases = collection_route_aliases("api/custom/my-report");
+        assert!(custom_aliases.contains(&"api/custom/my-report".to_string()));
+        assert!(custom_aliases.contains(&"my-report".to_string()));
     }
 
     #[test]
