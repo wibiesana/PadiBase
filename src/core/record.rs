@@ -1260,27 +1260,30 @@ pub async fn list_records_with(
     let meta = super::db::get_table_metadata(pool, &col.name).await?;
     let (filter_sql, sort_sql) = build_filter_and_sort_sql(&meta, col, sort, filter)?;
 
-    // Count query
+    // Execute COUNT(*) and SELECT items concurrently in parallel to halve pagination latency
     let count_sql = format!(
         "SELECT COUNT(*) as `total` FROM `{}` {};",
         col.name, filter_sql
     );
-    let total_row = pool.fetch_one(&count_sql, &[]).await?;
-    let total_items = json_get_i64(&total_row, "total");
-    let total_pages = if total_items == 0 {
-        1
-    } else {
-        (total_items as f64 / per_page as f64).ceil() as i64
-    };
-
-    // Items query
     let sql = format!(
         "SELECT * FROM `{}` {} {} LIMIT ? OFFSET ?;",
         col.name, filter_sql, sort_sql
     );
-    let rows = pool
-        .fetch_all(&sql, &[Val::Int(per_page), Val::Int(offset)])
-        .await?;
+    let bind_params = [Val::Int(per_page), Val::Int(offset)];
+
+    let (total_row_res, rows_res) = tokio::join!(
+        pool.fetch_one(&count_sql, &[]),
+        pool.fetch_all(&sql, &bind_params)
+    );
+
+    let total_row = total_row_res?;
+    let rows = rows_res?;
+    let total_items = json_get_i64(&total_row, "total");
+    let total_pages = if total_items == 0 {
+        1
+    } else {
+        (total_items + per_page - 1) / per_page
+    };
 
     let mut items = Vec::with_capacity(rows.len());
     for row in rows {

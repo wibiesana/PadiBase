@@ -17,8 +17,8 @@ use std::collections::HashMap;
 
 use crate::core::app::AppState;
 use crate::core::auth::{
-    authenticate_headers, check_permission, check_role_rule, check_session, has_role_constraint,
-    require_admin, Claims, RecordAction,
+    authenticate_headers, check_permission, check_session, evaluate_rule_expression, require_admin,
+    Claims, RecordAction,
 };
 use crate::core::db::{
     delete_custom_endpoint, get_all_custom_endpoints, get_collection_by_name_or_id,
@@ -39,6 +39,7 @@ pub struct TransferActionRequest {
 fn check_endpoint_permission(
     rule: &str,
     auth: Option<&Claims>,
+    params: &Map<String, Value>,
 ) -> Result<(), (StatusCode, Json<Value>)> {
     if let Some(c) = auth {
         if c.is_admin() {
@@ -76,12 +77,16 @@ fn check_endpoint_permission(
         )
     })?;
 
-    if has_role_constraint(r) && !check_role_rule(r, &claims.role) {
+    let existing_ctx = if params.is_empty() { None } else { Some(params) };
+    if !evaluate_rule_expression(r, Some(claims), existing_ctx) {
         return Err((
             StatusCode::FORBIDDEN,
             Json(json!({
                 "code": 403,
-                "message": format!("Permission denied. Your role '{}' is not authorized for this endpoint.", claims.role)
+                "message": format!(
+                    "Permission denied. Your account (role '{}') does not satisfy the endpoint access rule.",
+                    claims.role
+                )
             })),
         ));
     }
@@ -249,7 +254,7 @@ fn param_value_to_val(key: &str, v: &Value) -> Val {
 }
 
 /// Split multiple SQL statements by `;` while ignoring semicolons inside quotes/backticks.
-fn split_sql_statements(raw_sql: &str) -> Vec<String> {
+pub fn split_sql_statements(raw_sql: &str) -> Vec<String> {
     let mut stmts = Vec::new();
     let mut current = String::new();
     let mut in_single = false;
@@ -299,23 +304,25 @@ fn split_sql_statements(raw_sql: &str) -> Vec<String> {
 /// - `@request.auth.id`, `@request.auth.email`, `@request.auth.role`
 /// - Named parameters `:param_name` or `{{param_name}}`
 /// - Positional parameters `?`
+/// Uses zero-allocation byte slice scanning on the hot path.
 pub fn compile_custom_sql(
     sql: &str,
     named_params: &Map<String, Value>,
     positional_params: &[Value],
     auth: Option<&Claims>,
 ) -> (String, Vec<Val>) {
-    let mut out_sql = String::with_capacity(sql.len() + 16);
-    let mut binds: Vec<Val> = Vec::new();
+    let bytes = sql.as_bytes();
+    let len = bytes.len();
+    let mut out_sql = String::with_capacity(len + 16);
+    let mut binds: Vec<Val> = Vec::with_capacity(8);
     let mut pos_idx = 0usize;
 
     let mut in_single = false;
     let mut in_double = false;
     let mut in_backtick = false;
 
-    let chars: Vec<char> = sql.chars().collect();
-    let len = chars.len();
     let mut i = 0usize;
+    let mut seg_start = 0usize;
 
     let resolve_named = |name: &str| -> Val {
         match name {
@@ -343,13 +350,11 @@ pub fn compile_custom_sql(
     };
 
     while i < len {
-        let c = chars[i];
+        let b = bytes[i];
 
-        if c == '\'' && !in_double && !in_backtick {
-            out_sql.push(c);
+        if b == b'\'' && !in_double && !in_backtick {
             if in_single {
-                if i + 1 < len && chars[i + 1] == '\'' {
-                    out_sql.push(chars[i + 1]);
+                if i + 1 < len && bytes[i + 1] == b'\'' {
                     i += 2;
                     continue;
                 } else {
@@ -362,102 +367,98 @@ pub fn compile_custom_sql(
             continue;
         }
 
-        if c == '"' && !in_single && !in_backtick {
+        if b == b'"' && !in_single && !in_backtick {
             in_double = !in_double;
-            out_sql.push(c);
             i += 1;
             continue;
         }
 
-        if c == '`' && !in_single && !in_double {
+        if b == b'`' && !in_single && !in_double {
             in_backtick = !in_backtick;
-            out_sql.push(c);
             i += 1;
             continue;
         }
 
         if !in_single && !in_double && !in_backtick {
-            // 1. Check `@request.auth.id`, `@request.auth.email`, `@request.auth.role`
-            if c == '@' {
-                let rest: String = chars[i..].iter().collect();
-                let lower_rest = rest.to_lowercase();
-                if lower_rest.starts_with("@request.auth.id") {
+            // 1. Check `@request.auth.id`, `@request.auth.email`, `@request.auth.role`, `@last_insert_id`, `@last_id`
+            if b == b'@' {
+                let rest = &sql[i..];
+                let matched_token = if rest.len() >= 16 && rest[..16].eq_ignore_ascii_case("@request.auth.id") {
+                    Some((16, "request.auth.id"))
+                } else if rest.len() >= 19 && rest[..19].eq_ignore_ascii_case("@request.auth.email") {
+                    Some((19, "request.auth.email"))
+                } else if rest.len() >= 18 && rest[..18].eq_ignore_ascii_case("@request.auth.role") {
+                    Some((18, "request.auth.role"))
+                } else if rest.len() >= 15 && rest[..15].eq_ignore_ascii_case("@last_insert_id") {
+                    Some((15, "last_insert_id"))
+                } else if rest.len() >= 8 && rest[..8].eq_ignore_ascii_case("@last_id") {
+                    Some((8, "last_id"))
+                } else {
+                    None
+                };
+
+                if let Some((tok_len, key)) = matched_token {
+                    out_sql.push_str(&sql[seg_start..i]);
                     out_sql.push('?');
-                    binds.push(resolve_named("request.auth.id"));
-                    i += "@request.auth.id".len();
-                    continue;
-                } else if lower_rest.starts_with("@request.auth.email") {
-                    out_sql.push('?');
-                    binds.push(resolve_named("request.auth.email"));
-                    i += "@request.auth.email".len();
-                    continue;
-                } else if lower_rest.starts_with("@request.auth.role") {
-                    out_sql.push('?');
-                    binds.push(resolve_named("request.auth.role"));
-                    i += "@request.auth.role".len();
-                    continue;
-                } else if lower_rest.starts_with("@last_insert_id") {
-                    out_sql.push('?');
-                    binds.push(resolve_named("last_insert_id"));
-                    i += "@last_insert_id".len();
-                    continue;
-                } else if lower_rest.starts_with("@last_id") {
-                    out_sql.push('?');
-                    binds.push(resolve_named("last_id"));
-                    i += "@last_id".len();
+                    binds.push(resolve_named(key));
+                    i += tok_len;
+                    seg_start = i;
                     continue;
                 }
             }
 
             // 2. Check `{{param_name}}`
-            if c == '{' && i + 1 < len && chars[i + 1] == '{' {
+            if b == b'{' && i + 1 < len && bytes[i + 1] == b'{' {
                 let mut end = i + 2;
-                while end + 1 < len && !(chars[end] == '}' && chars[end + 1] == '}') {
+                while end + 1 < len && !(bytes[end] == b'}' && bytes[end + 1] == b'}') {
                     end += 1;
                 }
-                if end + 1 < len && chars[end] == '}' && chars[end + 1] == '}' {
-                    let param_name: String = chars[i + 2..end].iter().collect();
-                    let clean_name = param_name.trim();
+                if end + 1 < len && bytes[end] == b'}' && bytes[end + 1] == b'}' {
+                    let clean_name = sql[i + 2..end].trim();
                     if !clean_name.is_empty() {
+                        out_sql.push_str(&sql[seg_start..i]);
                         out_sql.push('?');
                         binds.push(resolve_named(clean_name));
                         i = end + 2;
+                        seg_start = i;
                         continue;
                     }
                 }
             }
 
             // 3. Check `:param_name` (ignoring `::` Postgres cast)
-            if c == ':' {
-                if i + 1 < len && chars[i + 1] == ':' {
-                    out_sql.push_str("::");
+            if b == b':' {
+                if i + 1 < len && bytes[i + 1] == b':' {
                     i += 2;
                     continue;
                 }
-                if i + 1 < len && (chars[i + 1].is_ascii_alphabetic() || chars[i + 1] == '_') {
+                if i + 1 < len && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'_') {
                     let mut end = i + 1;
                     while end < len
-                        && (chars[end].is_ascii_alphanumeric()
-                            || chars[end] == '_'
-                            || chars[end] == '.')
+                        && (bytes[end].is_ascii_alphanumeric()
+                            || bytes[end] == b'_'
+                            || bytes[end] == b'.')
                     {
                         end += 1;
                     }
-                    let param_name: String = chars[i + 1..end].iter().collect();
+                    let param_name = &sql[i + 1..end];
+                    out_sql.push_str(&sql[seg_start..i]);
                     out_sql.push('?');
-                    let mut val = resolve_named(&param_name);
+                    let mut val = resolve_named(param_name);
                     if val == Val::Null && pos_idx < positional_params.len() {
-                        val = param_value_to_val(&param_name, &positional_params[pos_idx]);
+                        val = param_value_to_val(param_name, &positional_params[pos_idx]);
                         pos_idx += 1;
                     }
                     binds.push(val);
                     i = end;
+                    seg_start = i;
                     continue;
                 }
             }
 
             // 4. Positional `?`
-            if c == '?' {
+            if b == b'?' {
+                out_sql.push_str(&sql[seg_start..i]);
                 out_sql.push('?');
                 if let Some(pv) = positional_params.get(pos_idx) {
                     binds.push(Val::from(pv));
@@ -466,18 +467,22 @@ pub fn compile_custom_sql(
                 }
                 pos_idx += 1;
                 i += 1;
+                seg_start = i;
                 continue;
             }
         }
 
-        out_sql.push(c);
         i += 1;
+    }
+
+    if seg_start < len {
+        out_sql.push_str(&sql[seg_start..len]);
     }
 
     (out_sql, binds)
 }
 
-fn is_select_statement(sql: &str) -> bool {
+pub fn is_select_statement(sql: &str) -> bool {
     let uncommented = strip_sql_comments(sql);
     uncommented
         .split_whitespace()
@@ -643,10 +648,9 @@ async fn execute_custom_endpoint_inner(
         ));
     }
 
-    // Authenticate & check endpoint permission rule
+    // Authenticate & check session
     let auth = authenticate_headers(&headers)?;
     check_session(&state, &headers).await?;
-    check_endpoint_permission(&ep.auth_rule, auth.as_ref())?;
 
     // Merge query parameters + JSON body parameters
     let mut named_params = Map::new();
@@ -671,6 +675,23 @@ async fn execute_custom_endpoint_inner(
             }
         }
     }
+
+    // If an ownership rule is defined (e.g. `user_id = @request.auth.id`), auto-populate missing
+    // owner parameter from the authenticated user's ID and verify permission against request params.
+    if let Some(ref c) = auth {
+        let lower_rule = ep.auth_rule.to_lowercase();
+        for owner_col in ["user_id", "created_by", "author_id", "owner_id"] {
+            if lower_rule.contains(&format!("{} = @request.auth.id", owner_col))
+                || lower_rule.contains(&format!("{}=@request.auth.id", owner_col))
+            {
+                if !named_params.contains_key(owner_col) {
+                    named_params.insert(owner_col.to_string(), Value::String(c.sub.clone()));
+                }
+            }
+        }
+    }
+
+    check_endpoint_permission(&ep.auth_rule, auth.as_ref(), &named_params)?;
 
     let non_comment_content: String = ep
         .sql
@@ -814,6 +835,22 @@ async fn execute_custom_endpoint_inner(
         compile_custom_sql(&statements[0], &named_params, &positional_params, auth.as_ref());
 
     if is_select_statement(&compiled_sql) {
+        let is_single = ep.single_row || is_single_row_sql(&compiled_sql) || is_single_row_sql(&statements[0]);
+        if is_single {
+            let first = state
+                .db
+                .fetch_optional(&compiled_sql, &binds)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({ "code": 400, "message": format!("SQL error: {}", e) })),
+                    )
+                })?
+                .unwrap_or(Value::Null);
+            return Ok(Json(first));
+        }
+
         let rows = state
             .db
             .fetch_all(&compiled_sql, &binds)
@@ -824,12 +861,6 @@ async fn execute_custom_endpoint_inner(
                     Json(json!({ "code": 400, "message": format!("SQL error: {}", e) })),
                 )
             })?;
-
-        let is_single = ep.single_row || is_single_row_sql(&compiled_sql) || is_single_row_sql(&statements[0]);
-        if is_single {
-            let first = rows.into_iter().next().unwrap_or(Value::Null);
-            return Ok(Json(first));
-        }
 
         Ok(Json(json!({
             "items": rows,

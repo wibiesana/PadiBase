@@ -1012,8 +1012,10 @@ pub async fn init_db_with_url<P: AsRef<Path>>(
                 .create_if_missing(true)
                 .journal_mode(SqliteJournalMode::Wal)
                 .synchronous(SqliteSynchronous::Normal)
+                .statement_cache_capacity(512)
                 .pragma("temp_store", "MEMORY")
                 .pragma("cache_size", "-64000")
+                .pragma("mmap_size", "268435456")
                 .busy_timeout(std::time::Duration::from_secs(15));
 
             let p = SqlitePoolOptions::new()
@@ -2903,6 +2905,46 @@ pub async fn create_or_update_collection_table(pool: &DbPool, col: &Collection) 
 
     pool.invalidate_schema_cache(&col.name);
     pool.invalidate_schema_cache(&col.id);
+
+    // 3. Auto-create database indexes on common filter, sort, and foreign-key relation columns for fast SQL execution
+    if pool.is_sqlite() || pool.is_postgres() {
+        let latest_cols = get_existing_table_columns(pool, &col.name).await.unwrap_or(existing_cols);
+        let has_latest_col = |target: &str| latest_cols.iter().any(|c| c.eq_ignore_ascii_case(target));
+
+        let mut indexed_cols: Vec<String> = Vec::new();
+        for std_col in ["created_at", "updated_at", "created", "updated", "created_by", "user_id", "status", "role"] {
+            if has_latest_col(std_col) {
+                indexed_cols.push(std_col.to_string());
+            }
+        }
+        for field in &col.schema {
+            if (field.field_type == FieldType::Relation
+                || field.name.ends_with("_id")
+                || field.name.ends_with("Id"))
+                && has_latest_col(&field.name)
+                && !indexed_cols.iter().any(|c| c.eq_ignore_ascii_case(&field.name))
+            {
+                indexed_cols.push(field.name.clone());
+            }
+        }
+
+        let safe_tbl: String = col
+            .name
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+            .collect();
+        for idx_col in indexed_cols {
+            let safe_col: String = idx_col
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
+            let idx_sql = format!(
+                "CREATE INDEX IF NOT EXISTS `idx_{}_{}` ON `{}` (`{}`);",
+                safe_tbl, safe_col, col.name, idx_col
+            );
+            let _ = pool.execute(&idx_sql, &[]).await;
+        }
+    }
 
     Ok(())
 }

@@ -7,7 +7,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
-use crate::api::custom::compile_custom_sql;
+use crate::api::custom::{compile_custom_sql, is_select_statement, split_sql_statements};
 use crate::core::app::AppState;
 use crate::core::auth::{
     authenticate_headers, check_permission, check_session, require_admin, Claims, RecordAction,
@@ -567,22 +567,15 @@ pub async fn execute_custom_sql(
         _ => {}
     }
 
-    let (compiled_sql, bind_vals) =
-        compile_custom_sql(raw_sql, &named_params, &positional_params, auth.as_ref());
+    let statements = split_sql_statements(raw_sql);
+    if statements.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "code": 400, "message": "SQL query cannot be empty." })),
+        ));
+    }
 
-    let is_select = compiled_sql
-        .split_whitespace()
-        .next()
-        .map(|w| {
-            w.eq_ignore_ascii_case("SELECT")
-                || w.eq_ignore_ascii_case("WITH")
-                || w.eq_ignore_ascii_case("PRAGMA")
-                || w.eq_ignore_ascii_case("SHOW")
-                || w.eq_ignore_ascii_case("EXPLAIN")
-        })
-        .unwrap_or(false);
-
-    if payload.transaction {
+    if payload.transaction || statements.len() > 1 {
         let mut tx = state.db.begin().await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -590,45 +583,85 @@ pub async fn execute_custom_sql(
             )
         })?;
 
-        if is_select {
-            let rows = tx.fetch_all(&state.db, &compiled_sql, &bind_vals).await.map_err(|e| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({ "code": 400, "message": e.to_string() })),
-                )
-            })?;
-            tx.commit().await.map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "code": 500, "message": e.to_string() })),
-                )
-            })?;
+        let mut last_rows: Option<Vec<Value>> = None;
+        let mut total_affected = 0u64;
+        let mut last_insert_id: Option<i64> = None;
+        let mut dynamic_params = named_params.clone();
+
+        for (idx, stmt) in statements.iter().enumerate() {
+            if let Some(lid) = last_insert_id {
+                dynamic_params.insert("last_insert_id".to_string(), json!(lid));
+                dynamic_params.insert("last_id".to_string(), json!(lid));
+            }
+
+            let (compiled_sql, bind_vals) =
+                compile_custom_sql(stmt, &dynamic_params, &positional_params, auth.as_ref());
+
+            if is_select_statement(&compiled_sql) {
+                match tx.fetch_all(&state.db, &compiled_sql, &bind_vals).await {
+                    Ok(rows) => {
+                        last_rows = Some(rows);
+                    }
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return Err((
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "code": 400,
+                                "message": format!("SQL error in statement {}: {}", idx + 1, e)
+                            })),
+                        ));
+                    }
+                }
+            } else {
+                match tx.execute(&state.db, &compiled_sql, &bind_vals).await {
+                    Ok((affected, lid)) => {
+                        total_affected += affected;
+                        if lid.is_some() {
+                            last_insert_id = lid;
+                        }
+                    }
+                    Err(e) => {
+                        let _ = tx.rollback().await;
+                        return Err((
+                            StatusCode::BAD_REQUEST,
+                            Json(json!({
+                                "code": 400,
+                                "message": format!("SQL error in statement {}: {}", idx + 1, e)
+                            })),
+                        ));
+                    }
+                }
+            }
+        }
+
+        tx.commit().await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "code": 500, "message": e.to_string() })),
+            )
+        })?;
+
+        if let Some(rows) = last_rows {
             return Ok(Json(json!({
+                "committed": true,
                 "items": rows,
-                "totalItems": rows.len()
-            })));
-        } else {
-            let (rows_affected, last_insert_id) =
-                tx.execute(&state.db, &compiled_sql, &bind_vals).await.map_err(|e| {
-                    (
-                        StatusCode::BAD_REQUEST,
-                        Json(json!({ "code": 400, "message": e.to_string() })),
-                    )
-                })?;
-            tx.commit().await.map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({ "code": 500, "message": e.to_string() })),
-                )
-            })?;
-            return Ok(Json(json!({
-                "rows_affected": rows_affected,
+                "totalItems": rows.len(),
                 "last_insert_id": last_insert_id
             })));
         }
+
+        return Ok(Json(json!({
+            "committed": true,
+            "rows_affected": total_affected,
+            "last_insert_id": last_insert_id
+        })));
     }
 
-    if is_select {
+    let (compiled_sql, bind_vals) =
+        compile_custom_sql(&statements[0], &named_params, &positional_params, auth.as_ref());
+
+    if is_select_statement(&compiled_sql) {
         let rows = state
             .db
             .fetch_all(&compiled_sql, &bind_vals)
