@@ -1,0 +1,1 @@
+import{S as e,v as t}from"./runtime-core.esm-bundler-CgYTuW-k.js";var n=`_q_li_`,r=`_q_fo_`;function i(){return t()?.appContext.config.globalProperties.$q??e(`_q_`)}export{r as n,n as r,i as t};

@@ -2968,7 +2968,13 @@ fn row_to_custom_endpoint(row: &Value) -> CustomEndpoint {
                 m
             }
         },
-        sql: json_get_str(row, "sql"),
+        sql: match json_get(row, "sql") {
+            Some(Value::String(s)) => s.clone(),
+            Some(v @ (Value::Object(_) | Value::Array(_))) => {
+                serde_json::to_string_pretty(v).unwrap_or_else(|_| v.to_string())
+            }
+            _ => json_get_str(row, "sql"),
+        },
         description: json_get_str(row, "description"),
         auth_rule: {
             let r = json_get_str(row, "authRule");
