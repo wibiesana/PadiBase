@@ -81,6 +81,9 @@ pub struct RawSqlRequest {
     /// Optional flag to run inside a transaction
     #[serde(default)]
     pub transaction: bool,
+    /// Optional flag to unpack first row as a single object `{}` instead of `items: [...]`
+    #[serde(default, alias = "singleRow")]
+    pub single_row: bool,
 }
 
 /// Execute multiple operations (`create`, `update`, `delete`, or admin `sql`) atomically in a single DB transaction.
@@ -510,6 +513,9 @@ pub async fn execute_custom_sql(
         || (trimmed_clean.starts_with('[') && trimmed_clean.ends_with(']'))
     {
         if let Ok(json_val) = serde_json::from_str::<Value>(trimmed_clean) {
+            if payload.single_row && json_val.is_object() {
+                return Ok(Json(json_val));
+            }
             let items = if json_val.is_array() { json_val } else { json!([json_val]) };
             let total = items.as_array().map(|a| a.len()).unwrap_or(1);
             return Ok(Json(json!({
@@ -643,6 +649,10 @@ pub async fn execute_custom_sql(
         })?;
 
         if let Some(rows) = last_rows {
+            if payload.single_row {
+                let first = rows.into_iter().next().unwrap_or(Value::Null);
+                return Ok(Json(first));
+            }
             return Ok(Json(json!({
                 "committed": true,
                 "items": rows,
@@ -662,6 +672,20 @@ pub async fn execute_custom_sql(
         compile_custom_sql(&statements[0], &named_params, &positional_params, auth.as_ref());
 
     if is_select_statement(&compiled_sql) {
+        if payload.single_row {
+            let first = state
+                .db
+                .fetch_optional(&compiled_sql, &bind_vals)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(json!({ "code": 400, "message": e.to_string() })),
+                    )
+                })?
+                .unwrap_or(Value::Null);
+            return Ok(Json(first));
+        }
         let rows = state
             .db
             .fetch_all(&compiled_sql, &bind_vals)
