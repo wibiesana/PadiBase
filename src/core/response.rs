@@ -214,7 +214,8 @@ pub fn format_padi_json(
             out.insert("code".to_string(), json!(status));
         }
     } else if let Value::Object(mut obj) = raw {
-        let is_paginated_list = obj.contains_key("items") && obj.contains_key("totalItems");
+        let is_paginated_list =
+            obj.contains_key("items") && obj.contains_key("totalItems") && obj.contains_key("page");
         let is_simple_items_list = obj.contains_key("items") && !obj.contains_key("page");
 
         if format == ResponseFormat::Simple {

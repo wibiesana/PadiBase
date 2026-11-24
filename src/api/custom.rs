@@ -628,6 +628,151 @@ pub async fn run_override_endpoint_request(
     }
 }
 
+pub fn resolve_pagination_params(
+    sql: &str,
+    named_params: &mut Map<String, Value>,
+) -> Option<(i64, i64)> {
+    // Support `order` as alias for `sort_dir` (and vice versa) for dynamic ORDER BY
+    if let Some(order_val) = named_params.get("order").cloned() {
+        if !named_params.contains_key("sort_dir") {
+            named_params.insert("sort_dir".to_string(), order_val);
+        }
+    } else if let Some(dir_val) = named_params.get("sort_dir").cloned() {
+        named_params.insert("order".to_string(), dir_val);
+    }
+
+    let parse_i64 = |v: &Value| -> Option<i64> {
+        match v {
+            Value::Number(n) => n.as_i64(),
+            Value::String(s) => s.trim().parse::<i64>().ok(),
+            _ => None,
+        }
+    };
+
+    let has_explicit_page = named_params.contains_key("page")
+        || named_params.contains_key("perPage")
+        || named_params.contains_key("per_page");
+    let sql_lower = sql.to_lowercase();
+    let has_sql_pagination = sql_lower.contains(":limit") && sql_lower.contains(":offset");
+
+    if !has_explicit_page && !has_sql_pagination {
+        // Non-paginated query that still exposes `:limit` (e.g. /api/banks/all?limit=5000)
+        if sql_lower.contains(":limit") {
+            let safe_limit = named_params
+                .get("limit")
+                .and_then(parse_i64)
+                .unwrap_or(MAX_UNPAGINATED_CUSTOM_ROWS as i64)
+                .clamp(1, MAX_UNPAGINATED_CUSTOM_ROWS as i64);
+            named_params.insert("limit".to_string(), json!(safe_limit));
+        }
+        return None;
+    }
+
+    let per_page = named_params
+        .get("perPage")
+        .or_else(|| named_params.get("per_page"))
+        .or_else(|| named_params.get("limit"))
+        .and_then(parse_i64)
+        .unwrap_or(30)
+        .clamp(1, 500);
+
+    let page = if let Some(p) = named_params.get("page").and_then(parse_i64) {
+        p.max(1)
+    } else if let Some(off) = named_params.get("offset").and_then(parse_i64) {
+        (off.max(0) / per_page) + 1
+    } else {
+        1
+    };
+
+    if !named_params.contains_key("limit") {
+        named_params.insert("limit".to_string(), json!(per_page));
+    }
+    if !named_params.contains_key("offset") {
+        named_params.insert("offset".to_string(), json!((page - 1) * per_page));
+    }
+
+    Some((page, per_page))
+}
+
+pub fn strip_trailing_limit_offset(sql: &str) -> String {
+    let trimmed = sql.trim().trim_end_matches(';').trim();
+    // Strip trailing `LIMIT <expr> [OFFSET <expr>]` or `LIMIT <expr>, <expr>` at depth 0
+    let bytes = trimmed.as_bytes();
+    let mut depth: i32 = 0;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut last_limit_idx: Option<usize> = None;
+
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'\'' && !in_double {
+            in_single = !in_single;
+        } else if b == b'"' && !in_single {
+            in_double = !in_double;
+        } else if !in_single && !in_double {
+            if b == b'(' {
+                depth += 1;
+            } else if b == b')' && depth > 0 {
+                depth -= 1;
+            } else if depth == 0 && i + 5 <= bytes.len() {
+                let slice = &trimmed[i..];
+                if slice.len() >= 5
+                    && slice[..5].eq_ignore_ascii_case("limit")
+                    && (i == 0 || bytes[i - 1].is_ascii_whitespace() || bytes[i - 1] == b')')
+                    && (i + 5 == bytes.len() || bytes[i + 5].is_ascii_whitespace())
+                {
+                    last_limit_idx = Some(i);
+                }
+            }
+        }
+        i += 1;
+    }
+
+    match last_limit_idx {
+        Some(idx) => trimmed[..idx].trim().to_string(),
+        None => trimmed.to_string(),
+    }
+}
+
+pub const MAX_UNPAGINATED_CUSTOM_ROWS: usize = 5000;
+
+pub fn apply_unpaginated_row_cap(compiled_sql: &str, max_rows: usize) -> String {
+    let trimmed = compiled_sql.trim().trim_end_matches(';').trim();
+    if !is_select_statement(trimmed) {
+        return compiled_sql.to_string();
+    }
+    let stripped = strip_trailing_limit_offset(trimmed);
+    if stripped.len() == trimmed.len() {
+        format!("{} LIMIT {}", trimmed, max_rows)
+    } else {
+        compiled_sql.to_string()
+    }
+}
+
+pub async fn count_paginated_select(
+    state: &AppState,
+    raw_sql: &str,
+    named_params: &Map<String, Value>,
+    positional_params: &[Value],
+    auth: Option<&Claims>,
+) -> Option<i64> {
+    let base_sql = strip_trailing_limit_offset(raw_sql);
+    if !is_select_statement(&base_sql) {
+        return None;
+    }
+    let count_sql_raw = format!("SELECT COUNT(*) AS _padi_cnt FROM ({}) AS _padi_sub", base_sql);
+    let (compiled_count, count_binds) =
+        compile_custom_sql(&count_sql_raw, named_params, positional_params, auth);
+    let row = state.db.fetch_optional(&compiled_count, &count_binds).await.ok()??;
+    let val = row.get("_padi_cnt")?;
+    match val {
+        Value::Number(n) => n.as_i64(),
+        Value::String(s) => s.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
 async fn execute_custom_endpoint_inner(
     state: AppState,
     ep: CustomEndpoint,
@@ -675,6 +820,12 @@ async fn execute_custom_endpoint_inner(
             }
         }
     }
+
+    let pagination_ctx = if !ep.single_row {
+        resolve_pagination_params(&ep.sql, &mut named_params)
+    } else {
+        None
+    };
 
     // If an ownership rule is defined (e.g. `user_id = @request.auth.id`), auto-populate missing
     // owner parameter from the authenticated user's ID and verify permission against request params.
@@ -851,9 +1002,15 @@ async fn execute_custom_endpoint_inner(
             return Ok(Json(first));
         }
 
+        let effective_sql = if pagination_ctx.is_none() {
+            apply_unpaginated_row_cap(&compiled_sql, MAX_UNPAGINATED_CUSTOM_ROWS)
+        } else {
+            compiled_sql.clone()
+        };
+
         let rows = state
             .db
-            .fetch_all(&compiled_sql, &binds)
+            .fetch_all(&effective_sql, &binds)
             .await
             .map_err(|e| {
                 (
@@ -861,6 +1018,26 @@ async fn execute_custom_endpoint_inner(
                     Json(json!({ "code": 400, "message": format!("SQL error: {}", e) })),
                 )
             })?;
+
+        if let Some((page, per_page)) = pagination_ctx {
+            let total_items = count_paginated_select(
+                &state,
+                &statements[0],
+                &named_params,
+                &positional_params,
+                auth.as_ref(),
+            )
+            .await
+            .unwrap_or(rows.len() as i64);
+            let total_pages = ((total_items + per_page - 1) / per_page).max(1);
+            return Ok(Json(json!({
+                "page": page,
+                "perPage": per_page,
+                "totalItems": total_items,
+                "totalPages": total_pages,
+                "items": rows
+            })));
+        }
 
         Ok(Json(json!({
             "items": rows,

@@ -530,6 +530,9 @@ pub async fn execute_custom_sql(
         || (trimmed_clean.starts_with('"') && trimmed_clean.ends_with('"') && trimmed_clean.len() >= 2)
     {
         let inner = &trimmed_clean[1..trimmed_clean.len() - 1];
+        if payload.single_row {
+            return Ok(Json(json!({ "result": inner })));
+        }
         return Ok(Json(json!({
             "items": [
                 { "result": inner }
@@ -551,6 +554,9 @@ pub async fn execute_custom_sql(
     ];
 
     if !trimmed_clean.is_empty() && !sql_keywords.contains(&first_word_check.as_str()) && !trimmed_clean.contains(';') {
+        if payload.single_row {
+            return Ok(Json(json!({ "result": trimmed_clean })));
+        }
         return Ok(Json(json!({
             "items": [
                 { "result": trimmed_clean }
@@ -668,6 +674,12 @@ pub async fn execute_custom_sql(
         })));
     }
 
+    let pagination_ctx = if !payload.single_row {
+        crate::api::custom::resolve_pagination_params(&statements[0], &mut named_params)
+    } else {
+        None
+    };
+
     let (compiled_sql, bind_vals) =
         compile_custom_sql(&statements[0], &named_params, &positional_params, auth.as_ref());
 
@@ -686,9 +698,18 @@ pub async fn execute_custom_sql(
                 .unwrap_or(Value::Null);
             return Ok(Json(first));
         }
+        let effective_sql = if pagination_ctx.is_none() {
+            crate::api::custom::apply_unpaginated_row_cap(
+                &compiled_sql,
+                crate::api::custom::MAX_UNPAGINATED_CUSTOM_ROWS,
+            )
+        } else {
+            compiled_sql.clone()
+        };
+
         let rows = state
             .db
-            .fetch_all(&compiled_sql, &bind_vals)
+            .fetch_all(&effective_sql, &bind_vals)
             .await
             .map_err(|e| {
                 (
@@ -696,6 +717,27 @@ pub async fn execute_custom_sql(
                     Json(json!({ "code": 400, "message": e.to_string() })),
                 )
             })?;
+
+        if let Some((page, per_page)) = pagination_ctx {
+            let total_items = crate::api::custom::count_paginated_select(
+                &state,
+                &statements[0],
+                &named_params,
+                &positional_params,
+                auth.as_ref(),
+            )
+            .await
+            .unwrap_or(rows.len() as i64);
+            let total_pages = ((total_items + per_page - 1) / per_page).max(1);
+            return Ok(Json(json!({
+                "page": page,
+                "perPage": per_page,
+                "totalItems": total_items,
+                "totalPages": total_pages,
+                "items": rows
+            })));
+        }
+
         Ok(Json(json!({
             "items": rows,
             "totalItems": rows.len()
