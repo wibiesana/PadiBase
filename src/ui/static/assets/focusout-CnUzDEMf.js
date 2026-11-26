@@ -1,0 +1,1 @@
+var e=[];function t(t){e.at(-1)(t)}function n(n){e.push(n),e.length===1&&document.body.addEventListener(`focusin`,t)}function r(n){let r=e.indexOf(n);r!==-1&&(e.splice(r,1),e.length===0&&document.body.removeEventListener(`focusin`,t))}export{r as n,n as t};
